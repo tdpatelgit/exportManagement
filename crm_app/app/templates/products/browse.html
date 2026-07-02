@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Products{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Catalog</div>
+    <h1>{{ current_group.name if current_group else 'Products' }}</h1>
+  </div>
+  {% if current_user.is_admin %}
+  <div class="topbar-actions">
+    <a href="{{ url_for('products.new_group', parent_id=current_group.id if current_group else None) }}" class="btn btn-ghost">+ New group</a>
+    <a href="{{ url_for('products.new_product', group_id=current_group.id if current_group else None) }}" class="btn btn-primary">+ New product</a>
+  </div>
+  {% endif %}
+</div>
+
+<div class="breadcrumb-trail">
+  <a href="{{ url_for('products.browse') }}">Products</a>
+  {% for g in breadcrumb %}
+    <span class="crumb-sep">/</span>
+    <a href="{{ url_for('products.browse', group_id=g.id) }}">{{ g.name }}</a>
+  {% endfor %}
+</div>
+
+{% if not subgroups and not products %}
+  <div class="empty-state">
+    This folder is empty.
+    {% if current_user.is_admin %}Create a subgroup or add a product to get started.{% endif %}
+  </div>
+{% endif %}
+
+{% if subgroups %}
+<div class="card">
+  <div class="card-header"><h3>Groups</h3></div>
+  <div class="folder-grid">
+    {% for group in subgroups %}
+    <div class="folder-tile">
+      <a class="folder-tile-link" href="{{ url_for('products.browse', group_id=group.id) }}">
+        <span class="folder-icon">📁</span>
+        <span class="folder-name">{{ group.name }}</span>
+      </a>
+      {% if current_user.is_admin %}
+      <div class="folder-tile-actions">
+        <a href="{{ url_for('products.edit_group', group_id=group.id) }}" class="text-sm">Rename</a>
+        <form method="POST" action="{{ url_for('products.delete_group', group_id=group.id) }}" onsubmit="return confirm('Delete \'{{ group.name }}\' and everything inside it?');">
+          <button type="submit" class="btn-link-danger text-sm">Delete</button>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if products %}
+<div class="card">
+  <div class="card-header"><h3>Products</h3></div>
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th>Photo</th>
+          <th>Product name</th>
+          <th>HSN code</th>
+          <th>Packing</th>
+          <th>Quantity</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for product in products %}
+        <tr>
+          <td>
+            {% if product.photo_path %}
+              <img class="thumb" src="{{ url_for('static', filename=product.photo_path) }}" alt="{{ product.alt_text or product.product_name }}">
+            {% else %}
+              <span class="text-soft text-sm">—</span>
+            {% endif %}
+          </td>
+          <td><strong>{{ product.product_name }}</strong></td>
+          <td class="text-sm">{{ product.hsn_code or '—' }}</td>
+          <td class="text-sm">{{ product.packing or '—' }}</td>
+          <td class="text-sm">{{ product.quantity or '—' }}</td>
+          <td><a href="{{ url_for('products.view_product', product_id=product.id) }}" class="text-sm">Open →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

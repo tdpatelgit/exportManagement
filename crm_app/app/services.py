@@ -11,20 +11,24 @@ Inversion) instead of importing SqliteXRepository itself, so services can be
 unit-tested with fake in-memory repositories.
 """
 
+import os
+import uuid
 from datetime import datetime, date
 from typing import Optional, List
 
 import requests
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
 from app.models import (
     User, Lead, Client, ContactPerson, Communication, PaymentEntry, DocumentEntry,
-    LEAD_STATUSES, CLIENT_STATUSES,
+    LEAD_STATUSES, CLIENT_STATUSES, ProductGroup, Product,
 )
 from app.repositories import (
     UserRepositoryBase, LeadRepositoryBase, ClientRepositoryBase,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
+    ProductGroupRepository, ProductRepository,
 )
 
 
@@ -359,7 +363,7 @@ class CompanyService:
         return self.company_repo.get()
 
     def save(self, current_user: User, company_name: str, gstin: str, pan_no: str, iec: str,
-              contact_details: list, contact_persons: list, bank_details: list) -> None:
+              lut: str, bin_no: str, contact_details: list, contact_persons: list, bank_details: list) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can edit our company's profile.")
         if not company_name or not company_name.strip():
@@ -391,7 +395,7 @@ class CompanyService:
                 raise ValidationError(f"Bank detail '{b.get('bank_name') or '(unnamed)'}' is missing: {', '.join(missing)}.")
         valid_banks = bank_details
 
-        self.company_repo.upsert(company_name.strip(), gstin, pan_no, iec)
+        self.company_repo.upsert(company_name.strip(), gstin, pan_no, iec, lut, bin_no)
         self.company_repo.replace_contact_details(valid_details)
         self.company_repo.replace_contact_persons(valid_persons)
         self.company_repo.replace_bank_details(valid_banks)
@@ -485,3 +489,145 @@ class ReportService:
             (start_date, end_date),
         )
         return dict(row) if row else {"payment_count": 0, "total_inr": 0}
+
+
+# ============================================================
+# PRODUCT SERVICE (folder-tree catalog: groups nest to any depth, each
+# group holds any number of subgroups + products)
+# ============================================================
+class ProductService:
+    def __init__(self, group_repo: ProductGroupRepository, product_repo: ProductRepository,
+                 upload_folder: str, allowed_extensions: set):
+        self.group_repo = group_repo
+        self.product_repo = product_repo
+        self.upload_folder = upload_folder
+        self.allowed_extensions = allowed_extensions
+
+    # ---- browsing --------------------------------------------------
+    def get_group(self, group_id: int) -> ProductGroup:
+        group = self.group_repo.get_by_id(group_id)
+        if not group:
+            raise NotFoundError(f"Product group #{group_id} not found.")
+        return group
+
+    def breadcrumb(self, group_id: Optional[int]) -> List[ProductGroup]:
+        return self.group_repo.list_ancestors(group_id) if group_id else []
+
+    def list_contents(self, group_id: Optional[int]):
+        """Returns (subgroups, products) for a folder - group_id=None is the catalog root."""
+        return self.group_repo.list_children(group_id), self.product_repo.list_in_group(group_id)
+
+    def get_product(self, product_id: int) -> Product:
+        product = self.product_repo.get_by_id(product_id)
+        if not product:
+            raise NotFoundError(f"Product #{product_id} not found.")
+        return product
+
+    # ---- groups --------------------------------------------------
+    def create_group(self, current_user: User, name: str, parent_id: Optional[int]) -> ProductGroup:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can manage the product catalog.")
+        if not name or not name.strip():
+            raise ValidationError("Group name is compulsory.")
+        if parent_id is not None:
+            self.get_group(parent_id)  # 404s if the parent doesn't exist
+        return self.group_repo.create(name.strip(), parent_id)
+
+    def rename_group(self, current_user: User, group_id: int, name: str) -> None:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can manage the product catalog.")
+        if not name or not name.strip():
+            raise ValidationError("Group name is compulsory.")
+        self.get_group(group_id)
+        self.group_repo.update(group_id, name.strip())
+
+    def delete_group(self, current_user: User, group_id: int) -> None:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can manage the product catalog.")
+        self.get_group(group_id)
+        self._delete_group_images_recursive(group_id)
+        self.group_repo.delete(group_id)  # cascades to subgroups/products in the DB
+
+    def _delete_group_images_recursive(self, group_id: int) -> None:
+        """Product image files live on disk, not in the DB, so cascading
+        deletes don't clean them up on their own - walk the subtree first."""
+        for product in self.product_repo.list_in_group(group_id):
+            self._delete_image_file(product.photo_path)
+            self._delete_image_file(product.dimension_photo_path)
+        for subgroup in self.group_repo.list_children(group_id):
+            self._delete_group_images_recursive(subgroup.id)
+
+    # ---- products --------------------------------------------------
+    def create_product(self, current_user: User, group_id: Optional[int], product_name: str,
+                        description: str, hsn_code: str, packing: str, quantity: str,
+                        alternate_quantity: str, alt_text: str, photo_file, dimension_photo_file) -> Product:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can manage the product catalog.")
+        if not product_name or not product_name.strip():
+            raise ValidationError("Product name is compulsory.")
+        if group_id is not None:
+            self.get_group(group_id)
+
+        photo_path = self._save_image(photo_file)
+        dimension_photo_path = self._save_image(dimension_photo_file)
+        product = Product(
+            id=None, group_id=group_id, product_name=product_name.strip(),
+            description=description or None, hsn_code=hsn_code or None, packing=packing or None,
+            quantity=quantity or None, alternate_quantity=alternate_quantity or None,
+            photo_path=photo_path, dimension_photo_path=dimension_photo_path, alt_text=alt_text or None,
+        )
+        return self.product_repo.create(product)
+
+    def update_product(self, current_user: User, product_id: int, product_name: str,
+                        description: str, hsn_code: str, packing: str, quantity: str,
+                        alternate_quantity: str, alt_text: str, photo_file, dimension_photo_file) -> None:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can manage the product catalog.")
+        if not product_name or not product_name.strip():
+            raise ValidationError("Product name is compulsory.")
+        existing = self.get_product(product_id)
+
+        fields = {
+            "product_name": product_name.strip(), "description": description or None,
+            "hsn_code": hsn_code or None, "packing": packing or None, "quantity": quantity or None,
+            "alternate_quantity": alternate_quantity or None, "alt_text": alt_text or None,
+        }
+        if photo_file and photo_file.filename:
+            fields["photo_path"] = self._save_image(photo_file)
+            self._delete_image_file(existing.photo_path)
+        if dimension_photo_file and dimension_photo_file.filename:
+            fields["dimension_photo_path"] = self._save_image(dimension_photo_file)
+            self._delete_image_file(existing.dimension_photo_path)
+
+        self.product_repo.update(product_id, fields)
+
+    def delete_product(self, current_user: User, product_id: int) -> None:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can manage the product catalog.")
+        product = self.get_product(product_id)
+        self._delete_image_file(product.photo_path)
+        self._delete_image_file(product.dimension_photo_path)
+        self.product_repo.delete(product_id)
+
+    # ---- image storage --------------------------------------------------
+    def _save_image(self, file_storage) -> Optional[str]:
+        """Saves an uploaded image under the product upload folder with a
+        collision-proof name and returns the path relative to static/
+        (so templates can do url_for('static', filename=path))."""
+        if not file_storage or not file_storage.filename:
+            return None
+        filename = secure_filename(file_storage.filename)
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if ext not in self.allowed_extensions:
+            raise ValidationError(f"Unsupported image type '.{ext}'. Allowed: {', '.join(sorted(self.allowed_extensions))}.")
+        os.makedirs(self.upload_folder, exist_ok=True)
+        stored_name = f"{uuid.uuid4().hex}_{filename}"
+        file_storage.save(os.path.join(self.upload_folder, stored_name))
+        return f"uploads/products/{stored_name}"
+
+    def _delete_image_file(self, relative_path: Optional[str]) -> None:
+        if not relative_path:
+            return
+        full_path = os.path.join(self.upload_folder, os.path.basename(relative_path))
+        if os.path.exists(full_path):
+            os.remove(full_path)

@@ -402,6 +402,36 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
 .subnav a:hover { text-decoration: none; border-color: var(--color-accent); color: var(--color-accent-deep); }
 .subnav a.active { background: var(--color-ink); color: #fff; border-color: var(--color-ink); }
 
+/* ---------------------------------------------------------------
+   Product catalog: folder-tree browser
+   --------------------------------------------------------------- */
+.breadcrumb-trail { font-size: .84rem; color: var(--color-text-soft); margin-bottom: 16px; }
+.breadcrumb-trail .crumb-sep { margin: 0 6px; }
+
+.folder-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; }
+.folder-tile {
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius);
+  padding: 14px 12px;
+  text-align: center;
+  background: var(--color-paper);
+}
+.folder-tile-link { display: block; color: var(--color-text); }
+.folder-tile-link:hover { text-decoration: none; color: var(--color-accent-deep); }
+.folder-icon { display: block; font-size: 2rem; margin-bottom: 6px; }
+.folder-name { display: block; font-weight: 600; font-size: .87rem; word-break: break-word; }
+.folder-tile-actions { display: flex; justify-content: center; gap: 10px; margin-top: 8px; }
+
+.btn-link-danger {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--color-danger); font-family: var(--font-body); font-weight: 500;
+}
+.btn-link-danger:hover { text-decoration: underline; }
+
+.thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 4px; border: 1px solid var(--color-line); }
+.thumb-lg { max-width: 160px; max-height: 160px; object-fit: cover; border-radius: var(--radius); border: 1px solid var(--color-line); margin-bottom: 8px; }
+.thumb-xl { max-width: 100%; max-height: 360px; object-fit: contain; border-radius: var(--radius); border: 1px solid var(--color-line); background: var(--color-paper); }
+
 .login-shell {
   min-height: 100vh;
   display: flex;

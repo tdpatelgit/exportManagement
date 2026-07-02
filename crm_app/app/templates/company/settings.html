@@ -22,6 +22,10 @@
         <div class="field"><label for="pan_no">PAN No.</label><input type="text" id="pan_no" name="pan_no" value="{{ company.pan_no if company else '' }}"></div>
         <div class="field"><label for="iec">IEC</label><input type="text" id="iec" name="iec" value="{{ company.iec if company else '' }}"></div>
       </div>
+      <div class="form-row">
+        <div class="field"><label for="lut">LUT</label><input type="text" id="lut" name="lut" value="{{ company.lut if company else '' }}"></div>
+        <div class="field"><label for="bin_no">BIN</label><input type="text" id="bin_no" name="bin_no" value="{{ company.bin if company else '' }}"></div>
+      </div>
     </fieldset>
 
     <fieldset>

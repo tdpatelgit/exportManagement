@@ -67,3 +67,9 @@ class Config:
 
     # Pagination default for list pages.
     PAGE_SIZE = 20
+
+    # Where product photos / dimension photos get saved. Lives under
+    # static/ so Flask can serve the files directly via url_for('static', ...).
+    PRODUCT_UPLOAD_FOLDER = os.path.join(BASE_DIR, "app", "static", "uploads", "products")
+    ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+    MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB upload cap

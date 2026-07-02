@@ -149,6 +149,8 @@ CREATE TABLE IF NOT EXISTS our_company (
     gstin           TEXT,
     pan_no          TEXT,
     iec             TEXT,
+    lut             TEXT,
+    bin             TEXT,
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -176,6 +178,33 @@ CREATE TABLE IF NOT EXISTS our_company_bank_details (
     is_primary      INTEGER NOT NULL DEFAULT 0
 );
 
+-- ============================================================
+-- PRODUCTS  (folder-style catalog: groups can nest under groups to any
+-- depth, and each group can hold any number of subgroups and products)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS product_groups (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    parent_id   INTEGER REFERENCES product_groups(id) ON DELETE CASCADE,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS products (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id                INTEGER REFERENCES product_groups(id) ON DELETE CASCADE,
+    product_name            TEXT NOT NULL,
+    description             TEXT,
+    hsn_code                TEXT,
+    packing                 TEXT,
+    quantity                TEXT,
+    alternate_quantity      TEXT,
+    photo_path              TEXT,
+    dimension_photo_path    TEXT,
+    alt_text                TEXT,
+    created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Helpful indexes for the dashboards/reports (grouping by employee, date
 -- range filters, and lookups by parent are the hottest queries).
 CREATE INDEX IF NOT EXISTS idx_leads_created_by ON leads(created_by);
@@ -184,3 +213,5 @@ CREATE INDEX IF NOT EXISTS idx_comms_parent ON communications(parent_type, paren
 CREATE INDEX IF NOT EXISTS idx_comms_employee ON communications(employee_id);
 CREATE INDEX IF NOT EXISTS idx_payments_client ON payment_history(client_id);
 CREATE INDEX IF NOT EXISTS idx_documents_client ON documents(client_id);
+CREATE INDEX IF NOT EXISTS idx_product_groups_parent ON product_groups(parent_id);
+CREATE INDEX IF NOT EXISTS idx_products_group ON products(group_id);

@@ -18,10 +18,11 @@ from app.database import Database
 from app.repositories import (
     SqliteUserRepository, SqliteLeadRepository, SqliteClientRepository,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
+    ProductGroupRepository, ProductRepository,
 )
 from app.services import (
     AuthService, LeadService, ClientService, CurrencyService,
-    CommunicationService, StatsService, CompanyService, ReportService,
+    CommunicationService, StatsService, CompanyService, ReportService, ProductService,
 )
 from app.utils import register_template_helpers
 
@@ -43,6 +44,8 @@ class ServiceContainer:
         self.payment_repo = PaymentRepository(db)
         self.document_repo = DocumentRepository(db)
         self.company_repo = CompanyRepository(db)
+        self.product_group_repo = ProductGroupRepository(db)
+        self.product_repo = ProductRepository(db)
 
         # Services (business logic layer)
         self.auth_service = AuthService(self.user_repo)
@@ -56,6 +59,10 @@ class ServiceContainer:
         self.stats_service = StatsService(self.user_repo, self.lead_repo, self.comm_repo, self.client_repo)
         self.company_service = CompanyService(self.company_repo)
         self.report_service = ReportService(db)
+        self.product_service = ProductService(
+            self.product_group_repo, self.product_repo,
+            Config.PRODUCT_UPLOAD_FOLDER, Config.ALLOWED_IMAGE_EXTENSIONS,
+        )
 
 
 def create_app(config_class=Config) -> Flask:
@@ -95,6 +102,7 @@ def create_app(config_class=Config) -> Flask:
     from app.routes.admin import admin_bp
     from app.routes.company import company_bp
     from app.routes.reports import reports_bp
+    from app.routes.products import products_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -103,6 +111,7 @@ def create_app(config_class=Config) -> Flask:
     app.register_blueprint(admin_bp)
     app.register_blueprint(company_bp)
     app.register_blueprint(reports_bp)
+    app.register_blueprint(products_bp)
 
     # --- friendly error pages --------------------------------------------------
     @app.errorhandler(403)

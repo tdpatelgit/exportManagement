@@ -255,6 +255,8 @@ class OurCompany:
     gstin: Optional[str]
     pan_no: Optional[str]
     iec: Optional[str]
+    lut: Optional[str] = None
+    bin: Optional[str] = None
     updated_at: Optional[str] = None
     contact_details: List[dict] = field(default_factory=list)  # [{type, value, is_primary}]
     contact_persons: List[dict] = field(default_factory=list)  # [{name, is_primary}]
@@ -268,5 +270,63 @@ class OurCompany:
             gstin=row["gstin"],
             pan_no=row["pan_no"],
             iec=row["iec"],
+            lut=row["lut"] if "lut" in row.keys() else None,
+            bin=row["bin"] if "bin" in row.keys() else None,
+            updated_at=row["updated_at"],
+        )
+
+
+@dataclass
+class ProductGroup:
+    """A folder in the product catalog. `parent_id=None` means it's a
+    top-level group; groups can nest to any depth via self-reference."""
+    id: Optional[int]
+    name: str
+    parent_id: Optional[int] = None
+    created_at: Optional[str] = None
+
+    @staticmethod
+    def from_row(row) -> "ProductGroup":
+        return ProductGroup(
+            id=row["id"],
+            name=row["name"],
+            parent_id=row["parent_id"],
+            created_at=row["created_at"],
+        )
+
+
+@dataclass
+class Product:
+    """A file in the product catalog folder tree. `group_id=None` means it
+    sits at the catalog root, alongside top-level groups."""
+    id: Optional[int]
+    group_id: Optional[int]
+    product_name: str
+    description: Optional[str] = None
+    hsn_code: Optional[str] = None
+    packing: Optional[str] = None
+    quantity: Optional[str] = None
+    alternate_quantity: Optional[str] = None
+    photo_path: Optional[str] = None
+    dimension_photo_path: Optional[str] = None
+    alt_text: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    @staticmethod
+    def from_row(row) -> "Product":
+        return Product(
+            id=row["id"],
+            group_id=row["group_id"],
+            product_name=row["product_name"],
+            description=row["description"],
+            hsn_code=row["hsn_code"],
+            packing=row["packing"],
+            quantity=row["quantity"],
+            alternate_quantity=row["alternate_quantity"],
+            photo_path=row["photo_path"],
+            dimension_photo_path=row["dimension_photo_path"],
+            alt_text=row["alt_text"],
+            created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ product.product_name }}{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Catalog</div>
+    <h1>{{ product.product_name }}</h1>
+  </div>
+  {% if current_user.is_admin %}
+  <div class="topbar-actions">
+    <a href="{{ url_for('products.edit_product', product_id=product.id) }}" class="btn btn-ghost">Edit</a>
+    <form method="POST" action="{{ url_for('products.delete_product', product_id=product.id) }}" onsubmit="return confirm('Delete this product?');">
+      <button type="submit" class="btn btn-danger">Delete</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+
+<div class="breadcrumb-trail">
+  <a href="{{ url_for('products.browse') }}">Products</a>
+  {% for g in breadcrumb %}
+    <span class="crumb-sep">/</span>
+    <a href="{{ url_for('products.browse', group_id=g.id) }}">{{ g.name }}</a>
+  {% endfor %}
+  <span class="crumb-sep">/</span>
+  <span>{{ product.product_name }}</span>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <div class="card-header"><h3>Photo</h3></div>
+    {% if product.photo_path %}
+      <img class="thumb-xl" src="{{ url_for('static', filename=product.photo_path) }}" alt="{{ product.alt_text or product.product_name }}">
+    {% else %}
+      <div class="empty-state">No photo uploaded.</div>
+    {% endif %}
+  </div>
+  <div class="card">
+    <div class="card-header"><h3>Dimension photo</h3></div>
+    {% if product.dimension_photo_path %}
+      <img class="thumb-xl" src="{{ url_for('static', filename=product.dimension_photo_path) }}" alt="{{ product.product_name }} dimensions">
+    {% else %}
+      <div class="empty-state">No dimension photo uploaded.</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h3>Details</h3></div>
+  <div class="grid grid-2">
+    <div><div class="text-sm text-soft">Description</div><div>{{ product.description or '—' }}</div></div>
+    <div><div class="text-sm text-soft">HSN code</div><div>{{ product.hsn_code or '—' }}</div></div>
+    <div><div class="text-sm text-soft">Packing</div><div>{{ product.packing or '—' }}</div></div>
+    <div><div class="text-sm text-soft">Quantity</div><div>{{ product.quantity or '—' }}</div></div>
+    <div><div class="text-sm text-soft">Alternate quantity</div><div>{{ product.alternate_quantity or '—' }}</div></div>
+    <div><div class="text-sm text-soft">Alt text</div><div>{{ product.alt_text or '—' }}</div></div>
+  </div>
+</div>
+
+{% endblock %}

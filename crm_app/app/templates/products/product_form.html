@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit product' if product else 'New product' }}{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Catalog</div>
+    <h1>{{ 'Edit product' if product else 'New product' }}</h1>
+  </div>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <form method="POST" enctype="multipart/form-data">
+    {% set data = form_data if form_data else product %}
+    <div class="field">
+      <label for="product_name">Product name<span class="required-mark">*</span></label>
+      <input type="text" id="product_name" name="product_name" required value="{{ data.product_name if data else '' }}">
+    </div>
+    <div class="field">
+      <label for="description">Description</label>
+      <textarea id="description" name="description" rows="3">{{ data.description if data else '' }}</textarea>
+    </div>
+    <div class="form-row">
+      <div class="field"><label for="hsn_code">HSN code</label><input type="text" id="hsn_code" name="hsn_code" value="{{ data.hsn_code if data else '' }}"></div>
+      <div class="field"><label for="packing">Packing</label><input type="text" id="packing" name="packing" value="{{ data.packing if data else '' }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label for="quantity">Quantity</label><input type="text" id="quantity" name="quantity" value="{{ data.quantity if data else '' }}"></div>
+      <div class="field"><label for="alternate_quantity">Alternate quantity</label><input type="text" id="alternate_quantity" name="alternate_quantity" value="{{ data.alternate_quantity if data else '' }}"></div>
+    </div>
+
+    <div class="form-row">
+      <div class="field">
+        <label for="photo">Photo</label>
+        {% if product and product.photo_path %}
+          <div class="mb-0"><img class="thumb-lg" src="{{ url_for('static', filename=product.photo_path) }}" alt="{{ product.alt_text or product.product_name }}"></div>
+        {% endif %}
+        <input type="file" id="photo" name="photo" accept="image/*">
+        <div class="hint">{{ 'Leave blank to keep the current photo.' if product and product.photo_path else '' }}</div>
+      </div>
+      <div class="field">
+        <label for="dimension_photo">Dimension photo</label>
+        {% if product and product.dimension_photo_path %}
+          <div class="mb-0"><img class="thumb-lg" src="{{ url_for('static', filename=product.dimension_photo_path) }}" alt="{{ product.product_name }} dimensions"></div>
+        {% endif %}
+        <input type="file" id="dimension_photo" name="dimension_photo" accept="image/*">
+        <div class="hint">{{ 'Leave blank to keep the current photo.' if product and product.dimension_photo_path else '' }}</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="alt_text">Alt text</label>
+      <input type="text" id="alt_text" name="alt_text" value="{{ data.alt_text if data else '' }}">
+      <div class="hint">Describes the photo for accessibility / when it fails to load.</div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">{{ 'Save' if product else 'Add product' }}</button>
+    <a href="{{ url_for('products.browse', group_id=group_id) }}" class="btn btn-ghost">Cancel</a>
+  </form>
+</div>
+
+{% endblock %}

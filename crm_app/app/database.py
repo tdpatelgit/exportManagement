@@ -74,6 +74,11 @@ class Database:
                 if existing and column not in existing:
                     conn.execute(f"ALTER TABLE our_company_bank_details ADD COLUMN {column} TEXT")
 
+            existing = {r["name"] for r in conn.execute("PRAGMA table_info(our_company)")}
+            for column in ("lut", "bin"):
+                if existing and column not in existing:
+                    conn.execute(f"ALTER TABLE our_company ADD COLUMN {column} TEXT")
+
     def query(self, sql: str, params: tuple = ()) -> list:
         """Run a SELECT and return a list of sqlite3.Row objects."""
         with self.get_connection() as conn:

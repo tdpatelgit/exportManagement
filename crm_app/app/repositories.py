@@ -17,7 +17,7 @@ from typing import Optional, List
 from app.database import Database
 from app.models import (
     User, Lead, Client, ContactPerson, Communication,
-    PaymentEntry, DocumentEntry, OurCompany,
+    PaymentEntry, DocumentEntry, OurCompany, ProductGroup, Product,
 )
 
 
@@ -430,18 +430,18 @@ class CompanyRepository:
         ]
         return company
 
-    def upsert(self, company_name: str, gstin: str, pan_no: str, iec: str) -> None:
+    def upsert(self, company_name: str, gstin: str, pan_no: str, iec: str, lut: str, bin_no: str) -> None:
         existing = self.db.query_one("SELECT id FROM our_company WHERE id = 1")
         if existing:
             self.db.execute(
-                """UPDATE our_company SET company_name = ?, gstin = ?, pan_no = ?, iec = ?,
+                """UPDATE our_company SET company_name = ?, gstin = ?, pan_no = ?, iec = ?, lut = ?, bin = ?,
                                            updated_at = datetime('now') WHERE id = 1""",
-                (company_name, gstin, pan_no, iec),
+                (company_name, gstin, pan_no, iec, lut, bin_no),
             )
         else:
             self.db.execute(
-                "INSERT INTO our_company (id, company_name, gstin, pan_no, iec) VALUES (1, ?, ?, ?, ?)",
-                (company_name, gstin, pan_no, iec),
+                "INSERT INTO our_company (id, company_name, gstin, pan_no, iec, lut, bin) VALUES (1, ?, ?, ?, ?, ?, ?)",
+                (company_name, gstin, pan_no, iec, lut, bin_no),
             )
 
     def replace_contact_details(self, details: list) -> None:
@@ -478,3 +478,89 @@ class CompanyRepository:
                      b.get("swift_code") or None, b.get("branch") or None,
                      b.get("bank_address") or None, int(b["is_primary"])),
                 )
+
+
+# ============================================================
+# PRODUCT CATALOG (groups = folders, products = files)
+# ============================================================
+class ProductGroupRepository:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def get_by_id(self, group_id: int) -> Optional[ProductGroup]:
+        row = self.db.query_one("SELECT * FROM product_groups WHERE id = ?", (group_id,))
+        return ProductGroup.from_row(row) if row else None
+
+    def list_children(self, parent_id: Optional[int]) -> List[ProductGroup]:
+        if parent_id is None:
+            rows = self.db.query("SELECT * FROM product_groups WHERE parent_id IS NULL ORDER BY name")
+        else:
+            rows = self.db.query("SELECT * FROM product_groups WHERE parent_id = ? ORDER BY name", (parent_id,))
+        return [ProductGroup.from_row(r) for r in rows]
+
+    def list_ancestors(self, group_id: int) -> List[ProductGroup]:
+        """Walks parent_id up to the root - powers the breadcrumb trail."""
+        trail = []
+        current = self.get_by_id(group_id)
+        while current:
+            trail.append(current)
+            current = self.get_by_id(current.parent_id) if current.parent_id else None
+        trail.reverse()
+        return trail
+
+    def create(self, name: str, parent_id: Optional[int]) -> ProductGroup:
+        new_id = self.db.execute(
+            "INSERT INTO product_groups (name, parent_id) VALUES (?, ?)", (name, parent_id)
+        )
+        return self.get_by_id(new_id)
+
+    def update(self, group_id: int, name: str) -> None:
+        self.db.execute("UPDATE product_groups SET name = ? WHERE id = ?", (name, group_id))
+
+    def delete(self, group_id: int) -> None:
+        """Cascades to subgroups and products via ON DELETE CASCADE."""
+        self.db.execute("DELETE FROM product_groups WHERE id = ?", (group_id,))
+
+    def has_children(self, group_id: int) -> bool:
+        subgroup = self.db.query_one("SELECT id FROM product_groups WHERE parent_id = ? LIMIT 1", (group_id,))
+        product = self.db.query_one("SELECT id FROM products WHERE group_id = ? LIMIT 1", (group_id,))
+        return bool(subgroup or product)
+
+
+class ProductRepository:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def get_by_id(self, product_id: int) -> Optional[Product]:
+        row = self.db.query_one("SELECT * FROM products WHERE id = ?", (product_id,))
+        return Product.from_row(row) if row else None
+
+    def list_in_group(self, group_id: Optional[int]) -> List[Product]:
+        if group_id is None:
+            rows = self.db.query("SELECT * FROM products WHERE group_id IS NULL ORDER BY product_name")
+        else:
+            rows = self.db.query("SELECT * FROM products WHERE group_id = ? ORDER BY product_name", (group_id,))
+        return [Product.from_row(r) for r in rows]
+
+    def create(self, product: Product) -> Product:
+        new_id = self.db.execute(
+            """INSERT INTO products
+               (group_id, product_name, description, hsn_code, packing, quantity,
+                alternate_quantity, photo_path, dimension_photo_path, alt_text)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (product.group_id, product.product_name, product.description, product.hsn_code,
+             product.packing, product.quantity, product.alternate_quantity,
+             product.photo_path, product.dimension_photo_path, product.alt_text),
+        )
+        return self.get_by_id(new_id)
+
+    def update(self, product_id: int, fields: dict) -> None:
+        """fields may include any column except id/group_id/created_at."""
+        columns = ", ".join(f"{k} = ?" for k in fields)
+        self.db.execute(
+            f"UPDATE products SET {columns}, updated_at = datetime('now') WHERE id = ?",
+            (*fields.values(), product_id),
+        )
+
+    def delete(self, product_id: int) -> None:
+        self.db.execute("DELETE FROM products WHERE id = ?", (product_id,))
