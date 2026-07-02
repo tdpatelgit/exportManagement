@@ -214,7 +214,8 @@ class SqliteLeadRepository(LeadRepositoryBase):
 
     def mark_converted(self, lead_id: int, client_id: int) -> None:
         self.db.execute(
-            "UPDATE leads SET is_converted = 1, converted_client_id = ? WHERE id = ?",
+            "UPDATE leads SET is_converted = 1, converted_client_id = ?, status = 'in_client', "
+            "updated_at = datetime('now') WHERE id = ?",
             (client_id, lead_id),
         )
 

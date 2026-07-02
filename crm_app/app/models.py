@@ -99,6 +99,7 @@ LEAD_STATUSES = [
     ("in_follow_up", "In Follow Up"),
     ("long_follow_up", "Long Follow Up"),
     ("quotation_submission_pending", "Quotation Submission Pending"),
+    ("in_client", "In Client"),
 ]
 
 CLIENT_STATUSES = [
