@@ -1,0 +1,18 @@
+# Core web framework
+Flask==3.1.3
+
+# Used by Flask for templating/security (installed automatically with Flask,
+# pinned explicitly here so `pip install -r requirements.txt` is reproducible)
+Jinja2==3.1.6
+Werkzeug==3.1.7
+
+# Used by CurrencyConversionService to call a live exchange-rate API
+requests==2.33.1
+
+# Used to load configuration (SECRET_KEY, DB path, etc.) from a .env file
+python-dotenv==1.2.2
+
+# NOTE: The database layer uses Python's built-in `sqlite3` module, so no
+# separate database driver is required. See README.md -> "Swapping the
+# database" for how to move to PostgreSQL/MySQL later without touching
+# services or routes (that's the point of the Repository pattern used here).

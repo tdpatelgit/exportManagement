@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Employees{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Administration</div>
+    <h1>Employees &amp; admins</h1>
+  </div>
+  <div class="topbar-actions">
+    <a href="{{ url_for('admin.new_employee') }}" class="btn btn-primary">+ New user</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h3>Employees</h3></div>
+  {% if performance %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead><tr><th>Name</th><th>Username</th><th class="num">Leads generated</th><th class="num">Communications</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        {% for row in performance %}
+        <tr>
+          <td>{{ row.employee.full_name }}</td>
+          <td class="mono text-sm">{{ row.employee.username }}</td>
+          <td class="num">{{ row.lead_count }}</td>
+          <td class="num">{{ row.communication_count }}</td>
+          <td>
+            {% if row.employee.is_active %}<span class="pill" style="background:var(--color-success-bg); color:var(--color-success);">Active</span>
+            {% else %}<span class="pill" style="background:var(--color-danger-bg); color:var(--color-danger);">Inactive</span>{% endif %}
+          </td>
+          <td class="flex gap-8">
+            <a href="{{ url_for('admin.employee_detail', user_id=row.employee.id) }}" class="text-sm">View →</a>
+            <form method="POST" action="{{ url_for('admin.toggle_active', user_id=row.employee.id) }}">
+              <button type="submit" class="btn btn-ghost btn-sm">{{ 'Deactivate' if row.employee.is_active else 'Activate' }}</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No employees yet. <a href="{{ url_for('admin.new_employee') }}">Add one →</a></div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-header"><h3>Admins</h3></div>
+  <table class="ledger">
+    <thead><tr><th>Name</th><th>Username</th></tr></thead>
+    <tbody>
+      {% for admin in admins %}
+      <tr><td>{{ admin.full_name }}</td><td class="mono text-sm">{{ admin.username }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

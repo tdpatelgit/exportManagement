@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign in · Trade Ledger CRM</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <div class="login-shell">
+    <div class="login-card">
+      <div class="mark">Ledger&nbsp;CRM</div>
+      <div class="sub">Sign in to your trade &amp; export desk</div>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="flash-stack">
+            {% for category, message in messages %}
+              <div class="flash flash-{{ category }}">{{ message }}</div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+
+      <form method="POST" action="{{ url_for('auth.login') }}">
+        <div class="field">
+          <label for="username">Username</label>
+          <input type="text" id="username" name="username" autofocus required>
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" required>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Sign in</button>
+      </form>
+
+      <p class="text-sm text-soft" style="margin-top:18px;">
+        No account yet? Ask an admin to create one for you, or run
+        <code>python seed.py</code> to create the first admin login.
+      </p>
+    </div>
+  </div>
+</body>
+</html>

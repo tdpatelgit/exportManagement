@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Reports{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Administration</div>
+    <h1>Activity report</h1>
+  </div>
+</div>
+
+<div class="card">
+  <form method="GET" class="form-row" style="align-items:flex-end;">
+    <div class="field"><label>From</label><input type="date" name="start_date" value="{{ start_date }}"></div>
+    <div class="field"><label>To</label><input type="date" name="end_date" value="{{ end_date }}"></div>
+    <div><button type="submit" class="btn btn-primary">Run report</button></div>
+  </form>
+  <p class="hint">Tip: set "From" to the 1st of a month/quarter/year and "To" to today for a monthly, quarterly, or yearly view.</p>
+</div>
+
+<div class="grid grid-2" style="margin-bottom:20px;">
+  <div class="stat-tile"><div class="value">{{ payments_summary.payment_count }}</div><div class="label">Payments received in range</div></div>
+  <div class="stat-tile"><div class="value">₹{{ '{:,.2f}'.format(payments_summary.total_inr) }}</div><div class="label">Total received (INR)</div></div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h3>Per-employee activity, {{ start_date }} → {{ end_date }}</h3></div>
+  {% if rows %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead><tr><th>Employee</th><th class="num">Leads generated</th><th class="num">Communications logged</th><th class="num">Clients converted</th></tr></thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.full_name }}</td>
+          <td class="num">{{ row.leads_generated }}</td>
+          <td class="num">{{ row.communications_logged }}</td>
+          <td class="num">{{ row.clients_converted }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No employees to report on yet.</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3>What's coming next</h3>
+  <p class="text-sm text-soft">
+    This report currently covers leads, communications, client conversions and payments received,
+    since that data already exists. Once product records and generated documents (proforma invoices,
+    purchase orders, etc.) are added, this page will expand to cover those too - see the README's
+    roadmap section for the full plan.
+  </p>
+</div>
+
+{% endblock %}

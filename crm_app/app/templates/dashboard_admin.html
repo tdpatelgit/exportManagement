@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Overview</div>
+    <h1>Good to see you, {{ current_user.full_name }}</h1>
+  </div>
+  <div class="topbar-actions">
+    <a href="{{ url_for('leads.new_lead') }}" class="btn btn-primary">+ New Lead</a>
+    <a href="{{ url_for('reports.index') }}" class="btn btn-ghost">View reports</a>
+  </div>
+</div>
+
+<div class="grid grid-4" style="margin-bottom:20px;">
+  <div class="stat-tile"><div class="value">{{ overview.total_leads }}</div><div class="label">Total leads</div></div>
+  <div class="stat-tile"><div class="value">{{ overview.open_leads }}</div><div class="label">Open leads</div></div>
+  <div class="stat-tile"><div class="value">{{ overview.total_clients }}</div><div class="label">Clients</div></div>
+  <div class="stat-tile"><div class="value">{{ performance|length }}</div><div class="label">Employees</div></div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2>Employee performance</h2>
+    <a href="{{ url_for('admin.list_employees') }}" class="text-sm">Manage employees →</a>
+  </div>
+  {% if performance %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead><tr><th>Employee</th><th class="num">Leads generated</th><th class="num">Communications logged</th><th></th></tr></thead>
+      <tbody>
+        {% for row in performance %}
+        <tr>
+          <td>{{ row.employee.full_name }} <span class="text-soft text-sm">@{{ row.employee.username }}</span></td>
+          <td class="num">{{ row.lead_count }}</td>
+          <td class="num">{{ row.communication_count }}</td>
+          <td><a href="{{ url_for('admin.employee_detail', user_id=row.employee.id) }}" class="text-sm">View →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No employees yet. Add one from the Employees page.</div>
+  {% endif %}
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <div class="card-header"><h3>Recent leads</h3><a href="{{ url_for('leads.list_leads') }}" class="text-sm">All leads →</a></div>
+    {% if recent_leads %}
+      {% for lead in recent_leads %}
+      <div class="flex-between" style="padding:7px 0; border-bottom:1px solid var(--color-line);">
+        <a href="{{ url_for('leads.view_lead', lead_id=lead.id) }}">{{ lead.company_name }}</a>
+        <span class="stamp stamp-{{ lead.status|status_css }}">{{ lead.status_label }}</span>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty-state">No leads yet.</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Recent clients</h3><a href="{{ url_for('clients.list_clients') }}" class="text-sm">All clients →</a></div>
+    {% if recent_clients %}
+      {% for client in recent_clients %}
+      <div class="flex-between" style="padding:7px 0; border-bottom:1px solid var(--color-line);">
+        <a href="{{ url_for('clients.view_client', client_id=client.id) }}">{{ client.company_name }}</a>
+        <span class="stamp stamp-{{ client.status|status_css }}">{{ client.client_type }}</span>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty-state">No clients yet - approve a lead to convert it.</div>
+    {% endif %}
+  </div>
+</div>
+
+{% if overview.lead_status_breakdown %}
+<div class="card">
+  <div class="card-header"><h3>Lead pipeline</h3></div>
+  <div class="grid grid-4">
+    {% for status_key, count in overview.lead_status_breakdown.items() %}
+    <div class="stat-tile">
+      <div class="value">{{ count }}</div>
+      <div class="label">{{ status_key.replace('_', ' ') }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

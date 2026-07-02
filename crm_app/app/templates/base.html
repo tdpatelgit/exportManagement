@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}CRM{% endblock %} · Trade Ledger CRM</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="mark">Ledger&nbsp;CRM</div>
+        <div class="sub">Trade &amp; Export Desk</div>
+      </div>
+
+      <div class="nav-section-label">Workspace</div>
+      <a class="nav-link {{ 'active' if request.endpoint == 'dashboard.home' }}" href="{{ url_for('dashboard.home') }}">📊 Dashboard</a>
+      <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('leads.') }}" href="{{ url_for('leads.list_leads') }}">🧭 Leads</a>
+      <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('clients.') }}" href="{{ url_for('clients.list_clients') }}">🤝 Clients</a>
+
+      {% if current_user and current_user.is_admin %}
+        <div class="nav-section-label">Administration</div>
+        <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('admin.') }}" href="{{ url_for('admin.list_employees') }}">👥 Employees</a>
+        <a class="nav-link {{ 'active' if request.endpoint == 'company.settings' }}" href="{{ url_for('company.settings') }}">🏢 Our Company</a>
+        <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('reports.') }}" href="{{ url_for('reports.index') }}">🗓️ Reports</a>
+      {% endif %}
+
+      {% if current_user %}
+      <div class="sidebar-footer">
+        <div class="sidebar-user">{{ current_user.full_name }}</div>
+        <div class="sidebar-role">{{ current_user.role }}</div>
+        <a class="logout-link" href="{{ url_for('auth.logout') }}">Log out →</a>
+      </div>
+      {% endif %}
+    </aside>
+
+    <main class="main">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="flash-stack">
+            {% for category, message in messages %}
+              <div class="flash flash-{{ category }}">{{ message }}</div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>

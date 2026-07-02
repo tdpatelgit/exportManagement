@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}New User{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Administration</div>
+    <h1>Create a new login</h1>
+  </div>
+</div>
+
+<div class="card" style="max-width:480px;">
+  <form method="POST">
+    <div class="field">
+      <label for="full_name">Full name<span class="required-mark">*</span></label>
+      <input type="text" id="full_name" name="full_name" required>
+    </div>
+    <div class="field">
+      <label for="username">Username<span class="required-mark">*</span></label>
+      <input type="text" id="username" name="username" required>
+    </div>
+    <div class="field">
+      <label for="password">Temporary password<span class="required-mark">*</span></label>
+      <input type="password" id="password" name="password" required minlength="6">
+      <div class="hint">Share this with them privately - they should change it after first login (password change from the UI is on the roadmap).</div>
+    </div>
+    <div class="field">
+      <label for="role">Role<span class="required-mark">*</span></label>
+      <select id="role" name="role">
+        <option value="employee" selected>Employee</option>
+        <option value="admin">Admin</option>
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Create user</button>
+    <a href="{{ url_for('admin.list_employees') }}" class="btn btn-ghost">Cancel</a>
+  </form>
+</div>
+
+{% endblock %}

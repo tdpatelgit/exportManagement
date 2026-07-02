@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}My Dashboard{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">My desk</div>
+    <h1>Welcome back, {{ current_user.full_name }}</h1>
+  </div>
+  <div class="topbar-actions">
+    <a href="{{ url_for('leads.new_lead') }}" class="btn btn-primary">+ New Lead</a>
+  </div>
+</div>
+
+<div class="grid grid-3" style="margin-bottom:20px;">
+  <div class="stat-tile"><div class="value">{{ my_lead_count }}</div><div class="label">Leads generated</div></div>
+  <div class="stat-tile"><div class="value">{{ my_comm_count }}</div><div class="label">Communications logged</div></div>
+  <div class="stat-tile"><div class="value">{{ followups|length }}</div><div class="label">Follow-ups due</div></div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2>Follow-ups due &amp; overdue</h2>
+    <span class="text-sm text-soft">Next {{ config.FOLLOWUP_LOOKAHEAD_DAYS if config else 3 }} days, and anything overdue</span>
+  </div>
+  {% if followups %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead><tr><th>Follow-up date</th><th>Regarding</th><th>Last note</th><th></th></tr></thead>
+      <tbody>
+        {% for f in followups %}
+        <tr>
+          <td class="num">{{ f.follow_up_date }}</td>
+          <td>{{ f.parent_type|capitalize }} #{{ f.parent_id }}</td>
+          <td class="text-sm">{{ f.description }}</td>
+          <td>
+            {% if f.parent_type == 'lead' %}
+              <a href="{{ url_for('leads.view_lead', lead_id=f.parent_id) }}" class="text-sm">Open →</a>
+            {% else %}
+              <a href="{{ url_for('clients.view_client', client_id=f.parent_id) }}" class="text-sm">Open →</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">Nothing due - you're all caught up.</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2>My recent leads</h2>
+    <a href="{{ url_for('leads.list_leads') }}" class="text-sm">All my leads →</a>
+  </div>
+  {% if my_leads %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead><tr><th>Company</th><th>Status</th><th>Created</th><th></th></tr></thead>
+      <tbody>
+        {% for lead in my_leads %}
+        <tr>
+          <td>{{ lead.company_name }}</td>
+          <td><span class="stamp stamp-{{ lead.status|status_css }}">{{ lead.status_label }}</span></td>
+          <td class="text-sm text-soft">{{ lead.created_at|friendly_date }}</td>
+          <td><a href="{{ url_for('leads.view_lead', lead_id=lead.id) }}" class="text-sm">Open →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">You haven't generated any leads yet. <a href="{{ url_for('leads.new_lead') }}">Create your first one →</a></div>
+  {% endif %}
+</div>
+
+{% endblock %}

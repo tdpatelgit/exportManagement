@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>404 · Not found</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <div class="login-shell">
+    <div class="login-card" style="text-align:center;">
+      <div class="mark">404</div>
+      <div class="sub">That record doesn't exist, or has been moved.</div>
+      <a href="{{ url_for('dashboard.home') }}" class="btn btn-primary btn-block">Back to my dashboard</a>
+    </div>
+  </div>
+</body>
+</html>

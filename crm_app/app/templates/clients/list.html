@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Clients{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Accounts</div>
+    <h1>Clients</h1>
+  </div>
+</div>
+
+<div class="subnav">
+  <a href="{{ url_for('clients.list_clients') }}" class="{{ 'active' if not client_type_filter and not status_filter }}">All</a>
+  {% for t in CLIENT_TYPES %}
+    <a href="{{ url_for('clients.list_clients', client_type=t) }}" class="{{ 'active' if client_type_filter == t }}">{{ t }}</a>
+  {% endfor %}
+</div>
+
+<div class="card">
+  {% if clients %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead><tr><th>Company</th><th>Type</th><th>Status</th><th>Contact</th><th>Since</th><th></th></tr></thead>
+      <tbody>
+        {% for client in clients %}
+        <tr>
+          <td><strong>{{ client.company_name }}</strong></td>
+          <td><span class="pill">{{ client.client_type }}</span></td>
+          <td><span class="stamp stamp-{{ client.status|status_css }}">{{ client.status_label }}</span></td>
+          <td class="text-sm">{{ client.phone }}</td>
+          <td class="text-sm text-soft">{{ client.created_at|friendly_date }}</td>
+          <td><a href="{{ url_for('clients.view_client', client_id=client.id) }}" class="text-sm">Open →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No clients yet. Clients are created by approving a lead for conversion.</div>
+  {% endif %}
+</div>
+
+{% endblock %}

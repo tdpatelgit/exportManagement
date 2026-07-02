@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit Lead' if editing else 'New Lead' }}{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">{{ 'Admin edit · compulsory fields only' if editing else 'New lead' }}</div>
+    <h1>{{ lead.company_name if editing else 'Generate a new lead' }}</h1>
+  </div>
+</div>
+
+<div class="card" style="max-width: 720px;">
+  <form method="POST">
+    <fieldset>
+      <legend>Company details</legend>
+      <div class="field">
+        <label for="company_name">Company name<span class="required-mark">*</span></label>
+        <input type="text" id="company_name" name="company_name" required
+               value="{{ lead.company_name if editing else (form_data.company_name if form_data else '') }}">
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label for="phone">Phone<span class="required-mark">*</span></label>
+          <input type="tel" id="phone" name="phone" required
+                 value="{{ lead.phone if editing else (form_data.phone if form_data else '') }}">
+        </div>
+        <div class="field">
+          <label for="email">Email<span class="required-mark">*</span></label>
+          <input type="email" id="email" name="email" required
+                 value="{{ lead.email if editing else (form_data.email if form_data else '') }}">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label for="facebook">Facebook</label>
+          <input type="text" id="facebook" name="facebook" placeholder="facebook.com/..."
+                 value="{{ lead.facebook if editing else (form_data.facebook if form_data else '') }}">
+        </div>
+        <div class="field">
+          <label for="instagram">Instagram</label>
+          <input type="text" id="instagram" name="instagram" placeholder="@handle"
+                 value="{{ lead.instagram if editing else (form_data.instagram if form_data else '') }}">
+        </div>
+        <div class="field">
+          <label for="other_social">Other social</label>
+          <input type="text" id="other_social" name="other_social"
+                 value="{{ lead.other_social if editing else (form_data.other_social if form_data else '') }}">
+        </div>
+      </div>
+      {% if editing %}
+        <p class="hint">Only an admin can change these compulsory fields. Contact persons and communications are managed from the lead's detail page.</p>
+      {% endif %}
+    </fieldset>
+
+    {% if not editing %}
+    <fieldset id="contacts-fieldset">
+      <legend>Contact person(s) <span class="text-soft text-sm">— at least one required</span></legend>
+      <div id="contact-rows">
+        <div class="repeatable-row">
+          <div class="field"><label>Name<span class="required-mark">*</span></label><input type="text" name="contact_name[]" required></div>
+          <div class="field"><label>Phone</label><input type="tel" name="contact_phone[]"></div>
+          <div class="field"><label>Email</label><input type="email" name="contact_email[]"></div>
+          <div class="radio-wrap"><input type="radio" name="primary_contact_index" value="0" id="primary-0" checked><label for="primary-0">Primary</label></div>
+        </div>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addContactRow()">+ Add another contact</button>
+    </fieldset>
+    {% endif %}
+
+    <button type="submit" class="btn btn-primary">{{ 'Save changes' if editing else 'Create lead' }}</button>
+    <a href="{{ url_for('leads.view_lead', lead_id=lead.id) if editing else url_for('leads.list_leads') }}" class="btn btn-ghost">Cancel</a>
+  </form>
+</div>
+
+{% if not editing %}
+<script>
+  let contactRowCount = 1;
+  function addContactRow() {
+    const wrap = document.getElementById('contact-rows');
+    const row = document.createElement('div');
+    row.className = 'repeatable-row';
+    row.innerHTML = `
+      <div class="field"><label>Name</label><input type="text" name="contact_name[]"></div>
+      <div class="field"><label>Phone</label><input type="tel" name="contact_phone[]"></div>
+      <div class="field"><label>Email</label><input type="email" name="contact_email[]"></div>
+      <div class="radio-wrap">
+        <input type="radio" name="primary_contact_index" value="${contactRowCount}" id="primary-${contactRowCount}">
+        <label for="primary-${contactRowCount}">Primary</label>
+      </div>`;
+    wrap.appendChild(row);
+    contactRowCount++;
+  }
+</script>
+{% endif %}
+
+{% endblock %}
