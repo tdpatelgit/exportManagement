@@ -359,23 +359,42 @@ class CompanyService:
         return self.company_repo.get()
 
     def save(self, current_user: User, company_name: str, gstin: str, pan_no: str, iec: str,
-              contact_details: list, contact_persons: list) -> None:
+              contact_details: list, contact_persons: list, bank_details: list) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can edit our company's profile.")
         if not company_name or not company_name.strip():
             raise ValidationError("Company name is compulsory.")
+
         valid_details = [d for d in contact_details if d.get("value", "").strip()]
         if not any(d["type"] == "phone" for d in valid_details):
             raise ValidationError("At least one company phone number is compulsory.")
         if not any(d["type"] == "email" for d in valid_details):
             raise ValidationError("At least one company email is compulsory.")
+        for d in valid_details:
+            if not d.get("type", "").strip():
+                raise ValidationError("Every contact detail row needs a type.")
+
         valid_persons = [p for p in contact_persons if p.get("name", "").strip()]
         if not valid_persons:
             raise ValidationError("At least one company contact person is compulsory.")
 
+        if not bank_details:
+            raise ValidationError("At least one bank detail is compulsory.")
+        bank_fields = ["bank_name", "account_number", "ifsc_code", "swift_code", "branch", "bank_address"]
+        bank_labels = {
+            "bank_name": "bank name", "account_number": "account number", "ifsc_code": "IFSC code",
+            "swift_code": "SWIFT code", "branch": "branch", "bank_address": "bank address",
+        }
+        for b in bank_details:
+            missing = [bank_labels[f] for f in bank_fields if not b.get(f, "").strip()]
+            if missing:
+                raise ValidationError(f"Bank detail '{b.get('bank_name') or '(unnamed)'}' is missing: {', '.join(missing)}.")
+        valid_banks = bank_details
+
         self.company_repo.upsert(company_name.strip(), gstin, pan_no, iec)
         self.company_repo.replace_contact_details(valid_details)
         self.company_repo.replace_contact_persons(valid_persons)
+        self.company_repo.replace_bank_details(valid_banks)
 
 
 # ============================================================

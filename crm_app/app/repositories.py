@@ -423,6 +423,11 @@ class CompanyRepository:
                 "SELECT * FROM our_company_contact_persons ORDER BY is_primary DESC, id"
             )
         ]
+        company.bank_details = [
+            dict(r) for r in self.db.query(
+                "SELECT * FROM our_company_bank_details ORDER BY is_primary DESC, id"
+            )
+        ]
         return company
 
     def upsert(self, company_name: str, gstin: str, pan_no: str, iec: str) -> None:
@@ -457,4 +462,19 @@ class CompanyRepository:
                 conn.execute(
                     "INSERT INTO our_company_contact_persons (name, is_primary) VALUES (?, ?)",
                     (p["name"], int(p["is_primary"])),
+                )
+
+    def replace_bank_details(self, bank_details: list) -> None:
+        """bank_details: [{'bank_name': str, 'account_number': str, 'ifsc_code': str,
+        'swift_code': str, 'branch': str, 'bank_address': str, 'is_primary': bool}]"""
+        with self.db.get_connection() as conn:
+            conn.execute("DELETE FROM our_company_bank_details")
+            for b in bank_details:
+                conn.execute(
+                    """INSERT INTO our_company_bank_details
+                       (bank_name, account_number, ifsc_code, swift_code, branch, bank_address, is_primary)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (b["bank_name"], b["account_number"], b.get("ifsc_code") or None,
+                     b.get("swift_code") or None, b.get("branch") or None,
+                     b.get("bank_address") or None, int(b["is_primary"])),
                 )

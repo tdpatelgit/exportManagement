@@ -34,6 +34,33 @@ def _extract_contact_persons(form) -> list:
     return persons
 
 
+def _extract_bank_details(form) -> list:
+    """Keeps any row that has at least one field filled in (rather than
+    silently dropping incomplete rows), so the service layer can reject
+    rows that are missing a compulsory field instead of ignoring them."""
+    bank_names = form.getlist("bank_name[]")
+    account_numbers = form.getlist("bank_account_number[]")
+    ifsc_codes = form.getlist("bank_ifsc_code[]")
+    swift_codes = form.getlist("bank_swift_code[]")
+    branches = form.getlist("bank_branch[]")
+    addresses = form.getlist("bank_address[]")
+    primaries = set(form.getlist("bank_primary[]"))
+    banks = []
+    for i, name in enumerate(bank_names):
+        row = {
+            "bank_name": name.strip(),
+            "account_number": account_numbers[i].strip() if i < len(account_numbers) else "",
+            "ifsc_code": ifsc_codes[i].strip() if i < len(ifsc_codes) else "",
+            "swift_code": swift_codes[i].strip() if i < len(swift_codes) else "",
+            "branch": branches[i].strip() if i < len(branches) else "",
+            "bank_address": addresses[i].strip() if i < len(addresses) else "",
+            "is_primary": str(i) in primaries,
+        }
+        if any(v for k, v in row.items() if k != "is_primary"):
+            banks.append(row)
+    return banks
+
+
 @company_bp.route("/", methods=["GET", "POST"])
 @admin_required
 def settings():
@@ -49,6 +76,7 @@ def settings():
                 iec=request.form.get("iec", ""),
                 contact_details=_extract_contact_details(request.form),
                 contact_persons=_extract_contact_persons(request.form),
+                bank_details=_extract_bank_details(request.form),
             )
             flash("Our Company profile saved.", "success")
             return redirect(url_for("company.settings"))

@@ -258,6 +258,7 @@ class OurCompany:
     updated_at: Optional[str] = None
     contact_details: List[dict] = field(default_factory=list)  # [{type, value, is_primary}]
     contact_persons: List[dict] = field(default_factory=list)  # [{name, is_primary}]
+    bank_details: List[dict] = field(default_factory=list)  # [{bank_name, account_number, ifsc_code, branch, is_primary}]
 
     @staticmethod
     def from_row(row) -> "OurCompany":

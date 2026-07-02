@@ -165,6 +165,17 @@ CREATE TABLE IF NOT EXISTS our_company_contact_persons (
     is_primary  INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS our_company_bank_details (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    bank_name       TEXT NOT NULL,
+    account_number  TEXT NOT NULL,
+    ifsc_code       TEXT,
+    swift_code      TEXT,
+    branch          TEXT,
+    bank_address    TEXT,
+    is_primary      INTEGER NOT NULL DEFAULT 0
+);
+
 -- Helpful indexes for the dashboards/reports (grouping by employee, date
 -- range filters, and lookups by parent are the hottest queries).
 CREATE INDEX IF NOT EXISTS idx_leads_created_by ON leads(created_by);

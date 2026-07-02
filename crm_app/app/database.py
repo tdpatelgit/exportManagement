@@ -61,6 +61,18 @@ class Database:
             schema_sql = f.read()
         with self.get_connection() as conn:
             conn.executescript(schema_sql)
+        self._migrate(conn=None)
+
+    def _migrate(self, conn=None) -> None:
+        """Add columns to already-created tables that predate a schema change.
+        `CREATE TABLE IF NOT EXISTS` can't retrofit columns onto an existing
+        table, so new nullable columns are added here, guarded by a check
+        against the live column list (ALTER TABLE has no IF NOT EXISTS)."""
+        with self.get_connection() as conn:
+            existing = {r["name"] for r in conn.execute("PRAGMA table_info(our_company_bank_details)")}
+            for column in ("swift_code", "bank_address"):
+                if existing and column not in existing:
+                    conn.execute(f"ALTER TABLE our_company_bank_details ADD COLUMN {column} TEXT")
 
     def query(self, sql: str, params: tuple = ()) -> list:
         """Run a SELECT and return a list of sqlite3.Row objects."""
