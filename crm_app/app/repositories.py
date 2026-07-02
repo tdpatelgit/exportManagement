@@ -18,6 +18,7 @@ from app.database import Database
 from app.models import (
     User, Lead, Client, ContactPerson, Communication,
     PaymentEntry, DocumentEntry, OurCompany, ProductGroup, Product,
+    Quotation, QuotationItem,
 )
 
 
@@ -292,11 +293,11 @@ class SqliteClientRepository(ClientRepositoryBase):
         self.db.execute(
             """UPDATE clients SET company_name = ?, phone = ?, email = ?,
                                    facebook = ?, instagram = ?, other_social = ?,
-                                   client_type = ?, updated_at = datetime('now')
+                                   address = ?, client_type = ?, updated_at = datetime('now')
                WHERE id = ?""",
             (fields["company_name"], fields["phone"], fields["email"],
              fields.get("facebook"), fields.get("instagram"), fields.get("other_social"),
-             fields["client_type"], client_id),
+             fields.get("address"), fields["client_type"], client_id),
         )
 
 
@@ -430,18 +431,18 @@ class CompanyRepository:
         ]
         return company
 
-    def upsert(self, company_name: str, gstin: str, pan_no: str, iec: str, lut: str, bin_no: str) -> None:
+    def upsert(self, company_name: str, address: str, gstin: str, pan_no: str, iec: str, lut: str, bin_no: str) -> None:
         existing = self.db.query_one("SELECT id FROM our_company WHERE id = 1")
         if existing:
             self.db.execute(
-                """UPDATE our_company SET company_name = ?, gstin = ?, pan_no = ?, iec = ?, lut = ?, bin = ?,
+                """UPDATE our_company SET company_name = ?, address = ?, gstin = ?, pan_no = ?, iec = ?, lut = ?, bin = ?,
                                            updated_at = datetime('now') WHERE id = 1""",
-                (company_name, gstin, pan_no, iec, lut, bin_no),
+                (company_name, address, gstin, pan_no, iec, lut, bin_no),
             )
         else:
             self.db.execute(
-                "INSERT INTO our_company (id, company_name, gstin, pan_no, iec, lut, bin) VALUES (1, ?, ?, ?, ?, ?, ?)",
-                (company_name, gstin, pan_no, iec, lut, bin_no),
+                "INSERT INTO our_company (id, company_name, address, gstin, pan_no, iec, lut, bin) VALUES (1, ?, ?, ?, ?, ?, ?, ?)",
+                (company_name, address, gstin, pan_no, iec, lut, bin_no),
             )
 
     def replace_contact_details(self, details: list) -> None:
@@ -546,11 +547,11 @@ class ProductRepository:
         new_id = self.db.execute(
             """INSERT INTO products
                (group_id, product_name, description, hsn_code, packing, quantity,
-                alternate_quantity, photo_path, dimension_photo_path, alt_text)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                alternate_quantity, weight_class, price_usd, photo_path, dimension_photo_path, alt_text)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (product.group_id, product.product_name, product.description, product.hsn_code,
-             product.packing, product.quantity, product.alternate_quantity,
-             product.photo_path, product.dimension_photo_path, product.alt_text),
+             product.packing, product.quantity, product.alternate_quantity, product.weight_class,
+             product.price_usd, product.photo_path, product.dimension_photo_path, product.alt_text),
         )
         return self.get_by_id(new_id)
 
@@ -564,3 +565,106 @@ class ProductRepository:
 
     def delete(self, product_id: int) -> None:
         self.db.execute("DELETE FROM products WHERE id = ?", (product_id,))
+
+
+# ============================================================
+# QUOTATION REPOSITORY (header + line items)
+# ============================================================
+class QuotationRepository:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def count_for_date_prefix(self, number_prefix: str) -> int:
+        """Counts existing quotations whose number starts with QT{YYYYMMDD} -
+        used to compute the next sequence for that day."""
+        row = self.db.query_one(
+            "SELECT COUNT(*) AS cnt FROM quotations WHERE quotation_number LIKE ?",
+            (f"{number_prefix}%",),
+        )
+        return row["cnt"] if row else 0
+
+    def get_by_id(self, quotation_id: int) -> Optional[Quotation]:
+        row = self.db.query_one(
+            """SELECT q.*, u.full_name AS created_by_name FROM quotations q
+               JOIN users u ON u.id = q.created_by WHERE q.id = ?""",
+            (quotation_id,),
+        )
+        if not row:
+            return None
+        quotation = Quotation.from_row(row)
+        item_rows = self.db.query(
+            "SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY sr_no", (quotation_id,)
+        )
+        quotation.items = [QuotationItem.from_row(r) for r in item_rows]
+        return quotation
+
+    def list_all(self) -> List[Quotation]:
+        rows = self.db.query(
+            """SELECT q.*, u.full_name AS created_by_name,
+                      COALESCE((SELECT SUM(total_usd) FROM quotation_items WHERE quotation_id = q.id), 0) AS items_total
+               FROM quotations q
+               JOIN users u ON u.id = q.created_by ORDER BY q.quotation_date DESC, q.id DESC"""
+        )
+        return [Quotation.from_row(r) for r in rows]
+
+    def create(self, quotation: Quotation) -> Quotation:
+        new_id = self.db.execute(
+            """INSERT INTO quotations
+               (quotation_number, quotation_date, client_id, buyer_name, buyer_address,
+                buyer_reference_no, port_of_loading, port_of_discharge, packing_details,
+                container_details, shipping_mode, shipping_terms, payment_terms,
+                advance_percent, against_bl_percent, price_validity_days, remarks,
+                discount_amount, bank_name, bank_account_number, bank_ifsc_code,
+                bank_swift_code, bank_branch, bank_address, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (quotation.quotation_number, quotation.quotation_date, quotation.client_id,
+             quotation.buyer_name, quotation.buyer_address, quotation.buyer_reference_no,
+             quotation.port_of_loading, quotation.port_of_discharge, quotation.packing_details,
+             quotation.container_details, quotation.shipping_mode, quotation.shipping_terms,
+             quotation.payment_terms, quotation.advance_percent, quotation.against_bl_percent,
+             quotation.price_validity_days, quotation.remarks, quotation.discount_amount,
+             quotation.bank_name, quotation.bank_account_number, quotation.bank_ifsc_code,
+             quotation.bank_swift_code, quotation.bank_branch, quotation.bank_address,
+             quotation.created_by),
+        )
+        self._replace_items(new_id, quotation.items)
+        return self.get_by_id(new_id)
+
+    def update(self, quotation_id: int, quotation: Quotation) -> None:
+        self.db.execute(
+            """UPDATE quotations SET quotation_date = ?, client_id = ?, buyer_name = ?,
+                                      buyer_address = ?, buyer_reference_no = ?, port_of_loading = ?,
+                                      port_of_discharge = ?, packing_details = ?, container_details = ?,
+                                      shipping_mode = ?, shipping_terms = ?, payment_terms = ?,
+                                      advance_percent = ?, against_bl_percent = ?, price_validity_days = ?,
+                                      remarks = ?, discount_amount = ?, bank_name = ?, bank_account_number = ?,
+                                      bank_ifsc_code = ?, bank_swift_code = ?, bank_branch = ?, bank_address = ?,
+                                      updated_at = datetime('now')
+               WHERE id = ?""",
+            (quotation.quotation_date, quotation.client_id, quotation.buyer_name,
+             quotation.buyer_address, quotation.buyer_reference_no, quotation.port_of_loading,
+             quotation.port_of_discharge, quotation.packing_details, quotation.container_details,
+             quotation.shipping_mode, quotation.shipping_terms, quotation.payment_terms,
+             quotation.advance_percent, quotation.against_bl_percent, quotation.price_validity_days,
+             quotation.remarks, quotation.discount_amount, quotation.bank_name,
+             quotation.bank_account_number, quotation.bank_ifsc_code, quotation.bank_swift_code,
+             quotation.bank_branch, quotation.bank_address, quotation_id),
+        )
+        self._replace_items(quotation_id, quotation.items)
+
+    def _replace_items(self, quotation_id: int, items: List[QuotationItem]) -> None:
+        with self.db.get_connection() as conn:
+            conn.execute("DELETE FROM quotation_items WHERE quotation_id = ?", (quotation_id,))
+            for item in items:
+                conn.execute(
+                    """INSERT INTO quotation_items
+                       (quotation_id, sr_no, product_id, product_name, dimension_mm, hsn_code,
+                        quantity_boxes, quantity_value, unit, price_usd, total_usd)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (quotation_id, item.sr_no, item.product_id, item.product_name, item.dimension_mm,
+                     item.hsn_code, item.quantity_boxes, item.quantity_value, item.unit,
+                     item.price_usd, item.total_usd),
+                )
+
+    def delete(self, quotation_id: int) -> None:
+        self.db.execute("DELETE FROM quotations WHERE id = ?", (quotation_id,))

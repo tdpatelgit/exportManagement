@@ -171,6 +171,7 @@ class Client:
     client_type: str
     status: str
     created_by: int
+    address: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     contacts: List[ContactPerson] = field(default_factory=list)
@@ -189,6 +190,7 @@ class Client:
             client_type=row["client_type"],
             status=row["status"],
             created_by=row["created_by"],
+            address=row["address"] if "address" in row.keys() else None,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -257,6 +259,7 @@ class OurCompany:
     iec: Optional[str]
     lut: Optional[str] = None
     bin: Optional[str] = None
+    address: Optional[str] = None
     updated_at: Optional[str] = None
     contact_details: List[dict] = field(default_factory=list)  # [{type, value, is_primary}]
     contact_persons: List[dict] = field(default_factory=list)  # [{name, is_primary}]
@@ -272,6 +275,7 @@ class OurCompany:
             iec=row["iec"],
             lut=row["lut"] if "lut" in row.keys() else None,
             bin=row["bin"] if "bin" in row.keys() else None,
+            address=row["address"] if "address" in row.keys() else None,
             updated_at=row["updated_at"],
         )
 
@@ -307,6 +311,8 @@ class Product:
     packing: Optional[str] = None
     quantity: Optional[str] = None
     alternate_quantity: Optional[str] = None
+    weight_class: Optional[str] = None
+    price_usd: Optional[float] = None
     photo_path: Optional[str] = None
     dimension_photo_path: Optional[str] = None
     alt_text: Optional[str] = None
@@ -324,9 +330,124 @@ class Product:
             packing=row["packing"],
             quantity=row["quantity"],
             alternate_quantity=row["alternate_quantity"],
+            weight_class=row["weight_class"] if "weight_class" in row.keys() else None,
+            price_usd=row["price_usd"] if "price_usd" in row.keys() else None,
             photo_path=row["photo_path"],
             dimension_photo_path=row["dimension_photo_path"],
             alt_text=row["alt_text"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
+
+
+@dataclass
+class QuotationItem:
+    id: Optional[int]
+    quotation_id: Optional[int]
+    sr_no: int
+    product_name: str
+    product_id: Optional[int] = None
+    dimension_mm: Optional[str] = None
+    hsn_code: Optional[str] = None
+    quantity_boxes: Optional[float] = None
+    quantity_value: float = 0
+    unit: str = "SQM"
+    price_usd: float = 0
+    total_usd: float = 0
+
+    @staticmethod
+    def from_row(row) -> "QuotationItem":
+        return QuotationItem(
+            id=row["id"],
+            quotation_id=row["quotation_id"],
+            sr_no=row["sr_no"],
+            product_id=row["product_id"],
+            product_name=row["product_name"],
+            dimension_mm=row["dimension_mm"],
+            hsn_code=row["hsn_code"],
+            quantity_boxes=row["quantity_boxes"],
+            quantity_value=row["quantity_value"],
+            unit=row["unit"],
+            price_usd=row["price_usd"],
+            total_usd=row["total_usd"],
+        )
+
+
+@dataclass
+class Quotation:
+    id: Optional[int]
+    quotation_number: str
+    quotation_date: str
+    buyer_name: str
+    created_by: int
+    client_id: Optional[int] = None
+    buyer_address: Optional[str] = None
+    buyer_reference_no: Optional[str] = None
+    port_of_loading: Optional[str] = None
+    port_of_discharge: Optional[str] = None
+    packing_details: Optional[str] = None
+    container_details: Optional[str] = None
+    shipping_mode: Optional[str] = None
+    shipping_terms: Optional[str] = None
+    payment_terms: Optional[str] = None
+    advance_percent: float = 0
+    against_bl_percent: float = 0
+    price_validity_days: int = 30
+    remarks: Optional[str] = None
+    discount_amount: float = 0
+    bank_name: Optional[str] = None
+    bank_account_number: Optional[str] = None
+    bank_ifsc_code: Optional[str] = None
+    bank_swift_code: Optional[str] = None
+    bank_branch: Optional[str] = None
+    bank_address: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    created_by_name: Optional[str] = None  # populated by joined queries only
+    items: List[QuotationItem] = field(default_factory=list)
+    computed_subtotal_usd: Optional[float] = None  # precomputed by list queries that don't load items
+
+    @staticmethod
+    def from_row(row) -> "Quotation":
+        return Quotation(
+            id=row["id"],
+            quotation_number=row["quotation_number"],
+            quotation_date=row["quotation_date"],
+            client_id=row["client_id"],
+            buyer_name=row["buyer_name"],
+            buyer_address=row["buyer_address"],
+            buyer_reference_no=row["buyer_reference_no"],
+            port_of_loading=row["port_of_loading"],
+            port_of_discharge=row["port_of_discharge"],
+            packing_details=row["packing_details"],
+            container_details=row["container_details"],
+            shipping_mode=row["shipping_mode"],
+            shipping_terms=row["shipping_terms"],
+            payment_terms=row["payment_terms"],
+            advance_percent=row["advance_percent"],
+            against_bl_percent=row["against_bl_percent"],
+            price_validity_days=row["price_validity_days"],
+            remarks=row["remarks"],
+            discount_amount=row["discount_amount"],
+            bank_name=row["bank_name"],
+            bank_account_number=row["bank_account_number"],
+            bank_ifsc_code=row["bank_ifsc_code"],
+            bank_swift_code=row["bank_swift_code"],
+            bank_branch=row["bank_branch"],
+            bank_address=row["bank_address"],
+            created_by=row["created_by"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            created_by_name=row["created_by_name"] if "created_by_name" in row.keys() else None,
+            computed_subtotal_usd=row["items_total"] if "items_total" in row.keys() else None,
+        )
+
+    @property
+    def subtotal_usd(self) -> float:
+        if self.computed_subtotal_usd is not None:
+            return self.computed_subtotal_usd
+        return sum(item.total_usd for item in self.items)
+
+    @property
+    def invoice_value_usd(self) -> float:
+        return self.subtotal_usd - self.discount_amount

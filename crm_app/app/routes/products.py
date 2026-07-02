@@ -6,7 +6,7 @@ products (the "files"). Everyone signed in can browse; only admins can
 create/edit/delete groups and products.
 """
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort
+from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort, jsonify
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
 from app.utils import login_required, admin_required
@@ -33,6 +33,36 @@ def browse(group_id=None):
         "products/browse.html", current_group=current_group, breadcrumb=breadcrumb,
         subgroups=subgroups, products=products,
     )
+
+
+@products_bp.route("/api/browse")
+@login_required
+def api_browse():
+    """JSON version of the folder browser, used by the product-picker modal
+    on the quotation form so it can navigate the same folder tree in place
+    instead of a flat dropdown."""
+    container = current_app.container
+    group_id = _int_or_none(request.args.get("group_id"))
+    try:
+        current_group = container.product_service.get_group(group_id) if group_id else None
+    except NotFoundError:
+        return jsonify({"error": "not found"}), 404
+    breadcrumb = container.product_service.breadcrumb(group_id)
+    subgroups, products = container.product_service.list_contents(group_id)
+    return jsonify({
+        "current_group": {"id": current_group.id, "name": current_group.name} if current_group else None,
+        "breadcrumb": [{"id": g.id, "name": g.name} for g in breadcrumb],
+        "subgroups": [{"id": g.id, "name": g.name} for g in subgroups],
+        "products": [
+            {
+                "id": p.id, "name": p.product_name, "hsn_code": p.hsn_code, "packing": p.packing,
+                "quantity": p.quantity, "alternate_quantity": p.alternate_quantity,
+                "weight_class": p.weight_class, "price_usd": p.price_usd,
+                "photo_url": url_for("static", filename=p.photo_path) if p.photo_path else None,
+            }
+            for p in products
+        ],
+    })
 
 
 @products_bp.route("/group/new", methods=["GET", "POST"])
@@ -112,6 +142,8 @@ def new_product():
                 packing=request.form.get("packing", ""),
                 quantity=request.form.get("quantity", ""),
                 alternate_quantity=request.form.get("alternate_quantity", ""),
+                weight_class=request.form.get("weight_class", ""),
+                price_usd=request.form.get("price_usd", ""),
                 alt_text=request.form.get("alt_text", ""),
                 photo_file=request.files.get("photo"),
                 dimension_photo_file=request.files.get("dimension_photo"),
@@ -159,6 +191,8 @@ def edit_product(product_id):
                 packing=request.form.get("packing", ""),
                 quantity=request.form.get("quantity", ""),
                 alternate_quantity=request.form.get("alternate_quantity", ""),
+                weight_class=request.form.get("weight_class", ""),
+                price_usd=request.form.get("price_usd", ""),
                 alt_text=request.form.get("alt_text", ""),
                 photo_file=request.files.get("photo"),
                 dimension_photo_file=request.files.get("dimension_photo"),

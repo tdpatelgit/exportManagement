@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Quotations{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Sales documents</div>
+    <h1>Quotations</h1>
+  </div>
+  <div class="topbar-actions">
+    <a href="{{ url_for('quotations.new_quotation') }}" class="btn btn-primary">+ New quotation</a>
+  </div>
+</div>
+
+<div class="card">
+  {% if quotations %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th>Quotation no.</th>
+          <th>Date</th>
+          <th>Buyer</th>
+          <th>Created by</th>
+          <th class="num">Invoice value (USD)</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for q in quotations %}
+        <tr>
+          <td class="mono">{{ q.quotation_number }}</td>
+          <td class="text-sm">{{ q.quotation_date }}</td>
+          <td><strong>{{ q.buyer_name }}</strong></td>
+          <td class="text-sm">{{ q.created_by_name }}</td>
+          <td class="num">$ {{ '{:,.2f}'.format(q.invoice_value_usd) }}</td>
+          <td><a href="{{ url_for('quotations.view_quotation', quotation_id=q.id) }}" class="text-sm">Open →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No quotations yet. <a href="{{ url_for('quotations.new_quotation') }}">Create one →</a></div>
+  {% endif %}
+</div>
+
+{% endblock %}

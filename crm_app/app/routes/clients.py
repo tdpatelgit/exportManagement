@@ -60,6 +60,7 @@ def edit_client(client_id):
                 "facebook": request.form.get("facebook", ""),
                 "instagram": request.form.get("instagram", ""),
                 "other_social": request.form.get("other_social", ""),
+                "address": request.form.get("address", ""),
                 "client_type": request.form.get("client_type", "Buyer"),
             })
             flash("Client details updated.", "success")

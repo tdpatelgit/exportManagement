@@ -71,6 +71,7 @@ def settings():
             container.company_service.save(
                 current_user=g.user,
                 company_name=request.form.get("company_name", ""),
+                address=request.form.get("address", ""),
                 gstin=request.form.get("gstin", ""),
                 pan_no=request.form.get("pan_no", ""),
                 iec=request.form.get("iec", ""),

@@ -75,9 +75,19 @@ class Database:
                     conn.execute(f"ALTER TABLE our_company_bank_details ADD COLUMN {column} TEXT")
 
             existing = {r["name"] for r in conn.execute("PRAGMA table_info(our_company)")}
-            for column in ("lut", "bin"):
+            for column in ("lut", "bin", "address"):
                 if existing and column not in existing:
                     conn.execute(f"ALTER TABLE our_company ADD COLUMN {column} TEXT")
+
+            existing = {r["name"] for r in conn.execute("PRAGMA table_info(clients)")}
+            if existing and "address" not in existing:
+                conn.execute("ALTER TABLE clients ADD COLUMN address TEXT")
+
+            existing = {r["name"] for r in conn.execute("PRAGMA table_info(products)")}
+            if existing and "weight_class" not in existing:
+                conn.execute("ALTER TABLE products ADD COLUMN weight_class TEXT")
+            if existing and "price_usd" not in existing:
+                conn.execute("ALTER TABLE products ADD COLUMN price_usd REAL")
 
     def query(self, sql: str, params: tuple = ()) -> list:
         """Run a SELECT and return a list of sqlite3.Row objects."""

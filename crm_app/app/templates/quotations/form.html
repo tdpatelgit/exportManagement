@@ -1,0 +1,362 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit quotation' if quotation else 'New quotation' }}{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Sales documents</div>
+    <h1>{{ 'Edit ' + quotation.quotation_number if quotation else 'New quotation' }}</h1>
+    {% if not quotation %}<div class="text-sm text-soft">Quotation number is generated automatically on save.</div>{% endif %}
+  </div>
+</div>
+
+<form method="POST" id="quotation-form">
+  {% set data = form_data if form_data else quotation %}
+  <div class="card">
+    <div class="card-header"><h3>Buyer / Importer</h3></div>
+    <div class="field">
+      <label for="client_select">Prefill from an existing client <span class="text-soft text-sm">(optional)</span></label>
+      <select id="client_select">
+        <option value="">— Select a client to prefill —</option>
+        {% for c in clients %}
+          <option value="{{ c.id }}" data-name="{{ c.company_name }}" data-address="{{ c.address or '' }}">{{ c.company_name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <input type="hidden" name="client_id" id="client_id" value="{{ data.client_id | default('', true) }}">
+    <div class="form-row">
+      <div class="field"><label for="buyer_name">Buyer name<span class="required-mark">*</span></label><input type="text" id="buyer_name" name="buyer_name" required value="{{ data.buyer_name | default('', true) }}"></div>
+      <div class="field"><label for="buyer_reference_no">Buyer reference no.</label><input type="text" id="buyer_reference_no" name="buyer_reference_no" value="{{ data.buyer_reference_no | default('', true) }}"></div>
+    </div>
+    <div class="field">
+      <label for="buyer_address">Buyer address</label>
+      <textarea id="buyer_address" name="buyer_address" rows="3">{{ data.buyer_address | default('', true) }}</textarea>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Quotation &amp; shipping details</h3></div>
+    <div class="form-row">
+      <div class="field"><label for="quotation_date">Date<span class="required-mark">*</span></label><input type="date" id="quotation_date" name="quotation_date" required value="{{ data.quotation_date | default(today, true) }}"></div>
+      <div class="field"><label for="price_validity_days">Price validity (days)</label><input type="number" id="price_validity_days" name="price_validity_days" value="{{ data.price_validity_days | default(30, true) }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label for="port_of_loading">Port of loading</label><input type="text" id="port_of_loading" name="port_of_loading" value="{{ data.port_of_loading | default('', true) }}"></div>
+      <div class="field"><label for="port_of_discharge">Port of discharge</label><input type="text" id="port_of_discharge" name="port_of_discharge" value="{{ data.port_of_discharge | default('', true) }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label for="packing_details">Packing details</label><input type="text" id="packing_details" name="packing_details" placeholder="e.g. PALLATE" value="{{ data.packing_details | default('', true) }}"></div>
+      <div class="field"><label for="container_details">Container</label><input type="text" id="container_details" name="container_details" placeholder="e.g. 24 X 20 FT STANDARD DRY" value="{{ data.container_details | default('', true) }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label for="shipping_mode">Shipping</label><input type="text" id="shipping_mode" name="shipping_mode" placeholder="e.g. BY SEA" value="{{ data.shipping_mode | default('', true) }}"></div>
+      <div class="field"><label for="shipping_terms">Shipping terms</label><input type="text" id="shipping_terms" name="shipping_terms" placeholder="e.g. FOB" value="{{ data.shipping_terms | default('', true) }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label for="payment_terms">Payment terms</label><input type="text" id="payment_terms" name="payment_terms" placeholder="e.g. LC 90 DAYS FROM BL" value="{{ data.payment_terms | default('', true) }}"></div>
+      <div class="field"><label for="advance_percent">Advance %</label><input type="number" step="0.01" id="advance_percent" name="advance_percent" value="{{ data.advance_percent | default(0, true) }}"></div>
+      <div class="field"><label for="against_bl_percent">Against BL %</label><input type="number" step="0.01" id="against_bl_percent" name="against_bl_percent" value="{{ data.against_bl_percent | default(0, true) }}"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Products</h3></div>
+    <div class="table-wrap">
+      <table class="ledger" id="items-table">
+        <thead>
+          <tr>
+            <th>Sr</th>
+            <th style="min-width:220px;">Product</th>
+            <th>HSN code</th>
+            <th>Boxes</th>
+            <th>Qty (SQM/LM)</th>
+            <th>Unit</th>
+            <th>Price (USD)</th>
+            <th class="num">Total (USD)</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="items-body">
+          {% set rows = form_items if form_items is not none else (quotation.items if quotation else []) %}
+          {% for row in rows %}
+          <tr class="item-row" data-alt-qty="{{ alt_qty_map.get(row.product_id | int, '') if row.product_id else '' }}">
+            <td class="js-sr">{{ loop.index }}</td>
+            <td>
+              <input type="hidden" name="item_product_id[]" class="js-product-id" value="{{ row.product_id or '' }}">
+              <input type="text" name="item_product_name[]" class="js-product-name" required value="{{ row.product_name }}">
+              <button type="button" class="btn btn-ghost btn-sm js-choose-product">📁 Choose</button>
+            </td>
+            <td><input type="text" name="item_hsn_code[]" class="js-hsn" value="{{ row.hsn_code or '' }}"></td>
+            <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" value="{{ row.quantity_boxes or '' }}"></td>
+            <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" readonly tabindex="-1" value="{{ row.quantity_value or '' }}"></td>
+            <td>
+              <select name="item_unit[]" class="js-unit">
+                {% for u in ['SQM', 'LM', 'PCS', 'KG', 'SET'] %}
+                  <option value="{{ u }}" {{ 'selected' if row.unit == u }}>{{ u }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td><input type="number" step="0.01" name="item_price_usd[]" class="js-price" required value="{{ row.price_usd or '' }}"></td>
+            <td class="num js-total">0.00</td>
+            <td><button type="button" class="btn-link-danger js-remove-row">Remove</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <button type="button" class="btn btn-ghost btn-sm" id="add-row-btn">+ Add product line</button>
+    <p class="hint">Qty is calculated automatically from Boxes (× the product's Alternate Quantity, when a product is chosen from the catalog) — it isn't typed in directly. Price prefills from the product's catalog price and stays editable per quotation.</p>
+    <div class="flex-between" style="margin-top:14px;">
+      <div class="field" style="max-width:200px;"><label for="discount_amount">Discount (USD)</label><input type="number" step="0.01" id="discount_amount" name="discount_amount" value="{{ data.discount_amount | default(0, true) }}"></div>
+      <div class="text-sm"><strong>Subtotal:</strong> $ <span id="subtotal-display">0.00</span> &nbsp;·&nbsp; <strong>Invoice value:</strong> $ <span id="invoice-value-display">0.00</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Bank information</h3></div>
+    <div class="field">
+      <label for="bank_select">Prefill from Our Company bank details <span class="text-soft text-sm">(optional)</span></label>
+      <select id="bank_select">
+        <option value="">— Select a bank account —</option>
+        {% for b in bank_options %}
+          <option value="{{ loop.index0 }}"
+                  data-name="{{ b.bank_name }}" data-account="{{ b.account_number }}"
+                  data-ifsc="{{ b.ifsc_code or '' }}" data-swift="{{ b.swift_code or '' }}"
+                  data-branch="{{ b.branch or '' }}" data-address="{{ b.bank_address or '' }}">
+            {{ b.bank_name }} — {{ b.account_number }}{% if b.is_primary %} (Primary){% endif %}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="field"><label for="bank_name">Bank name</label><input type="text" id="bank_name" name="bank_name" value="{{ data.bank_name | default('', true) }}"></div>
+      <div class="field"><label for="bank_account_number">Account number</label><input type="text" id="bank_account_number" name="bank_account_number" value="{{ data.bank_account_number | default('', true) }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label for="bank_ifsc_code">IFSC code</label><input type="text" id="bank_ifsc_code" name="bank_ifsc_code" value="{{ data.bank_ifsc_code | default('', true) }}"></div>
+      <div class="field"><label for="bank_swift_code">SWIFT code</label><input type="text" id="bank_swift_code" name="bank_swift_code" value="{{ data.bank_swift_code | default('', true) }}"></div>
+      <div class="field"><label for="bank_branch">Branch</label><input type="text" id="bank_branch" name="bank_branch" value="{{ data.bank_branch | default('', true) }}"></div>
+    </div>
+    <div class="field"><label for="bank_address">Bank address</label><textarea id="bank_address" name="bank_address" rows="2">{{ data.bank_address | default('', true) }}</textarea></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Remarks</h3></div>
+    <div class="field">
+      <textarea name="remarks" rows="4" placeholder="One remark per line">{{ data.remarks | default('', true) }}</textarea>
+    </div>
+  </div>
+
+  <button type="submit" class="btn btn-primary">{{ 'Save changes' if quotation else 'Create quotation' }}</button>
+  <a href="{{ url_for('quotations.view_quotation', quotation_id=quotation.id) if quotation else url_for('quotations.list_quotations') }}" class="btn btn-ghost">Cancel</a>
+</form>
+
+<!-- Product picker modal: browses the catalog folder tree exactly as it was saved -->
+<div id="product-picker-overlay" class="modal-overlay" hidden>
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Choose a product</h3>
+      <button type="button" class="btn-link-danger" id="picker-close">✕ Close</button>
+    </div>
+    <div class="breadcrumb-trail" id="picker-breadcrumb"></div>
+    <div id="picker-subgroups" class="folder-grid"></div>
+    <div id="picker-products" class="table-wrap"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const itemsBody = document.getElementById('items-body');
+  const addRowBtn = document.getElementById('add-row-btn');
+
+  const rowTemplate = () => {
+    const tr = document.createElement('tr');
+    tr.className = 'item-row';
+    tr.innerHTML = `
+      <td class="js-sr"></td>
+      <td>
+        <input type="hidden" name="item_product_id[]" class="js-product-id">
+        <input type="text" name="item_product_name[]" class="js-product-name" required>
+        <button type="button" class="btn btn-ghost btn-sm js-choose-product">📁 Choose</button>
+      </td>
+      <td><input type="text" name="item_hsn_code[]" class="js-hsn"></td>
+      <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes"></td>
+      <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" readonly tabindex="-1"></td>
+      <td>
+        <select name="item_unit[]" class="js-unit">
+          <option value="SQM">SQM</option><option value="LM">LM</option><option value="PCS">PCS</option><option value="KG">KG</option><option value="SET">SET</option>
+        </select>
+      </td>
+      <td><input type="number" step="0.01" name="item_price_usd[]" class="js-price" required></td>
+      <td class="num js-total">0.00</td>
+      <td><button type="button" class="btn-link-danger js-remove-row">Remove</button></td>`;
+    return tr;
+  };
+
+  function renumber() {
+    itemsBody.querySelectorAll('.item-row').forEach((tr, i) => {
+      tr.querySelector('.js-sr').textContent = i + 1;
+    });
+  }
+
+  function recalcTotals() {
+    let subtotal = 0;
+    itemsBody.querySelectorAll('.item-row').forEach((tr) => {
+      const qty = parseFloat(tr.querySelector('.js-qty').value) || 0;
+      const price = parseFloat(tr.querySelector('.js-price').value) || 0;
+      const total = qty * price;
+      tr.querySelector('.js-total').textContent = total.toFixed(2);
+      subtotal += total;
+    });
+    const discount = parseFloat(document.getElementById('discount_amount').value) || 0;
+    document.getElementById('subtotal-display').textContent = subtotal.toFixed(2);
+    document.getElementById('invoice-value-display').textContent = (subtotal - discount).toFixed(2);
+  }
+
+  // Qty is never typed in directly - it's always derived from Boxes.
+  // When the row is tied to a catalog product with a known Alternate Quantity
+  // (per-box SQM/LM), Qty = Boxes x that Alternate Quantity. Otherwise Boxes
+  // itself is used as Qty, since there's no other data to derive it from.
+  function recalcRowQty(tr) {
+    const boxes = parseFloat(tr.querySelector('.js-boxes').value) || 0;
+    const altQty = parseFloat(tr.dataset.altQty);
+    const qty = altQty ? boxes * altQty : boxes;
+    tr.querySelector('.js-qty').value = qty.toFixed(2);
+  }
+
+  addRowBtn.addEventListener('click', () => {
+    itemsBody.appendChild(rowTemplate());
+    renumber();
+  });
+
+  itemsBody.addEventListener('click', (e) => {
+    if (e.target.classList.contains('js-remove-row')) {
+      e.target.closest('tr').remove();
+      renumber();
+      recalcTotals();
+    } else if (e.target.classList.contains('js-choose-product')) {
+      openPicker(e.target.closest('tr'));
+    }
+  });
+
+  itemsBody.addEventListener('input', (e) => {
+    if (e.target.classList.contains('js-boxes')) {
+      recalcRowQty(e.target.closest('tr'));
+      recalcTotals();
+    } else if (e.target.classList.contains('js-price')) {
+      recalcTotals();
+    }
+  });
+  document.getElementById('discount_amount').addEventListener('input', recalcTotals);
+
+  // ---- client dropdown prefill --------------------------------------------------
+  document.getElementById('client_select').addEventListener('change', (e) => {
+    const opt = e.target.selectedOptions[0];
+    if (!opt.value) { document.getElementById('client_id').value = ''; return; }
+    document.getElementById('client_id').value = opt.value;
+    document.getElementById('buyer_name').value = opt.dataset.name || '';
+    document.getElementById('buyer_address').value = opt.dataset.address || '';
+  });
+
+  // ---- bank dropdown prefill --------------------------------------------------
+  document.getElementById('bank_select').addEventListener('change', (e) => {
+    const opt = e.target.selectedOptions[0];
+    if (!opt.value && opt.value !== '0') return;
+    document.getElementById('bank_name').value = opt.dataset.name || '';
+    document.getElementById('bank_account_number').value = opt.dataset.account || '';
+    document.getElementById('bank_ifsc_code').value = opt.dataset.ifsc || '';
+    document.getElementById('bank_swift_code').value = opt.dataset.swift || '';
+    document.getElementById('bank_branch').value = opt.dataset.branch || '';
+    document.getElementById('bank_address').value = opt.dataset.address || '';
+  });
+
+  // ---- product picker modal (browses the same folder tree it was saved in) --------------------------------------------------
+  const overlay = document.getElementById('product-picker-overlay');
+  const breadcrumbEl = document.getElementById('picker-breadcrumb');
+  const subgroupsEl = document.getElementById('picker-subgroups');
+  const productsEl = document.getElementById('picker-products');
+  let activeRow = null;
+  let currentBreadcrumb = [];
+
+  function openPicker(row) {
+    activeRow = row;
+    overlay.hidden = false;
+    loadFolder(null);
+  }
+
+  document.getElementById('picker-close').addEventListener('click', () => { overlay.hidden = true; });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.hidden = true; });
+
+  function loadFolder(groupId) {
+    const url = groupId ? `/products/api/browse?group_id=${groupId}` : '/products/api/browse';
+    fetch(url).then(r => r.json()).then(data => {
+      currentBreadcrumb = data.breadcrumb;
+      breadcrumbEl.innerHTML = '';
+      const rootLink = document.createElement('a');
+      rootLink.href = '#'; rootLink.textContent = 'Products';
+      rootLink.addEventListener('click', (e) => { e.preventDefault(); loadFolder(null); });
+      breadcrumbEl.appendChild(rootLink);
+      data.breadcrumb.forEach(g => {
+        const sep = document.createElement('span'); sep.className = 'crumb-sep'; sep.textContent = '/';
+        breadcrumbEl.appendChild(sep);
+        const link = document.createElement('a');
+        link.href = '#'; link.textContent = g.name;
+        link.addEventListener('click', (e) => { e.preventDefault(); loadFolder(g.id); });
+        breadcrumbEl.appendChild(link);
+      });
+
+      subgroupsEl.innerHTML = '';
+      data.subgroups.forEach(g => {
+        const tile = document.createElement('div');
+        tile.className = 'folder-tile';
+        tile.innerHTML = `<a class="folder-tile-link" href="#"><span class="folder-icon">📁</span><span class="folder-name">${g.name}</span></a>`;
+        tile.querySelector('a').addEventListener('click', (e) => { e.preventDefault(); loadFolder(g.id); });
+        subgroupsEl.appendChild(tile);
+      });
+
+      if (data.products.length === 0) {
+        productsEl.innerHTML = '<div class="empty-state">No products in this folder.</div>';
+      } else {
+        const table = document.createElement('table');
+        table.className = 'ledger';
+        table.innerHTML = '<thead><tr><th></th><th>Product</th><th>HSN code</th><th>Packing</th><th></th></tr></thead>';
+        const tbody = document.createElement('tbody');
+        data.products.forEach(p => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${p.photo_url ? `<img class="thumb" src="${p.photo_url}">` : ''}</td>
+            <td><strong>${p.name}</strong></td>
+            <td class="text-sm">${p.hsn_code || '—'}</td>
+            <td class="text-sm">${p.packing || '—'}</td>
+            <td><button type="button" class="btn btn-primary btn-sm">Select</button></td>`;
+          tr.querySelector('button').addEventListener('click', () => selectProduct(p));
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        productsEl.innerHTML = '';
+        productsEl.appendChild(table);
+      }
+    });
+  }
+
+  function selectProduct(p) {
+    if (!activeRow) return;
+    const pathName = currentBreadcrumb.map(g => g.name).concat(p.name).join(' ');
+    activeRow.querySelector('.js-product-id').value = p.id;
+    activeRow.querySelector('.js-product-name').value = pathName;
+    activeRow.querySelector('.js-hsn').value = p.hsn_code || '';
+    if (p.price_usd !== null && p.price_usd !== undefined) {
+      activeRow.querySelector('.js-price').value = p.price_usd;
+    }
+    activeRow.dataset.altQty = p.alternate_quantity || '';
+    recalcRowQty(activeRow);
+    recalcTotals();
+    overlay.hidden = true;
+  }
+
+  renumber();
+  recalcTotals();
+})();
+</script>
+
+{% endblock %}

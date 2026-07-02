@@ -26,6 +26,7 @@
       <tr><td class="text-soft">Facebook</td><td>{{ client.facebook or '—' }}</td></tr>
       <tr><td class="text-soft">Instagram</td><td>{{ client.instagram or '—' }}</td></tr>
       <tr><td class="text-soft">Other social</td><td>{{ client.other_social or '—' }}</td></tr>
+      <tr><td class="text-soft">Address</td><td>{{ client.address or '—' }}</td></tr>
       <tr><td class="text-soft">Client since</td><td>{{ client.created_at|friendly_date }}</td></tr>
       <tr><td class="text-soft">Total received</td><td class="num">₹{{ '{:,.2f}'.format(total_received_inr) }}</td></tr>
     </table>

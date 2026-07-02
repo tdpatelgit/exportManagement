@@ -38,7 +38,13 @@
         <tr>
           <td><strong>{{ lead.company_name }}</strong>{% if lead.is_converted %} <span class="pill">Converted</span>{% endif %}</td>
           <td class="text-sm">{{ lead.phone }}<br><span class="text-soft">{{ lead.email }}</span></td>
-          <td><span class="stamp stamp-{{ lead.status|status_css }}">{{ lead.status_label }}</span></td>
+          <td>
+            {% if lead.status == 'quotation_submission_pending' %}
+              <a href="{{ url_for('quotations.new_quotation', lead_id=lead.id) }}" class="stamp stamp-{{ lead.status|status_css }}" title="Generate a quotation for this lead">{{ lead.status_label }} →</a>
+            {% else %}
+              <span class="stamp stamp-{{ lead.status|status_css }}">{{ lead.status_label }}</span>
+            {% endif %}
+          </td>
           {% if current_user.is_admin %}<td class="text-sm">{{ lead.created_by_name }}</td>{% endif %}
           <td class="text-sm text-soft">{{ lead.created_at|friendly_date }}</td>
           <td><a href="{{ url_for('leads.view_lead', lead_id=lead.id) }}" class="text-sm">Open →</a></td>

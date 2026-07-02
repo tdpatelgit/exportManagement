@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS clients (
     facebook            TEXT,
     instagram           TEXT,
     other_social        TEXT,
+    address             TEXT,
     client_type         TEXT NOT NULL DEFAULT 'Buyer'
                         CHECK (client_type IN ('Supplier', 'Exporter', 'Buyer')),
     status              TEXT NOT NULL DEFAULT 'proforma_invoice_submission_pending'
@@ -146,6 +147,7 @@ CREATE TABLE IF NOT EXISTS documents (
 CREATE TABLE IF NOT EXISTS our_company (
     id              INTEGER PRIMARY KEY CHECK (id = 1),
     company_name    TEXT NOT NULL,
+    address         TEXT,
     gstin           TEXT,
     pan_no          TEXT,
     iec             TEXT,
@@ -198,11 +200,63 @@ CREATE TABLE IF NOT EXISTS products (
     packing                 TEXT,
     quantity                TEXT,
     alternate_quantity      TEXT,
+    weight_class            TEXT,
+    price_usd               REAL,
     photo_path              TEXT,
     dimension_photo_path    TEXT,
     alt_text                TEXT,
     created_at              TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ============================================================
+-- QUOTATIONS  (header + line items; the number is generated as
+-- QT{YYYYMMDD}{seq-of-that-day}, e.g. QT20260702001)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS quotations (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    quotation_number        TEXT NOT NULL UNIQUE,
+    quotation_date          TEXT NOT NULL,
+    client_id                INTEGER REFERENCES clients(id),   -- optional, just for prefill/reference
+    buyer_name              TEXT NOT NULL,
+    buyer_address           TEXT,
+    buyer_reference_no      TEXT,
+    port_of_loading         TEXT,
+    port_of_discharge       TEXT,
+    packing_details         TEXT,
+    container_details       TEXT,
+    shipping_mode           TEXT,
+    shipping_terms          TEXT,
+    payment_terms           TEXT,
+    advance_percent         REAL NOT NULL DEFAULT 0,
+    against_bl_percent      REAL NOT NULL DEFAULT 0,
+    price_validity_days     INTEGER NOT NULL DEFAULT 30,
+    remarks                 TEXT,
+    discount_amount         REAL NOT NULL DEFAULT 0,
+    bank_name               TEXT,
+    bank_account_number     TEXT,
+    bank_ifsc_code          TEXT,
+    bank_swift_code         TEXT,
+    bank_branch             TEXT,
+    bank_address            TEXT,
+    created_by              INTEGER NOT NULL REFERENCES users(id),
+    created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS quotation_items (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    quotation_id        INTEGER NOT NULL REFERENCES quotations(id) ON DELETE CASCADE,
+    sr_no               INTEGER NOT NULL,
+    product_id          INTEGER REFERENCES products(id),   -- optional, just for prefill/reference
+    product_name        TEXT NOT NULL,
+    dimension_mm        TEXT,
+    hsn_code            TEXT,
+    quantity_boxes      REAL,
+    quantity_value       REAL NOT NULL DEFAULT 0,
+    unit                TEXT NOT NULL DEFAULT 'SQM',
+    price_usd           REAL NOT NULL DEFAULT 0,
+    total_usd           REAL NOT NULL DEFAULT 0
 );
 
 -- Helpful indexes for the dashboards/reports (grouping by employee, date
@@ -215,3 +269,6 @@ CREATE INDEX IF NOT EXISTS idx_payments_client ON payment_history(client_id);
 CREATE INDEX IF NOT EXISTS idx_documents_client ON documents(client_id);
 CREATE INDEX IF NOT EXISTS idx_product_groups_parent ON product_groups(parent_id);
 CREATE INDEX IF NOT EXISTS idx_products_group ON products(group_id);
+CREATE INDEX IF NOT EXISTS idx_quotations_created_by ON quotations(created_by);
+CREATE INDEX IF NOT EXISTS idx_quotations_date ON quotations(quotation_date);
+CREATE INDEX IF NOT EXISTS idx_quotation_items_quotation ON quotation_items(quotation_id);

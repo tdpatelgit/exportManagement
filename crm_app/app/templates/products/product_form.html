@@ -14,19 +14,30 @@
     {% set data = form_data if form_data else product %}
     <div class="field">
       <label for="product_name">Product name<span class="required-mark">*</span></label>
-      <input type="text" id="product_name" name="product_name" required value="{{ data.product_name if data else '' }}">
+      <input type="text" id="product_name" name="product_name" required value="{{ data.product_name | default('', true) }}">
     </div>
     <div class="field">
       <label for="description">Description</label>
-      <textarea id="description" name="description" rows="3">{{ data.description if data else '' }}</textarea>
+      <textarea id="description" name="description" rows="3">{{ data.description | default('', true) }}</textarea>
     </div>
     <div class="form-row">
-      <div class="field"><label for="hsn_code">HSN code</label><input type="text" id="hsn_code" name="hsn_code" value="{{ data.hsn_code if data else '' }}"></div>
-      <div class="field"><label for="packing">Packing</label><input type="text" id="packing" name="packing" value="{{ data.packing if data else '' }}"></div>
+      <div class="field"><label for="hsn_code">HSN code</label><input type="text" id="hsn_code" name="hsn_code" value="{{ data.hsn_code | default('', true) }}"></div>
+      <div class="field"><label for="packing">Packing</label><input type="text" id="packing" name="packing" value="{{ data.packing | default('', true) }}"></div>
     </div>
     <div class="form-row">
-      <div class="field"><label for="quantity">Quantity</label><input type="text" id="quantity" name="quantity" value="{{ data.quantity if data else '' }}"></div>
-      <div class="field"><label for="alternate_quantity">Alternate quantity</label><input type="text" id="alternate_quantity" name="alternate_quantity" value="{{ data.alternate_quantity if data else '' }}"></div>
+      <div class="field"><label for="quantity">Quantity</label><input type="text" id="quantity" name="quantity" value="{{ data.quantity | default('', true) }}"></div>
+      <div class="field"><label for="alternate_quantity">Alternate quantity</label><input type="text" id="alternate_quantity" name="alternate_quantity" value="{{ data.alternate_quantity | default('', true) }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="field">
+        <label for="weight_class">Weight class</label>
+        <input type="text" id="weight_class" name="weight_class" value="{{ data.weight_class | default('', true) }}" placeholder="e.g. 18.5 KG / box">
+      </div>
+      <div class="field">
+        <label for="price_usd">Price (USD)</label>
+        <input type="number" step="0.01" id="price_usd" name="price_usd" value="{{ data.price_usd | default('', true) }}">
+        <div class="hint">Used to prefill the price when this product is added to a quotation.</div>
+      </div>
     </div>
 
     <div class="form-row">
@@ -50,7 +61,7 @@
 
     <div class="field">
       <label for="alt_text">Alt text</label>
-      <input type="text" id="alt_text" name="alt_text" value="{{ data.alt_text if data else '' }}">
+      <input type="text" id="alt_text" name="alt_text" value="{{ data.alt_text | default('', true) }}">
       <div class="hint">Describes the photo for accessibility / when it fails to load.</div>
     </div>
 

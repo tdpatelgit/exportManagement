@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ quotation.quotation_number }} · Quotation</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="quote-print-body">
+
+  <div class="quote-toolbar no-print">
+    <a href="{{ url_for('quotations.list_quotations') }}" class="btn btn-ghost btn-sm">← All quotations</a>
+    <div class="flex gap-8">
+      <a href="{{ url_for('quotations.edit_quotation', quotation_id=quotation.id) }}" class="btn btn-ghost btn-sm">Edit</a>
+      <form method="POST" action="{{ url_for('quotations.delete_quotation', quotation_id=quotation.id) }}" onsubmit="return confirm('Delete this quotation?');">
+        <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+      </form>
+      <button type="button" class="btn btn-primary btn-sm" onclick="window.print()">🖨 Print / Save as PDF</button>
+    </div>
+  </div>
+
+  {% set phone = (company.contact_details | selectattr('type', 'equalto', 'phone') | list | first) if company else None %}
+  {% set email = (company.contact_details | selectattr('type', 'equalto', 'email') | list | first) if company else None %}
+
+  <div class="quote-sheet">
+    <div class="quote-banner">&lt; &lt; &lt; &lt; &lt; QUOTATION &gt; &gt; &gt; &gt; &gt;</div>
+
+    <table class="quote-meta-table">
+      <tr>
+        <td class="quote-side-label" rowspan="5">EXPORTER</td>
+        <td class="quote-block" rowspan="5">
+          <strong>{{ company.company_name if company else '' }}</strong><br>
+          {{ (company.address or '')|replace('\n', '<br>')|safe if company else '' }}
+          {% if phone %}<br>Tel: {{ phone.value }}{% endif %}
+          {% if email %}<br>Email: {{ email.value }}{% endif %}
+        </td>
+        <td class="quote-field-label">QUOTATION NO</td>
+        <td class="quote-field-value mono">{{ quotation.quotation_number }}</td>
+      </tr>
+      <tr>
+        <td class="quote-field-label">DATE</td>
+        <td class="quote-field-value">{{ quotation.quotation_date }}</td>
+      </tr>
+      <tr>
+        <td class="quote-field-label">PORT OF LOADING</td>
+        <td class="quote-field-value">{{ quotation.port_of_loading or '—' }}</td>
+      </tr>
+      <tr>
+        <td class="quote-field-label">PORT OF DISCHARGE</td>
+        <td class="quote-field-value">{{ quotation.port_of_discharge or '—' }}</td>
+      </tr>
+      <tr>
+        <td class="quote-field-label">PACKING / CONTAINER</td>
+        <td class="quote-field-value">{{ quotation.packing_details or '—' }} · {{ quotation.container_details or '—' }}</td>
+      </tr>
+
+      <tr>
+        <td class="quote-side-label" rowspan="5">IMPORTER</td>
+        <td class="quote-block" rowspan="5">
+          <strong>{{ quotation.buyer_name }}</strong><br>
+          {{ (quotation.buyer_address or '')|replace('\n', '<br>')|safe }}
+        </td>
+        <td class="quote-field-label">SHIPPING</td>
+        <td class="quote-field-value">{{ quotation.shipping_mode or '—' }}</td>
+      </tr>
+      <tr>
+        <td class="quote-field-label">SHIPPING TERMS</td>
+        <td class="quote-field-value">{{ quotation.shipping_terms or '—' }}</td>
+      </tr>
+      <tr>
+        <td class="quote-field-label">BUYER REFERENCE NO</td>
+        <td class="quote-field-value">{{ quotation.buyer_reference_no or '—' }}</td>
+      </tr>
+      <tr>
+        <td class="quote-field-label">PAYMENT TERMS</td>
+        <td class="quote-field-value">{{ quotation.payment_terms or '—' }}</td>
+      </tr>
+      <tr>
+        <td class="quote-field-label">ADVANCE / AGAINST BL</td>
+        <td class="quote-field-value">{{ quotation.advance_percent }}% / {{ quotation.against_bl_percent }}%</td>
+      </tr>
+    </table>
+
+    {% if quotation.remarks %}
+    <div class="quote-remarks">
+      <strong>REMARKS:</strong>
+      <div>{{ quotation.remarks|replace('\n', '<br>')|safe }}</div>
+    </div>
+    {% endif %}
+
+    <table class="quote-items-table">
+      <thead>
+        <tr>
+          <th>SR</th>
+          <th>PRODUCT</th>
+          <th>HSN CODE</th>
+          <th>BOXES</th>
+          <th>QTY</th>
+          <th>UNIT</th>
+          <th>PRICE (USD)</th>
+          <th>TOTAL (USD)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in quotation.items %}
+        <tr>
+          <td class="num">{{ item.sr_no }}</td>
+          <td>{{ item.product_name }}</td>
+          <td>{{ item.hsn_code or '—' }}</td>
+          <td class="num">{{ '{:,.0f}'.format(item.quantity_boxes) if item.quantity_boxes else '—' }}</td>
+          <td class="num">{{ '{:,.2f}'.format(item.quantity_value) }}</td>
+          <td>{{ item.unit }}</td>
+          <td class="num">$ {{ '{:,.2f}'.format(item.price_usd) }}</td>
+          <td class="num">$ {{ '{:,.2f}'.format(item.total_usd) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="7" class="num"><strong>SUBTOTAL</strong></td>
+          <td class="num">$ {{ '{:,.2f}'.format(quotation.subtotal_usd) }}</td>
+        </tr>
+        <tr>
+          <td colspan="7" class="num">DISCOUNT</td>
+          <td class="num">$ {{ '{:,.2f}'.format(quotation.discount_amount) }}</td>
+        </tr>
+        <tr>
+          <td colspan="7" class="num"><strong>INVOICE VALUE (USD)</strong></td>
+          <td class="num"><strong>$ {{ '{:,.2f}'.format(quotation.invoice_value_usd) }}</strong></td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <div class="quote-footnote">Price validity: {{ quotation.price_validity_days }} days from date of quotation.</div>
+
+    <table class="quote-bank-table">
+      <tr>
+        <th>BENEFICIARY</th>
+        <th>BANK NAME &amp; ADDRESS</th>
+      </tr>
+      <tr>
+        <td>
+          <strong>{{ company.company_name if company else '' }}</strong><br>
+          {{ (company.address or '')|replace('\n', '<br>')|safe if company else '' }}
+        </td>
+        <td>
+          <strong>{{ quotation.bank_name or '—' }}</strong><br>
+          {{ (quotation.bank_address or '')|replace('\n', '<br>')|safe }}<br>
+          {% if quotation.bank_account_number %}ACCOUNT NO: {{ quotation.bank_account_number }}<br>{% endif %}
+          {% if quotation.bank_ifsc_code %}IFSC CODE: {{ quotation.bank_ifsc_code }}<br>{% endif %}
+          {% if quotation.bank_swift_code %}SWIFT CODE: {{ quotation.bank_swift_code }}{% endif %}
+        </td>
+      </tr>
+    </table>
+
+    <div class="quote-signature">
+      <div></div>
+      <div class="quote-signature-box">
+        <div>{{ company.company_name if company else '' }}</div>
+        <div class="text-sm text-soft">Authorised Signatory</div>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

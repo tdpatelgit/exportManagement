@@ -54,6 +54,8 @@
     <div><div class="text-sm text-soft">Packing</div><div>{{ product.packing or '—' }}</div></div>
     <div><div class="text-sm text-soft">Quantity</div><div>{{ product.quantity or '—' }}</div></div>
     <div><div class="text-sm text-soft">Alternate quantity</div><div>{{ product.alternate_quantity or '—' }}</div></div>
+    <div><div class="text-sm text-soft">Weight class</div><div>{{ product.weight_class or '—' }}</div></div>
+    <div><div class="text-sm text-soft">Price (USD)</div><div>{{ '$ {:,.2f}'.format(product.price_usd) if product.price_usd is not none else '—' }}</div></div>
     <div><div class="text-sm text-soft">Alt text</div><div>{{ product.alt_text or '—' }}</div></div>
   </div>
 </div>

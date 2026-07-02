@@ -18,11 +18,12 @@ from app.database import Database
 from app.repositories import (
     SqliteUserRepository, SqliteLeadRepository, SqliteClientRepository,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
-    ProductGroupRepository, ProductRepository,
+    ProductGroupRepository, ProductRepository, QuotationRepository,
 )
 from app.services import (
     AuthService, LeadService, ClientService, CurrencyService,
     CommunicationService, StatsService, CompanyService, ReportService, ProductService,
+    QuotationService,
 )
 from app.utils import register_template_helpers
 
@@ -46,6 +47,7 @@ class ServiceContainer:
         self.company_repo = CompanyRepository(db)
         self.product_group_repo = ProductGroupRepository(db)
         self.product_repo = ProductRepository(db)
+        self.quotation_repo = QuotationRepository(db)
 
         # Services (business logic layer)
         self.auth_service = AuthService(self.user_repo)
@@ -63,6 +65,7 @@ class ServiceContainer:
             self.product_group_repo, self.product_repo,
             Config.PRODUCT_UPLOAD_FOLDER, Config.ALLOWED_IMAGE_EXTENSIONS,
         )
+        self.quotation_service = QuotationService(self.quotation_repo, self.product_repo)
 
 
 def create_app(config_class=Config) -> Flask:
@@ -103,6 +106,7 @@ def create_app(config_class=Config) -> Flask:
     from app.routes.company import company_bp
     from app.routes.reports import reports_bp
     from app.routes.products import products_bp
+    from app.routes.quotations import quotations_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -112,6 +116,7 @@ def create_app(config_class=Config) -> Flask:
     app.register_blueprint(company_bp)
     app.register_blueprint(reports_bp)
     app.register_blueprint(products_bp)
+    app.register_blueprint(quotations_bp)
 
     # --- friendly error pages --------------------------------------------------
     @app.errorhandler(403)

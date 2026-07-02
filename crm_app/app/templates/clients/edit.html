@@ -25,6 +25,11 @@
       <div class="field"><label for="other_social">Other social</label><input type="text" id="other_social" name="other_social" value="{{ client.other_social or '' }}"></div>
     </div>
     <div class="field">
+      <label for="address">Address</label>
+      <textarea id="address" name="address" rows="3">{{ client.address or '' }}</textarea>
+      <div class="hint">Used to prefill the buyer address when this client is selected on a quotation.</div>
+    </div>
+    <div class="field">
       <label for="client_type">Client type<span class="required-mark">*</span></label>
       <select id="client_type" name="client_type" required>
         {% for t in CLIENT_TYPES %}<option value="{{ t }}" {{ 'selected' if t == client.client_type }}>{{ t }}</option>{% endfor %}

@@ -23,12 +23,12 @@ from werkzeug.utils import secure_filename
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
 from app.models import (
     User, Lead, Client, ContactPerson, Communication, PaymentEntry, DocumentEntry,
-    LEAD_STATUSES, CLIENT_STATUSES, ProductGroup, Product,
+    LEAD_STATUSES, CLIENT_STATUSES, ProductGroup, Product, Quotation, QuotationItem,
 )
 from app.repositories import (
     UserRepositoryBase, LeadRepositoryBase, ClientRepositoryBase,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
-    ProductGroupRepository, ProductRepository,
+    ProductGroupRepository, ProductRepository, QuotationRepository,
 )
 
 
@@ -362,7 +362,7 @@ class CompanyService:
     def get(self):
         return self.company_repo.get()
 
-    def save(self, current_user: User, company_name: str, gstin: str, pan_no: str, iec: str,
+    def save(self, current_user: User, company_name: str, address: str, gstin: str, pan_no: str, iec: str,
               lut: str, bin_no: str, contact_details: list, contact_persons: list, bank_details: list) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can edit our company's profile.")
@@ -395,7 +395,7 @@ class CompanyService:
                 raise ValidationError(f"Bank detail '{b.get('bank_name') or '(unnamed)'}' is missing: {', '.join(missing)}.")
         valid_banks = bank_details
 
-        self.company_repo.upsert(company_name.strip(), gstin, pan_no, iec, lut, bin_no)
+        self.company_repo.upsert(company_name.strip(), address, gstin, pan_no, iec, lut, bin_no)
         self.company_repo.replace_contact_details(valid_details)
         self.company_repo.replace_contact_persons(valid_persons)
         self.company_repo.replace_bank_details(valid_banks)
@@ -560,7 +560,8 @@ class ProductService:
     # ---- products --------------------------------------------------
     def create_product(self, current_user: User, group_id: Optional[int], product_name: str,
                         description: str, hsn_code: str, packing: str, quantity: str,
-                        alternate_quantity: str, alt_text: str, photo_file, dimension_photo_file) -> Product:
+                        alternate_quantity: str, weight_class: str, price_usd: str, alt_text: str,
+                        photo_file, dimension_photo_file) -> Product:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
         if not product_name or not product_name.strip():
@@ -574,13 +575,15 @@ class ProductService:
             id=None, group_id=group_id, product_name=product_name.strip(),
             description=description or None, hsn_code=hsn_code or None, packing=packing or None,
             quantity=quantity or None, alternate_quantity=alternate_quantity or None,
+            weight_class=weight_class or None, price_usd=self._parse_price(price_usd),
             photo_path=photo_path, dimension_photo_path=dimension_photo_path, alt_text=alt_text or None,
         )
         return self.product_repo.create(product)
 
     def update_product(self, current_user: User, product_id: int, product_name: str,
                         description: str, hsn_code: str, packing: str, quantity: str,
-                        alternate_quantity: str, alt_text: str, photo_file, dimension_photo_file) -> None:
+                        alternate_quantity: str, weight_class: str, price_usd: str, alt_text: str,
+                        photo_file, dimension_photo_file) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
         if not product_name or not product_name.strip():
@@ -590,7 +593,8 @@ class ProductService:
         fields = {
             "product_name": product_name.strip(), "description": description or None,
             "hsn_code": hsn_code or None, "packing": packing or None, "quantity": quantity or None,
-            "alternate_quantity": alternate_quantity or None, "alt_text": alt_text or None,
+            "alternate_quantity": alternate_quantity or None, "weight_class": weight_class or None,
+            "price_usd": self._parse_price(price_usd), "alt_text": alt_text or None,
         }
         if photo_file and photo_file.filename:
             fields["photo_path"] = self._save_image(photo_file)
@@ -608,6 +612,15 @@ class ProductService:
         self._delete_image_file(product.photo_path)
         self._delete_image_file(product.dimension_photo_path)
         self.product_repo.delete(product_id)
+
+    @staticmethod
+    def _parse_price(price_usd: str) -> Optional[float]:
+        if not price_usd or not price_usd.strip():
+            return None
+        try:
+            return round(float(price_usd), 2)
+        except ValueError:
+            raise ValidationError("Price (USD) must be a number.")
 
     # ---- image storage --------------------------------------------------
     def _save_image(self, file_storage) -> Optional[str]:
@@ -631,3 +644,148 @@ class ProductService:
         full_path = os.path.join(self.upload_folder, os.path.basename(relative_path))
         if os.path.exists(full_path):
             os.remove(full_path)
+
+
+# ============================================================
+# QUOTATION SERVICE
+# ============================================================
+class QuotationService:
+    def __init__(self, quotation_repo: QuotationRepository, product_repo: ProductRepository):
+        self.quotation_repo = quotation_repo
+        self.product_repo = product_repo
+
+    # ---- reads --------------------------------------------------
+    def get(self, quotation_id: int) -> Quotation:
+        quotation = self.quotation_repo.get_by_id(quotation_id)
+        if not quotation:
+            raise NotFoundError(f"Quotation #{quotation_id} not found.")
+        return quotation
+
+    def list_all(self) -> List[Quotation]:
+        return self.quotation_repo.list_all()
+
+    # ---- permission --------------------------------------------------
+    def _assert_can_modify(self, quotation: Quotation, current_user: User):
+        if current_user.is_admin:
+            return
+        if quotation.created_by != current_user.id:
+            raise PermissionDeniedError("You can only manage quotations you created yourself.")
+
+    # ---- number generation --------------------------------------------------
+    def _generate_number(self, quotation_date: str) -> str:
+        """QT{YYYYMMDD}{seq} where seq is that day's quotation count + 1,
+        zero-padded to 3 digits (e.g. QT20260702001)."""
+        date_part = quotation_date.replace("-", "")
+        prefix = f"QT{date_part}"
+        seq = self.quotation_repo.count_for_date_prefix(prefix) + 1
+        return f"{prefix}{seq:03d}"
+
+    # ---- validation --------------------------------------------------
+    def _build_items(self, raw_items: list) -> List[QuotationItem]:
+        items = []
+        for i, raw in enumerate(raw_items, start=1):
+            product_name = (raw.get("product_name") or "").strip()
+            if not product_name:
+                continue
+            try:
+                quantity_value = float(raw.get("quantity_value") or 0)
+                price_usd = float(raw.get("price_usd") or 0)
+                quantity_boxes = float(raw["quantity_boxes"]) if raw.get("quantity_boxes") else None
+            except ValueError:
+                raise ValidationError(f"Row {i}: quantity and price must be numbers.")
+            product_id = int(raw["product_id"]) if raw.get("product_id") else None
+
+            # Qty is authoritatively boxes x the catalog product's Alternate
+            # Quantity whenever both are known - the client-side value is only
+            # a convenience preview, not trusted for the stored total.
+            if product_id and quantity_boxes:
+                product = self.product_repo.get_by_id(product_id)
+                if product and product.alternate_quantity:
+                    try:
+                        quantity_value = round(quantity_boxes * float(product.alternate_quantity), 2)
+                    except ValueError:
+                        pass
+
+            if quantity_value <= 0:
+                raise ValidationError(f"Row {i} ('{product_name}'): quantity is compulsory and must be greater than zero.")
+            if price_usd < 0:
+                raise ValidationError(f"Row {i} ('{product_name}'): price can't be negative.")
+            items.append(QuotationItem(
+                id=None, quotation_id=None, sr_no=i, product_id=product_id, product_name=product_name,
+                hsn_code=(raw.get("hsn_code") or "").strip() or None,
+                quantity_boxes=quantity_boxes, quantity_value=quantity_value,
+                unit=(raw.get("unit") or "SQM").strip() or "SQM",
+                price_usd=price_usd, total_usd=round(quantity_value * price_usd, 2),
+            ))
+        if not items:
+            raise ValidationError("At least one product line is compulsory.")
+        return items
+
+    def _build_header(self, current_user: User, fields: dict, items: List[QuotationItem]) -> Quotation:
+        buyer_name = (fields.get("buyer_name") or "").strip()
+        if not buyer_name:
+            raise ValidationError("Buyer name is compulsory.")
+        quotation_date = (fields.get("quotation_date") or "").strip() or date.today().isoformat()
+
+        def _float(key, default=0):
+            raw = fields.get(key)
+            try:
+                return float(raw) if raw not in (None, "") else default
+            except ValueError:
+                raise ValidationError(f"'{key}' must be a number.")
+
+        def _int(key, default):
+            raw = fields.get(key)
+            try:
+                return int(raw) if raw not in (None, "") else default
+            except ValueError:
+                raise ValidationError(f"'{key}' must be a whole number.")
+
+        client_id = int(fields["client_id"]) if fields.get("client_id") else None
+
+        quotation = Quotation(
+            id=None, quotation_number="", quotation_date=quotation_date, buyer_name=buyer_name,
+            created_by=current_user.id, client_id=client_id,
+            buyer_address=(fields.get("buyer_address") or "").strip() or None,
+            buyer_reference_no=(fields.get("buyer_reference_no") or "").strip() or None,
+            port_of_loading=(fields.get("port_of_loading") or "").strip() or None,
+            port_of_discharge=(fields.get("port_of_discharge") or "").strip() or None,
+            packing_details=(fields.get("packing_details") or "").strip() or None,
+            container_details=(fields.get("container_details") or "").strip() or None,
+            shipping_mode=(fields.get("shipping_mode") or "").strip() or None,
+            shipping_terms=(fields.get("shipping_terms") or "").strip() or None,
+            payment_terms=(fields.get("payment_terms") or "").strip() or None,
+            advance_percent=_float("advance_percent", 0),
+            against_bl_percent=_float("against_bl_percent", 0),
+            price_validity_days=_int("price_validity_days", 30),
+            remarks=(fields.get("remarks") or "").strip() or None,
+            discount_amount=_float("discount_amount", 0),
+            bank_name=(fields.get("bank_name") or "").strip() or None,
+            bank_account_number=(fields.get("bank_account_number") or "").strip() or None,
+            bank_ifsc_code=(fields.get("bank_ifsc_code") or "").strip() or None,
+            bank_swift_code=(fields.get("bank_swift_code") or "").strip() or None,
+            bank_branch=(fields.get("bank_branch") or "").strip() or None,
+            bank_address=(fields.get("bank_address") or "").strip() or None,
+            items=items,
+        )
+        return quotation
+
+    # ---- writes --------------------------------------------------
+    def create(self, current_user: User, fields: dict, raw_items: list) -> Quotation:
+        items = self._build_items(raw_items)
+        quotation = self._build_header(current_user, fields, items)
+        quotation.quotation_number = self._generate_number(quotation.quotation_date)
+        return self.quotation_repo.create(quotation)
+
+    def update(self, current_user: User, quotation_id: int, fields: dict, raw_items: list) -> Quotation:
+        existing = self.get(quotation_id)
+        self._assert_can_modify(existing, current_user)
+        items = self._build_items(raw_items)
+        quotation = self._build_header(current_user, fields, items)
+        self.quotation_repo.update(quotation_id, quotation)
+        return self.get(quotation_id)
+
+    def delete(self, current_user: User, quotation_id: int) -> None:
+        existing = self.get(quotation_id)
+        self._assert_can_modify(existing, current_user)
+        self.quotation_repo.delete(quotation_id)
