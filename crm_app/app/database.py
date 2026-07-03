@@ -89,6 +89,58 @@ class Database:
             if existing and "price_usd" not in existing:
                 conn.execute("ALTER TABLE products ADD COLUMN price_usd REAL")
 
+            # The original `leads.status` CHECK constraint didn't allow
+            # 'in_client', so converting a lead to a client crashed on the
+            # final UPDATE (after the client row was already created) - a
+            # CHECK constraint can't be altered in place, so the table has
+            # to be rebuilt.
+            row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='leads'"
+            ).fetchone()
+            if row and "in_client" not in row["sql"]:
+                conn.execute("PRAGMA foreign_keys = OFF")
+                # Without this, SQLite silently rewrites the REFERENCES
+                # clauses in `clients.lead_id` and `lead_contacts.lead_id`
+                # to point at `leads_old`, which breaks once that table is
+                # dropped below.
+                conn.execute("PRAGMA legacy_alter_table = ON")
+                conn.execute("ALTER TABLE leads RENAME TO leads_old")
+                conn.execute("""
+                    CREATE TABLE leads (
+                        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                        company_name        TEXT NOT NULL,
+                        phone               TEXT NOT NULL,
+                        email               TEXT NOT NULL,
+                        facebook            TEXT,
+                        instagram           TEXT,
+                        other_social        TEXT,
+                        status              TEXT NOT NULL DEFAULT 'new'
+                                            CHECK (status IN (
+                                                'new', 'in_communication', 'in_follow_up',
+                                                'long_follow_up', 'quotation_submission_pending', 'in_client'
+                                            )),
+                        created_by          INTEGER NOT NULL REFERENCES users(id),
+                        created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+                        updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+                        is_converted         INTEGER NOT NULL DEFAULT 0,
+                        converted_client_id  INTEGER REFERENCES clients(id)
+                    )
+                """)
+                conn.execute("""
+                    INSERT INTO leads (id, company_name, phone, email, facebook, instagram,
+                                        other_social, status, created_by, created_at, updated_at,
+                                        is_converted, converted_client_id)
+                    SELECT id, company_name, phone, email, facebook, instagram,
+                           other_social, status, created_by, created_at, updated_at,
+                           is_converted, converted_client_id
+                    FROM leads_old
+                """)
+                conn.execute("DROP TABLE leads_old")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_created_by ON leads(created_by)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status)")
+                conn.execute("PRAGMA legacy_alter_table = OFF")
+                conn.execute("PRAGMA foreign_keys = ON")
+
     def query(self, sql: str, params: tuple = ()) -> list:
         """Run a SELECT and return a list of sqlite3.Row objects."""
         with self.get_connection() as conn:

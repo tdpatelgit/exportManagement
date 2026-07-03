@@ -301,11 +301,7 @@ class ClientService:
             other_social=lead.other_social, client_type=client_type,
             status="proforma_invoice_submission_pending", created_by=admin_user.id,
         )
-        client = self.client_repo.create_from_lead(client, lead.id)
-        # Carry every contact person across from the lead.
-        self.lead_repo.contacts.copy_all(lead.id, client.id, self.client_repo.contacts)
-        self.lead_repo.mark_converted(lead.id, client.id)
-        return client
+        return self.client_repo.convert_from_lead(client, lead.contacts)
 
     # ---- reads --------------------------------------------------
     def get(self, client_id: int) -> Client:

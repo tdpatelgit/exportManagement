@@ -115,13 +115,6 @@ class ContactRepository:
         contact.id = new_id
         return contact
 
-    def copy_all(self, from_parent_id: int, to_parent_id: int, to_repo: "ContactRepository") -> None:
-        """Used when a Lead converts into a Client - carries every contact
-        person across without the caller needing to know the row shape."""
-        for c in self.list_for(from_parent_id):
-            to_repo.add(to_parent_id, ContactPerson(id=None, name=c.name, phone=c.phone,
-                                                      email=c.email, is_primary=c.is_primary))
-
     def set_primary(self, parent_id: int, contact_id: int) -> None:
         """Marks one contact as the primary and un-marks every other contact
         under the same parent, so there's always at most one primary."""
@@ -154,9 +147,6 @@ class LeadRepositoryBase(ABC):
 
     @abstractmethod
     def update_status(self, lead_id: int, status: str) -> None: ...
-
-    @abstractmethod
-    def mark_converted(self, lead_id: int, client_id: int) -> None: ...
 
     @abstractmethod
     def count_by_employee(self) -> dict: ...
@@ -225,13 +215,6 @@ class SqliteLeadRepository(LeadRepositoryBase):
             (status, lead_id),
         )
 
-    def mark_converted(self, lead_id: int, client_id: int) -> None:
-        self.db.execute(
-            "UPDATE leads SET is_converted = 1, converted_client_id = ?, status = 'in_client', "
-            "updated_at = datetime('now') WHERE id = ?",
-            (client_id, lead_id),
-        )
-
     def count_by_employee(self) -> dict:
         """Returns {employee_id: lead_count} - powers the admin dashboard."""
         rows = self.db.query("SELECT created_by, COUNT(*) AS cnt FROM leads GROUP BY created_by")
@@ -249,7 +232,7 @@ class ClientRepositoryBase(ABC):
     def list_all(self, client_type: Optional[str] = None, status: Optional[str] = None) -> List[Client]: ...
 
     @abstractmethod
-    def create_from_lead(self, client: Client, lead_id: int) -> Client: ...
+    def convert_from_lead(self, client: Client, lead_contacts: List[ContactPerson]) -> Client: ...
 
     @abstractmethod
     def update_status(self, client_id: int, status: str) -> None: ...
@@ -283,16 +266,36 @@ class SqliteClientRepository(ClientRepositoryBase):
         sql += " ORDER BY created_at DESC"
         return [Client.from_row(r) for r in self.db.query(sql, tuple(params))]
 
-    def create_from_lead(self, client: Client, lead_id: int) -> Client:
-        new_id = self.db.execute(
-            """INSERT INTO clients (lead_id, company_name, phone, email, facebook,
-                                     instagram, other_social, client_type, status, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (lead_id, client.company_name, client.phone, client.email, client.facebook,
-             client.instagram, client.other_social, client.client_type, client.status,
-             client.created_by),
-        )
-        client.id = new_id
+    def convert_from_lead(self, client: Client, lead_contacts: List[ContactPerson]) -> Client:
+        """Creates the client, copies every lead contact person across, and
+        marks the originating lead as converted - all inside ONE transaction.
+        This has to be atomic: previously the client row, its contacts, and
+        the lead's converted flag were written in three separate
+        transactions, so a failure on the last write (e.g. a status value
+        the DB didn't allow yet) left a client already created but the lead
+        still un-converted - and every retry created another duplicate
+        client."""
+        with self.db.get_connection() as conn:
+            cursor = conn.execute(
+                """INSERT INTO clients (lead_id, company_name, phone, email, facebook,
+                                         instagram, other_social, client_type, status, created_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (client.lead_id, client.company_name, client.phone, client.email, client.facebook,
+                 client.instagram, client.other_social, client.client_type, client.status,
+                 client.created_by),
+            )
+            client.id = cursor.lastrowid
+            for contact in lead_contacts:
+                conn.execute(
+                    """INSERT INTO client_contacts (name, phone, email, is_primary, client_id)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (contact.name, contact.phone, contact.email, int(contact.is_primary), client.id),
+                )
+            conn.execute(
+                "UPDATE leads SET is_converted = 1, converted_client_id = ?, status = 'in_client', "
+                "updated_at = datetime('now') WHERE id = ?",
+                (client.id, client.lead_id),
+            )
         return client
 
     def update_status(self, client_id: int, status: str) -> None:

@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS leads (
     status              TEXT NOT NULL DEFAULT 'new'
                         CHECK (status IN (
                             'new', 'in_communication', 'in_follow_up',
-                            'long_follow_up', 'quotation_submission_pending'
+                            'long_follow_up', 'quotation_submission_pending', 'in_client'
                         )),
     created_by          INTEGER NOT NULL REFERENCES users(id),  -- employee who filled it
     created_at          TEXT NOT NULL DEFAULT (datetime('now')),
