@@ -458,6 +458,13 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
   display: flex; justify-content: space-between; align-items: center;
   background: var(--color-ink); padding: 12px 24px;
 }
+/* .btn-ghost's default text color is a near-match for this dark toolbar
+   background, so it's unreadable until :hover repaints it - give ghost/danger
+   buttons here the same light-on-dark treatment the sidebar nav links use. */
+.quote-toolbar .btn-ghost { color: var(--color-text-inverse); border-color: rgba(238, 242, 245, 0.35); }
+.quote-toolbar .btn-ghost:hover { color: #fff; border-color: var(--color-text-inverse); }
+.quote-toolbar .btn-danger { color: #e79a9a; border-color: #e79a9a; }
+.quote-toolbar .btn-danger:hover { background: rgba(231, 154, 154, 0.15); }
 .quote-sheet {
   max-width: 960px; margin: 24px auto 60px; background: #fff; padding: 30px 34px;
   box-shadow: var(--shadow-card); font-size: .82rem; color: var(--color-text);
@@ -485,6 +492,10 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
 }
 .quote-items-table td { border: 1px solid var(--color-line-dark); padding: 6px 8px; }
 .quote-items-table tfoot td { border: 1px solid var(--color-line-dark); padding: 6px 8px; background: var(--color-paper); }
+.quote-amount-words {
+  vertical-align: top; font-size: .72rem; text-transform: uppercase;
+  letter-spacing: .02em; line-height: 1.4;
+}
 
 .quote-footnote { font-size: .74rem; color: var(--color-text-soft); margin-bottom: 16px; }
 

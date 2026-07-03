@@ -144,6 +144,10 @@ class Database:
             existing = {r["name"] for r in conn.execute("PRAGMA table_info(quotations)")}
             if existing and "lead_id" not in existing:
                 conn.execute("ALTER TABLE quotations ADD COLUMN lead_id INTEGER REFERENCES leads(id)")
+            if existing:
+                for column in ("sea_freight", "insurance", "certification", "other_charges"):
+                    if column not in existing:
+                        conn.execute(f"ALTER TABLE quotations ADD COLUMN {column} REAL NOT NULL DEFAULT 0")
 
             # `our_company.lut` used to hold a single LUT number; it's now a
             # list in `our_company_lut_details` (one row per financial year).

@@ -52,11 +52,7 @@
       <div class="field"><label for="shipping_mode">Shipping</label><input type="text" id="shipping_mode" name="shipping_mode" placeholder="e.g. BY SEA" value="{{ data.shipping_mode | default('', true) }}"></div>
       <div class="field"><label for="shipping_terms">Shipping terms</label><input type="text" id="shipping_terms" name="shipping_terms" placeholder="e.g. FOB" value="{{ data.shipping_terms | default('', true) }}"></div>
     </div>
-    <div class="form-row">
-      <div class="field"><label for="payment_terms">Payment terms</label><input type="text" id="payment_terms" name="payment_terms" placeholder="e.g. LC 90 DAYS FROM BL" value="{{ data.payment_terms | default('', true) }}"></div>
-      <div class="field"><label for="advance_percent">Advance %</label><input type="number" step="0.01" id="advance_percent" name="advance_percent" value="{{ data.advance_percent | default(0, true) }}"></div>
-      <div class="field"><label for="against_bl_percent">Against BL %</label><input type="number" step="0.01" id="against_bl_percent" name="against_bl_percent" value="{{ data.against_bl_percent | default(0, true) }}"></div>
-    </div>
+    <div class="field"><label for="payment_terms">Payment terms</label><input type="text" id="payment_terms" name="payment_terms" placeholder="e.g. LC 90 DAYS FROM BL" value="{{ data.payment_terms | default('', true) }}"></div>
   </div>
 
   <div class="card">
@@ -106,8 +102,15 @@
     </div>
     <button type="button" class="btn btn-ghost btn-sm" id="add-row-btn">+ Add product line</button>
     <p class="hint">Qty is calculated automatically from Boxes (× the product's Alternate Quantity, when a product is chosen from the catalog) — it isn't typed in directly. Price prefills from the product's catalog price and stays editable per quotation.</p>
+    <div class="form-row" style="margin-top:14px;">
+      <div class="field" style="max-width:160px;"><label for="sea_freight">Sea freight (USD)</label><input type="number" step="0.01" id="sea_freight" name="sea_freight" value="{{ data.sea_freight | default(0, true) }}"></div>
+      <div class="field" style="max-width:160px;"><label for="insurance">Insurance (USD)</label><input type="number" step="0.01" id="insurance" name="insurance" value="{{ data.insurance | default(0, true) }}"></div>
+      <div class="field" style="max-width:160px;"><label for="certification">Certification (USD)</label><input type="number" step="0.01" id="certification" name="certification" value="{{ data.certification | default(0, true) }}"></div>
+      <div class="field" style="max-width:160px;"><label for="other_charges">Other (USD)</label><input type="number" step="0.01" id="other_charges" name="other_charges" value="{{ data.other_charges | default(0, true) }}"></div>
+      <div class="field" style="max-width:160px;"><label for="discount_amount">Discount (USD)</label><input type="number" step="0.01" id="discount_amount" name="discount_amount" value="{{ data.discount_amount | default(0, true) }}"></div>
+    </div>
     <div class="flex-between" style="margin-top:14px;">
-      <div class="field" style="max-width:200px;"><label for="discount_amount">Discount (USD)</label><input type="number" step="0.01" id="discount_amount" name="discount_amount" value="{{ data.discount_amount | default(0, true) }}"></div>
+      <div></div>
       <div class="text-sm"><strong>Subtotal:</strong> $ <span id="subtotal-display">0.00</span> &nbsp;·&nbsp; <strong>Invoice value:</strong> $ <span id="invoice-value-display">0.00</span></div>
     </div>
   </div>
@@ -239,8 +242,13 @@
       subtotal += total;
     });
     const discount = parseFloat(document.getElementById('discount_amount').value) || 0;
+    const seaFreight = parseFloat(document.getElementById('sea_freight').value) || 0;
+    const insurance = parseFloat(document.getElementById('insurance').value) || 0;
+    const certification = parseFloat(document.getElementById('certification').value) || 0;
+    const otherCharges = parseFloat(document.getElementById('other_charges').value) || 0;
     document.getElementById('subtotal-display').textContent = subtotal.toFixed(2);
-    document.getElementById('invoice-value-display').textContent = (subtotal - discount).toFixed(2);
+    const invoiceValue = subtotal + seaFreight + insurance + certification + otherCharges - discount;
+    document.getElementById('invoice-value-display').textContent = invoiceValue.toFixed(2);
   }
 
   // Qty is never typed in directly - it's always derived from Boxes.
@@ -277,7 +285,9 @@
       recalcTotals();
     }
   });
-  document.getElementById('discount_amount').addEventListener('input', recalcTotals);
+  ['discount_amount', 'sea_freight', 'insurance', 'certification', 'other_charges'].forEach((id) => {
+    document.getElementById(id).addEventListener('input', recalcTotals);
+  });
 
   // ---- lead dropdown prefill --------------------------------------------------
   document.getElementById('lead_select').addEventListener('change', (e) => {

@@ -18,8 +18,9 @@ quotations_bp = Blueprint("quotations", __name__, url_prefix="/quotations")
 _HEADER_FIELDS = [
     "quotation_date", "lead_id", "buyer_name", "buyer_address", "buyer_reference_no",
     "port_of_loading", "port_of_discharge", "packing_details", "container_details",
-    "shipping_mode", "shipping_terms", "payment_terms", "advance_percent", "against_bl_percent",
-    "price_validity_days", "remarks", "discount_amount",
+    "shipping_mode", "shipping_terms", "payment_terms",
+    "price_validity_days", "remarks",
+    "sea_freight", "insurance", "certification", "other_charges", "discount_amount",
     "bank_name", "bank_account_number", "bank_ifsc_code", "bank_swift_code", "bank_branch", "bank_address",
 ]
 
@@ -119,7 +120,7 @@ def new_quotation():
             lead = container.lead_service.get(int(lead_id))
             prefill = {
                 "lead_id": lead.id, "buyer_name": lead.company_name, "quotation_date": date.today().isoformat(),
-                "price_validity_days": 30, "advance_percent": 0, "against_bl_percent": 0, "discount_amount": 0,
+                "price_validity_days": 30, "discount_amount": 0,
             }
         except (NotFoundError, ValueError):
             pass

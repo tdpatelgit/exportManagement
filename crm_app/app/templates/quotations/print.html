@@ -55,8 +55,8 @@
       </tr>
 
       <tr>
-        <td class="quote-side-label" rowspan="5">IMPORTER</td>
-        <td class="quote-block" rowspan="5">
+        <td class="quote-side-label" rowspan="4">IMPORTER</td>
+        <td class="quote-block" rowspan="4">
           <strong>{{ quotation.buyer_name }}</strong><br>
           {{ (quotation.buyer_address or '')|replace('\n', '<br>')|safe }}
         </td>
@@ -74,10 +74,6 @@
       <tr>
         <td class="quote-field-label">PAYMENT TERMS</td>
         <td class="quote-field-value">{{ quotation.payment_terms or '—' }}</td>
-      </tr>
-      <tr>
-        <td class="quote-field-label">ADVANCE / AGAINST BL</td>
-        <td class="quote-field-value">{{ quotation.advance_percent }}% / {{ quotation.against_bl_percent }}%</td>
       </tr>
     </table>
 
@@ -117,15 +113,35 @@
       </tbody>
       <tfoot>
         <tr>
-          <td colspan="7" class="num"><strong>SUBTOTAL</strong></td>
+          <td rowspan="7" colspan="2" class="quote-amount-words">
+            AMOUNT IN WORDS<br>
+            <strong>{{ quotation.invoice_value_usd | amount_in_words }}</strong>
+          </td>
+          <td colspan="5" class="num"><strong>SUBTOTAL</strong></td>
           <td class="num">$ {{ '{:,.2f}'.format(quotation.subtotal_usd) }}</td>
         </tr>
         <tr>
-          <td colspan="7" class="num">DISCOUNT</td>
+          <td colspan="5" class="num">SEA FREIGHT</td>
+          <td class="num">$ {{ '{:,.2f}'.format(quotation.sea_freight) }}</td>
+        </tr>
+        <tr>
+          <td colspan="5" class="num">INSURANCE</td>
+          <td class="num">$ {{ '{:,.2f}'.format(quotation.insurance) }}</td>
+        </tr>
+        <tr>
+          <td colspan="5" class="num">CERTIFICATION</td>
+          <td class="num">$ {{ '{:,.2f}'.format(quotation.certification) }}</td>
+        </tr>
+        <tr>
+          <td colspan="5" class="num">OTHER</td>
+          <td class="num">$ {{ '{:,.2f}'.format(quotation.other_charges) }}</td>
+        </tr>
+        <tr>
+          <td colspan="5" class="num">DISCOUNT</td>
           <td class="num">$ {{ '{:,.2f}'.format(quotation.discount_amount) }}</td>
         </tr>
         <tr>
-          <td colspan="7" class="num"><strong>INVOICE VALUE (USD)</strong></td>
+          <td colspan="5" class="num"><strong>INVOICE VALUE (USD)</strong></td>
           <td class="num"><strong>$ {{ '{:,.2f}'.format(quotation.invoice_value_usd) }}</strong></td>
         </tr>
       </tfoot>

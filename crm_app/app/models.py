@@ -389,10 +389,12 @@ class Quotation:
     shipping_mode: Optional[str] = None
     shipping_terms: Optional[str] = None
     payment_terms: Optional[str] = None
-    advance_percent: float = 0
-    against_bl_percent: float = 0
     price_validity_days: int = 30
     remarks: Optional[str] = None
+    sea_freight: float = 0
+    insurance: float = 0
+    certification: float = 0
+    other_charges: float = 0
     discount_amount: float = 0
     bank_name: Optional[str] = None
     bank_account_number: Optional[str] = None
@@ -423,10 +425,12 @@ class Quotation:
             shipping_mode=row["shipping_mode"],
             shipping_terms=row["shipping_terms"],
             payment_terms=row["payment_terms"],
-            advance_percent=row["advance_percent"],
-            against_bl_percent=row["against_bl_percent"],
             price_validity_days=row["price_validity_days"],
             remarks=row["remarks"],
+            sea_freight=row["sea_freight"] if "sea_freight" in row.keys() else 0,
+            insurance=row["insurance"] if "insurance" in row.keys() else 0,
+            certification=row["certification"] if "certification" in row.keys() else 0,
+            other_charges=row["other_charges"] if "other_charges" in row.keys() else 0,
             discount_amount=row["discount_amount"],
             bank_name=row["bank_name"],
             bank_account_number=row["bank_account_number"],
@@ -449,4 +453,5 @@ class Quotation:
 
     @property
     def invoice_value_usd(self) -> float:
-        return self.subtotal_usd - self.discount_amount
+        return (self.subtotal_usd + self.sea_freight + self.insurance
+                + self.certification + self.other_charges - self.discount_amount)

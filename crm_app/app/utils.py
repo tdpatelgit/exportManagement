@@ -38,8 +38,64 @@ def admin_required(view_func):
     return wrapped
 
 
+_ONES = [
+    "", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE",
+    "TEN", "ELEVEN", "TWELVE", "THIRTEEN", "FOURTEEN", "FIFTEEN", "SIXTEEN",
+    "SEVENTEEN", "EIGHTEEN", "NINETEEN",
+]
+_TENS = ["", "", "TWENTY", "THIRTY", "FORTY", "FIFTY", "SIXTY", "SEVENTY", "EIGHTY", "NINETY"]
+_SCALES = [(1_000_000_000, "BILLION"), (1_000_000, "MILLION"), (1_000, "THOUSAND")]
+
+
+def _three_digit_words(n: int) -> str:
+    parts = []
+    if n >= 100:
+        parts.append(_ONES[n // 100])
+        parts.append("HUNDRED")
+        n %= 100
+    if n >= 20:
+        tens_word = _TENS[n // 10]
+        parts.append(f"{tens_word}-{_ONES[n % 10]}" if n % 10 else tens_word)
+    elif n > 0:
+        parts.append(_ONES[n])
+    return " ".join(parts)
+
+
+def number_to_words(n: int) -> str:
+    """Spells out a non-negative whole number in English, e.g. 15640 ->
+    'FIFTEEN THOUSAND SIX HUNDRED FORTY'. Used to print quotation totals
+    in words alongside the numeric amount, as export documents expect."""
+    if n == 0:
+        return "ZERO"
+    words = []
+    remaining = n
+    for value, name in _SCALES:
+        if remaining >= value:
+            count = remaining // value
+            words.append(f"{_three_digit_words(count)} {name}")
+            remaining %= value
+    if remaining > 0:
+        words.append(_three_digit_words(remaining))
+    return " ".join(words)
+
+
+def amount_in_words(amount, currency_label: str = "US DOLLARS") -> str:
+    """e.g. 15640.50 -> 'US DOLLARS FIFTEEN THOUSAND SIX HUNDRED FORTY AND CENTS FIFTY ONLY'."""
+    amount = round(float(amount or 0), 2)
+    whole = int(amount)
+    cents = int(round((amount - whole) * 100))
+    words = f"{currency_label} {number_to_words(whole)}"
+    if cents:
+        words += f" AND CENTS {number_to_words(cents)}"
+    return words + " ONLY"
+
+
 def register_template_helpers(app):
     """Small, presentation-only helpers exposed to every Jinja template."""
+
+    @app.template_filter("amount_in_words")
+    def amount_in_words_filter(value):
+        return amount_in_words(value)
 
     @app.template_filter("friendly_date")
     def friendly_date(value):
