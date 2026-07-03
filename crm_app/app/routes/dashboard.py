@@ -18,10 +18,10 @@ def home():
     container = current_app.container
 
     if g.user.is_admin:
-        performance = container.stats_service.employee_performance()
-        overview = container.stats_service.overview_counts()
+        performance = container.stats_service.employee_performance(g.user.company_id)
+        overview = container.stats_service.overview_counts(g.user.company_id)
         recent_leads = container.lead_service.list_for_dashboard(g.user)[:8]
-        recent_clients = container.client_service.list_all()[:8]
+        recent_clients = container.client_service.list_all(g.user.company_id)[:8]
         return render_template(
             "dashboard_admin.html",
             performance=performance,
@@ -33,12 +33,12 @@ def home():
     # Employee view: their own leads + upcoming/overdue follow-ups.
     my_leads = container.lead_service.list_for_dashboard(g.user)
     my_lead_count = len(my_leads)
-    my_comm_count = container.stats_service.employee_performance()
+    my_comm_count = container.stats_service.employee_performance(g.user.company_id)
     my_comm_count = next(
         (row["communication_count"] for row in my_comm_count if row["employee"].id == g.user.id), 0
     )
     followups = container.communication_service.upcoming_followups(
-        g.user.id, Config.FOLLOWUP_LOOKAHEAD_DAYS
+        g.user.company_id, g.user.id, Config.FOLLOWUP_LOOKAHEAD_DAYS
     )
     return render_template(
         "dashboard_employee.html",

@@ -5,20 +5,40 @@
 --
 -- Naming convention: every table has an integer primary key `id`, a
 -- `created_at` timestamp, and foreign keys named `<table>_id`.
+--
+-- Multi-tenancy: `tenants` is a company/business using this CRM (picked on
+-- the login screen). Root entities (users, leads, clients, product_groups,
+-- products, quotations, our_company) carry `company_id` directly; everything
+-- else (contacts, communications, payments, documents, quotation_items, the
+-- our_company_* detail tables) is scoped transitively through its parent FK
+-- instead of duplicating company_id everywhere.
 
 PRAGMA foreign_keys = ON;
+
+-- ============================================================
+-- TENANTS  (each is an independent company/business using this CRM)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS tenants (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,                 -- shown in the login dropdown
+    slug        TEXT NOT NULL UNIQUE,
+    is_active   INTEGER NOT NULL DEFAULT 1,     -- 1 = can log in, 0 = whole company locked out
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 -- ============================================================
 -- USERS  (admins + employees)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS users (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    username        TEXT NOT NULL UNIQUE,
+    company_id      INTEGER NOT NULL REFERENCES tenants(id),
+    username        TEXT NOT NULL,
     password_hash   TEXT NOT NULL,
     full_name       TEXT NOT NULL,
     role            TEXT NOT NULL CHECK (role IN ('admin', 'employee')),
     is_active       INTEGER NOT NULL DEFAULT 1,   -- 1 = can log in, 0 = disabled
-    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (company_id, username)
 );
 
 -- ============================================================
@@ -26,11 +46,12 @@ CREATE TABLE IF NOT EXISTS users (
 -- ============================================================
 CREATE TABLE IF NOT EXISTS leads (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    company_name        TEXT NOT NULL,                 -- compulsory
+    company_id          INTEGER NOT NULL REFERENCES tenants(id),
+    company_name        TEXT NOT NULL,                 -- compulsory (the LEAD's own business name - not the tenant)
     phone               TEXT NOT NULL,                  -- compulsory
     email               TEXT NOT NULL,                  -- compulsory
     facebook            TEXT,                           -- not compulsory
-    instagram           TEXT,                           -- not compulsory
+    instagram            TEXT,                           -- not compulsory
     other_social        TEXT,                           -- not compulsory
     status              TEXT NOT NULL DEFAULT 'new'
                         CHECK (status IN (
@@ -60,6 +81,7 @@ CREATE TABLE IF NOT EXISTS lead_contacts (
 -- ============================================================
 CREATE TABLE IF NOT EXISTS clients (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id          INTEGER NOT NULL REFERENCES tenants(id),
     lead_id             INTEGER REFERENCES leads(id),   -- originating lead
     company_name        TEXT NOT NULL,
     phone               TEXT NOT NULL,
@@ -98,7 +120,8 @@ CREATE TABLE IF NOT EXISTS client_contacts (
 -- `parent_type` + `parent_id` act as a polymorphic foreign key. This keeps
 -- one CommunicationRepository usable for both entities (Liskov substitution:
 -- a Lead and a Client are both "communicable" parents) instead of two
--- near-identical tables/classes.
+-- near-identical tables/classes. Scoped transitively via the parent lead/
+-- client's own company_id - no company_id column here.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS communications (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -142,10 +165,14 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 
 -- ============================================================
--- OUR COMPANY  (singleton - always id = 1)
+-- OUR COMPANY  (one row per tenant - this tenant's own business profile,
+-- shown on generated quotations. NOT the same thing as the `tenants` table
+-- above: `tenants` is the workspace/login concept, `our_company` is that
+-- workspace's own GSTIN/PAN/bank-details profile.)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS our_company (
-    id              INTEGER PRIMARY KEY CHECK (id = 1),
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id      INTEGER NOT NULL UNIQUE REFERENCES tenants(id),
     company_name    TEXT NOT NULL,
     address         TEXT,
     gstin           TEXT,
@@ -157,26 +184,30 @@ CREATE TABLE IF NOT EXISTS our_company (
 
 CREATE TABLE IF NOT EXISTS our_company_lut_details (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    our_company_id  INTEGER NOT NULL REFERENCES our_company(id) ON DELETE CASCADE,
     lut_number      TEXT NOT NULL,
     financial_year  TEXT NOT NULL,
     is_primary      INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS our_company_contact_details (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    type        TEXT NOT NULL CHECK (type IN ('phone', 'email')),
-    value       TEXT NOT NULL,
-    is_primary  INTEGER NOT NULL DEFAULT 0
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    our_company_id  INTEGER NOT NULL REFERENCES our_company(id) ON DELETE CASCADE,
+    type            TEXT NOT NULL CHECK (type IN ('phone', 'email')),
+    value           TEXT NOT NULL,
+    is_primary      INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS our_company_contact_persons (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT NOT NULL,
-    is_primary  INTEGER NOT NULL DEFAULT 0
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    our_company_id  INTEGER NOT NULL REFERENCES our_company(id) ON DELETE CASCADE,
+    name            TEXT NOT NULL,
+    is_primary      INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS our_company_bank_details (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    our_company_id  INTEGER NOT NULL REFERENCES our_company(id) ON DELETE CASCADE,
     bank_name       TEXT NOT NULL,
     account_number  TEXT NOT NULL,
     ifsc_code       TEXT,
@@ -192,6 +223,7 @@ CREATE TABLE IF NOT EXISTS our_company_bank_details (
 -- ============================================================
 CREATE TABLE IF NOT EXISTS product_groups (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id  INTEGER NOT NULL REFERENCES tenants(id),
     name        TEXT NOT NULL,
     parent_id   INTEGER REFERENCES product_groups(id) ON DELETE CASCADE,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
@@ -199,6 +231,7 @@ CREATE TABLE IF NOT EXISTS product_groups (
 
 CREATE TABLE IF NOT EXISTS products (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id              INTEGER NOT NULL REFERENCES tenants(id),
     group_id                INTEGER REFERENCES product_groups(id) ON DELETE CASCADE,
     product_name            TEXT NOT NULL,
     description             TEXT,
@@ -217,11 +250,12 @@ CREATE TABLE IF NOT EXISTS products (
 
 -- ============================================================
 -- QUOTATIONS  (header + line items; the number is generated as
--- QT{YYYYMMDD}{seq-of-that-day}, e.g. QT20260702001)
+-- QT{YYYYMMDD}{seq-of-that-day}, e.g. QT20260702001, per company)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS quotations (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-    quotation_number        TEXT NOT NULL UNIQUE,
+    company_id              INTEGER NOT NULL REFERENCES tenants(id),
+    quotation_number        TEXT NOT NULL,
     quotation_date          TEXT NOT NULL,
     lead_id                  INTEGER REFERENCES leads(id),   -- optional, just for prefill/reference
     buyer_name              TEXT NOT NULL,
@@ -249,7 +283,8 @@ CREATE TABLE IF NOT EXISTS quotations (
     bank_address            TEXT,
     created_by              INTEGER NOT NULL REFERENCES users(id),
     created_at              TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
+    updated_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (company_id, quotation_number)
 );
 
 CREATE TABLE IF NOT EXISTS quotation_items (
@@ -280,3 +315,4 @@ CREATE INDEX IF NOT EXISTS idx_products_group ON products(group_id);
 CREATE INDEX IF NOT EXISTS idx_quotations_created_by ON quotations(created_by);
 CREATE INDEX IF NOT EXISTS idx_quotations_date ON quotations(quotation_date);
 CREATE INDEX IF NOT EXISTS idx_quotation_items_quotation ON quotation_items(quotation_id);
+CREATE INDEX IF NOT EXISTS idx_tenants_active ON tenants(is_active);

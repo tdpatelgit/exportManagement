@@ -24,11 +24,11 @@ def _int_or_none(value):
 def browse(group_id=None):
     container = current_app.container
     try:
-        current_group = container.product_service.get_group(group_id) if group_id else None
+        current_group = container.product_service.get_group(group_id, g.user.company_id) if group_id else None
     except NotFoundError:
         abort(404)
-    breadcrumb = container.product_service.breadcrumb(group_id)
-    subgroups, products = container.product_service.list_contents(group_id)
+    breadcrumb = container.product_service.breadcrumb(g.user.company_id, group_id)
+    subgroups, products = container.product_service.list_contents(g.user.company_id, group_id)
     return render_template(
         "products/browse.html", current_group=current_group, breadcrumb=breadcrumb,
         subgroups=subgroups, products=products,
@@ -44,11 +44,11 @@ def api_browse():
     container = current_app.container
     group_id = _int_or_none(request.args.get("group_id"))
     try:
-        current_group = container.product_service.get_group(group_id) if group_id else None
+        current_group = container.product_service.get_group(group_id, g.user.company_id) if group_id else None
     except NotFoundError:
         return jsonify({"error": "not found"}), 404
-    breadcrumb = container.product_service.breadcrumb(group_id)
-    subgroups, products = container.product_service.list_contents(group_id)
+    breadcrumb = container.product_service.breadcrumb(g.user.company_id, group_id)
+    subgroups, products = container.product_service.list_contents(g.user.company_id, group_id)
     return jsonify({
         "current_group": {"id": current_group.id, "name": current_group.name} if current_group else None,
         "breadcrumb": [{"id": g.id, "name": g.name} for g in breadcrumb],
@@ -119,7 +119,7 @@ def new_group():
         except NotFoundError:
             abort(404)
 
-    parent = container.product_service.get_group(parent_id) if parent_id else None
+    parent = container.product_service.get_group(parent_id, g.user.company_id) if parent_id else None
     return render_template("products/group_form.html", group=None, parent=parent)
 
 
@@ -128,7 +128,7 @@ def new_group():
 def edit_group(group_id):
     container = current_app.container
     try:
-        group = container.product_service.get_group(group_id)
+        group = container.product_service.get_group(group_id, g.user.company_id)
     except NotFoundError:
         abort(404)
 
@@ -141,7 +141,7 @@ def edit_group(group_id):
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
 
-    parent = container.product_service.get_group(group.parent_id) if group.parent_id else None
+    parent = container.product_service.get_group(group.parent_id, g.user.company_id) if group.parent_id else None
     return render_template("products/group_form.html", group=group, parent=parent)
 
 
@@ -150,7 +150,7 @@ def edit_group(group_id):
 def delete_group(group_id):
     container = current_app.container
     try:
-        group = container.product_service.get_group(group_id)
+        group = container.product_service.get_group(group_id, g.user.company_id)
         parent_id = group.parent_id
         container.product_service.delete_group(g.user, group_id)
         flash(f"Group '{group.name}' and everything inside it was deleted.", "success")
@@ -202,10 +202,10 @@ def new_product():
 def view_product(product_id):
     container = current_app.container
     try:
-        product = container.product_service.get_product(product_id)
+        product = container.product_service.get_product(product_id, g.user.company_id)
     except NotFoundError:
         abort(404)
-    breadcrumb = container.product_service.breadcrumb(product.group_id)
+    breadcrumb = container.product_service.breadcrumb(g.user.company_id, product.group_id)
     return render_template("products/detail.html", product=product, breadcrumb=breadcrumb)
 
 
@@ -214,7 +214,7 @@ def view_product(product_id):
 def edit_product(product_id):
     container = current_app.container
     try:
-        product = container.product_service.get_product(product_id)
+        product = container.product_service.get_product(product_id, g.user.company_id)
     except NotFoundError:
         abort(404)
 
@@ -247,7 +247,7 @@ def edit_product(product_id):
 def delete_product(product_id):
     container = current_app.container
     try:
-        product = container.product_service.get_product(product_id)
+        product = container.product_service.get_product(product_id, g.user.company_id)
         group_id = product.group_id
         container.product_service.delete_product(g.user, product_id)
         flash(f"Product '{product.product_name}' deleted.", "success")

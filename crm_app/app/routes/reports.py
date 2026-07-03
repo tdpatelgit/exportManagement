@@ -10,7 +10,7 @@ app already stores.
 
 from datetime import date
 
-from flask import Blueprint, render_template, request, current_app
+from flask import Blueprint, render_template, request, current_app, g
 
 from app.utils import admin_required
 
@@ -31,8 +31,8 @@ def index():
     end_date = request.args.get("end_date") or default_end
 
     container = current_app.container
-    rows = container.report_service.activity_report(start_date, end_date)
-    payments_summary = container.report_service.payments_received_total(start_date, end_date)
+    rows = container.report_service.activity_report(g.user.company_id, start_date, end_date)
+    payments_summary = container.report_service.payments_received_total(g.user.company_id, start_date, end_date)
 
     return render_template(
         "reports/index.html",

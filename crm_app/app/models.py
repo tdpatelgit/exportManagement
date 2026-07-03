@@ -17,8 +17,32 @@ from typing import Optional, List
 
 
 @dataclass
+class Tenant:
+    """A company/business using this CRM, picked on the login screen before
+    username/password. NOT the same thing as OurCompany below - a Tenant is
+    the workspace/login concept, OurCompany is one specific tenant's own
+    business profile (GSTIN/PAN/bank details) shown on its quotations."""
+    id: Optional[int]
+    name: str
+    slug: str
+    is_active: bool = True
+    created_at: Optional[str] = None
+
+    @staticmethod
+    def from_row(row) -> "Tenant":
+        return Tenant(
+            id=row["id"],
+            name=row["name"],
+            slug=row["slug"],
+            is_active=bool(row["is_active"]),
+            created_at=row["created_at"],
+        )
+
+
+@dataclass
 class User:
     id: Optional[int]
+    company_id: int
     username: str
     password_hash: str
     full_name: str
@@ -34,6 +58,7 @@ class User:
     def from_row(row) -> "User":
         return User(
             id=row["id"],
+            company_id=row["company_id"],
             username=row["username"],
             password_hash=row["password_hash"],
             full_name=row["full_name"],
@@ -118,6 +143,7 @@ COMMUNICATION_MODES = ["WhatsApp", "WeChat", "Call", "Email", "In Person", "Othe
 @dataclass
 class Lead:
     id: Optional[int]
+    company_id: int
     company_name: str
     phone: str
     email: str
@@ -138,6 +164,7 @@ class Lead:
     def from_row(row) -> "Lead":
         return Lead(
             id=row["id"],
+            company_id=row["company_id"],
             company_name=row["company_name"],
             phone=row["phone"],
             email=row["email"],
@@ -161,6 +188,7 @@ class Lead:
 @dataclass
 class Client:
     id: Optional[int]
+    company_id: int
     lead_id: Optional[int]
     company_name: str
     phone: str
@@ -180,6 +208,7 @@ class Client:
     def from_row(row) -> "Client":
         return Client(
             id=row["id"],
+            company_id=row["company_id"],
             lead_id=row["lead_id"],
             company_name=row["company_name"],
             phone=row["phone"],
@@ -229,6 +258,15 @@ class PaymentEntry:
 
 @dataclass
 class DocumentEntry:
+    """Metadata-only placeholder for now (see the hint on the client detail
+    page) - a future update will auto-generate and file-store these the
+    same way Quotation already works. When that happens, give the new
+    document type its own optional `lead_id` (like Quotation.lead_id)
+    instead of a `client_id` - a client has no document link of its own;
+    QuotationRepository.list_for_lead shows the pattern: a converted
+    client's documents are found via `client.lead_id`, so anything created
+    against the lead (before OR after conversion) stays visible on the
+    client automatically, with nothing to copy or keep in sync by hand."""
     id: Optional[int]
     client_id: int
     document_name: str
@@ -253,6 +291,7 @@ class DocumentEntry:
 @dataclass
 class OurCompany:
     id: int
+    company_id: int
     company_name: str
     gstin: Optional[str]
     pan_no: Optional[str]
@@ -269,6 +308,7 @@ class OurCompany:
     def from_row(row) -> "OurCompany":
         return OurCompany(
             id=row["id"],
+            company_id=row["company_id"],
             company_name=row["company_name"],
             gstin=row["gstin"],
             pan_no=row["pan_no"],
@@ -284,6 +324,7 @@ class ProductGroup:
     """A folder in the product catalog. `parent_id=None` means it's a
     top-level group; groups can nest to any depth via self-reference."""
     id: Optional[int]
+    company_id: int
     name: str
     parent_id: Optional[int] = None
     created_at: Optional[str] = None
@@ -292,6 +333,7 @@ class ProductGroup:
     def from_row(row) -> "ProductGroup":
         return ProductGroup(
             id=row["id"],
+            company_id=row["company_id"],
             name=row["name"],
             parent_id=row["parent_id"],
             created_at=row["created_at"],
@@ -303,6 +345,7 @@ class Product:
     """A file in the product catalog folder tree. `group_id=None` means it
     sits at the catalog root, alongside top-level groups."""
     id: Optional[int]
+    company_id: int
     group_id: Optional[int]
     product_name: str
     description: Optional[str] = None
@@ -322,6 +365,7 @@ class Product:
     def from_row(row) -> "Product":
         return Product(
             id=row["id"],
+            company_id=row["company_id"],
             group_id=row["group_id"],
             product_name=row["product_name"],
             description=row["description"],
@@ -375,6 +419,7 @@ class QuotationItem:
 @dataclass
 class Quotation:
     id: Optional[int]
+    company_id: int
     quotation_number: str
     quotation_date: str
     buyer_name: str
@@ -412,6 +457,7 @@ class Quotation:
     def from_row(row) -> "Quotation":
         return Quotation(
             id=row["id"],
+            company_id=row["company_id"],
             quotation_number=row["quotation_number"],
             quotation_date=row["quotation_date"],
             lead_id=row["lead_id"] if "lead_id" in row.keys() else None,

@@ -74,13 +74,14 @@ def new_lead():
 def view_lead(lead_id):
     container = current_app.container
     try:
-        lead = container.lead_service.get(lead_id)
+        lead = container.lead_service.get(lead_id, g.user.company_id)
     except NotFoundError:
         abort(404)
     if not g.user.is_admin and lead.created_by != g.user.id:
         abort(403)
     communications = container.communication_service.list_for("lead", lead_id)
-    return render_template("leads/detail.html", lead=lead, communications=communications)
+    quotations = container.quotation_service.list_for_lead(lead_id)
+    return render_template("leads/detail.html", lead=lead, communications=communications, quotations=quotations)
 
 
 @leads_bp.route("/<int:lead_id>/edit", methods=["GET", "POST"])
@@ -88,7 +89,7 @@ def view_lead(lead_id):
 def edit_lead(lead_id):
     container = current_app.container
     try:
-        lead = container.lead_service.get(lead_id)
+        lead = container.lead_service.get(lead_id, g.user.company_id)
     except NotFoundError:
         abort(404)
 

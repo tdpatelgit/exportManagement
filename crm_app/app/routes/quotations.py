@@ -54,7 +54,7 @@ def _extract_items(form) -> list:
 def _form_context():
     container = current_app.container
     leads = container.lead_service.list_for_dashboard(g.user)
-    company = container.company_service.get()
+    company = container.company_service.get(g.user.company_id)
     bank_options = company.bank_details if company else []
     return leads, bank_options
 
@@ -77,7 +77,7 @@ def _alt_qty_map(items) -> dict:
         if product_id in result:
             continue
         try:
-            product = container.product_service.get_product(product_id)
+            product = container.product_service.get_product(product_id, g.user.company_id)
             result[product_id] = product.alternate_quantity or ""
         except NotFoundError:
             pass
@@ -87,7 +87,7 @@ def _alt_qty_map(items) -> dict:
 @quotations_bp.route("/")
 @login_required
 def list_quotations():
-    quotations = current_app.container.quotation_service.list_all()
+    quotations = current_app.container.quotation_service.list_all(g.user.company_id)
     return render_template("quotations/list.html", quotations=quotations)
 
 
@@ -117,7 +117,7 @@ def new_quotation():
     lead_id = request.args.get("lead_id")
     if lead_id:
         try:
-            lead = container.lead_service.get(int(lead_id))
+            lead = container.lead_service.get(int(lead_id), g.user.company_id)
             prefill = {
                 "lead_id": lead.id, "buyer_name": lead.company_name, "quotation_date": date.today().isoformat(),
                 "price_validity_days": 30, "discount_amount": 0,
@@ -135,10 +135,10 @@ def new_quotation():
 def view_quotation(quotation_id):
     container = current_app.container
     try:
-        quotation = container.quotation_service.get(quotation_id)
+        quotation = container.quotation_service.get(quotation_id, g.user.company_id)
     except NotFoundError:
         abort(404)
-    company = container.company_service.get()
+    company = container.company_service.get(g.user.company_id)
     return render_template("quotations/print.html", quotation=quotation, company=company)
 
 
@@ -147,7 +147,7 @@ def view_quotation(quotation_id):
 def edit_quotation(quotation_id):
     container = current_app.container
     try:
-        quotation = container.quotation_service.get(quotation_id)
+        quotation = container.quotation_service.get(quotation_id, g.user.company_id)
     except NotFoundError:
         abort(404)
 
@@ -180,7 +180,7 @@ def edit_quotation(quotation_id):
 @login_required
 def delete_quotation(quotation_id):
     try:
-        quotation = current_app.container.quotation_service.get(quotation_id)
+        quotation = current_app.container.quotation_service.get(quotation_id, g.user.company_id)
         current_app.container.quotation_service.delete(g.user, quotation_id)
         flash(f"Quotation {quotation.quotation_number} deleted.", "success")
     except (ValidationError, PermissionDeniedError) as e:

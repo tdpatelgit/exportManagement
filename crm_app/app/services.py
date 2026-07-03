@@ -26,7 +26,7 @@ from app.models import (
     LEAD_STATUSES, CLIENT_STATUSES, ProductGroup, Product, Quotation, QuotationItem,
 )
 from app.repositories import (
-    UserRepositoryBase, LeadRepositoryBase, ClientRepositoryBase,
+    TenantRepository, UserRepositoryBase, LeadRepositoryBase, ClientRepositoryBase,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
     ProductGroupRepository, ProductRepository, QuotationRepository,
 )
@@ -39,26 +39,29 @@ class AuthService:
     """Owns password hashing and credential checking. Nothing else in the
     app should call werkzeug.security directly - that's this class's job."""
 
-    def __init__(self, user_repo: UserRepositoryBase):
+    def __init__(self, user_repo: UserRepositoryBase, tenant_repo: TenantRepository):
         self.user_repo = user_repo
+        self.tenant_repo = tenant_repo
 
-    def authenticate(self, username: str, password: str) -> Optional[User]:
-        user = self.user_repo.get_by_username(username)
+    def authenticate(self, company_id: int, username: str, password: str) -> Optional[User]:
+        if not self.tenant_repo.is_active(company_id):
+            return None
+        user = self.user_repo.get_by_username(company_id, username)
         if not user or not user.is_active:
             return None
         if not check_password_hash(user.password_hash, password):
             return None
         return user
 
-    def create_user(self, username: str, password: str, full_name: str, role: str) -> User:
+    def create_user(self, company_id: int, username: str, password: str, full_name: str, role: str) -> User:
         if not username or not password or not full_name:
             raise ValidationError("Username, password and full name are all required.")
         if role not in ("admin", "employee"):
             raise ValidationError("Role must be 'admin' or 'employee'.")
-        if self.user_repo.get_by_username(username):
+        if self.user_repo.get_by_username(company_id, username):
             raise ValidationError(f"Username '{username}' is already taken.")
         user = User(
-            id=None, username=username,
+            id=None, company_id=company_id, username=username,
             password_hash=generate_password_hash(password),
             full_name=full_name, role=role, is_active=True,
         )
@@ -66,16 +69,16 @@ class AuthService:
 
     def change_username(self, current_user: User, target_user_id: int, new_username: str) -> User:
         """Employees may only rename themselves; admins may rename anyone
-        (including themselves)."""
+        in their own company (including themselves)."""
         if current_user.id != target_user_id and not current_user.is_admin:
             raise PermissionDeniedError("You can only change your own username.")
         target = self.user_repo.get_by_id(target_user_id)
-        if not target:
+        if not target or target.company_id != current_user.company_id:
             raise NotFoundError(f"User #{target_user_id} not found.")
         new_username = (new_username or "").strip()
         if not new_username:
             raise ValidationError("Username is required.")
-        existing = self.user_repo.get_by_username(new_username)
+        existing = self.user_repo.get_by_username(current_user.company_id, new_username)
         if existing and existing.id != target.id:
             raise ValidationError(f"Username '{new_username}' is already taken.")
         self.user_repo.update_username(target.id, new_username)
@@ -166,8 +169,8 @@ class CommunicationService:
     def list_for(self, parent_type: str, parent_id: int) -> List[Communication]:
         return self.comm_repo.list_for(parent_type, parent_id)
 
-    def upcoming_followups(self, employee_id: Optional[int], within_days: int) -> List[Communication]:
-        return self.comm_repo.upcoming_followups(employee_id, within_days)
+    def upcoming_followups(self, company_id: int, employee_id: Optional[int], within_days: int) -> List[Communication]:
+        return self.comm_repo.upcoming_followups(company_id, employee_id, within_days)
 
 
 # ============================================================
@@ -184,7 +187,8 @@ class LeadService:
                      contacts: List[dict]) -> Lead:
         self._validate_compulsory(company_name, phone, email, contacts)
         lead = Lead(
-            id=None, company_name=company_name.strip(), phone=phone.strip(), email=email.strip(),
+            id=None, company_id=current_user.company_id,
+            company_name=company_name.strip(), phone=phone.strip(), email=email.strip(),
             facebook=facebook or None, instagram=instagram or None, other_social=other_social or None,
             status="new", created_by=current_user.id,
         )
@@ -211,17 +215,19 @@ class LeadService:
             raise ValidationError("At least one company contact person is compulsory.")
 
     # ---- reads --------------------------------------------------
-    def get(self, lead_id: int) -> Lead:
+    def get(self, lead_id: int, company_id: int) -> Lead:
         lead = self.lead_repo.get_by_id(lead_id)
-        if not lead:
+        if not lead or lead.company_id != company_id:
+            # 404, not 403 - don't reveal that another company's lead exists.
             raise NotFoundError(f"Lead #{lead_id} not found.")
         return lead
 
     def list_for_dashboard(self, current_user: User, status: Optional[str] = None) -> List[Lead]:
-        """Employees see only their own leads; admins see everyone's."""
+        """Employees see only their own leads; admins see everyone's (within
+        their own company)."""
         if current_user.is_admin:
-            return self.lead_repo.list_all(status=status)
-        return self.lead_repo.list_all(employee_id=current_user.id, status=status)
+            return self.lead_repo.list_all(current_user.company_id, status=status)
+        return self.lead_repo.list_all(current_user.company_id, employee_id=current_user.id, status=status)
 
     # ---- writes with permission checks --------------------------------------------------
     def _assert_can_modify(self, lead: Lead, current_user: User):
@@ -235,12 +241,13 @@ class LeadService:
             raise PermissionDeniedError(
                 "Only an admin can change a lead's compulsory fields (company name / contact details)."
             )
+        self.get(lead_id, current_user.company_id)  # 404s if missing/another company's
         self._validate_compulsory(fields.get("company_name"), fields.get("phone"),
                                    fields.get("email"), [{"name": "existing"}])
         self.lead_repo.update_compulsory_fields(lead_id, fields)
 
     def update_status(self, lead_id: int, current_user: User, status: str) -> None:
-        lead = self.get(lead_id)
+        lead = self.get(lead_id, current_user.company_id)
         self._assert_can_modify(lead, current_user)
         valid_statuses = {s for s, _ in LEAD_STATUSES}
         if status not in valid_statuses:
@@ -248,7 +255,7 @@ class LeadService:
         self.lead_repo.update_status(lead_id, status)
 
     def add_contact(self, lead_id: int, current_user: User, name: str, phone: str, email: str) -> ContactPerson:
-        lead = self.get(lead_id)
+        lead = self.get(lead_id, current_user.company_id)
         self._assert_can_modify(lead, current_user)
         if not name or not name.strip():
             raise ValidationError("Contact person name is required.")
@@ -257,14 +264,14 @@ class LeadService:
         ))
 
     def set_primary_contact(self, lead_id: int, current_user: User, contact_id: int) -> None:
-        lead = self.get(lead_id)
+        lead = self.get(lead_id, current_user.company_id)
         self._assert_can_modify(lead, current_user)
         if not any(c.id == contact_id for c in lead.contacts):
             raise ValidationError("That contact does not belong to this lead.")
         self.lead_repo.contacts.set_primary(lead_id, contact_id)
 
     def add_communication(self, lead_id: int, current_user: User, **comm_kwargs) -> Communication:
-        lead = self.get(lead_id)
+        lead = self.get(lead_id, current_user.company_id)
         self._assert_can_modify(lead, current_user)
         return self.comm_service.add("lead", lead_id, current_user.id, **comm_kwargs)
 
@@ -275,20 +282,22 @@ class LeadService:
 class ClientService:
     def __init__(self, client_repo: ClientRepositoryBase, lead_repo: LeadRepositoryBase,
                  comm_service: CommunicationService, payment_repo: PaymentRepository,
-                 document_repo: DocumentRepository, currency_service: CurrencyService):
+                 document_repo: DocumentRepository, currency_service: CurrencyService,
+                 quotation_repo: QuotationRepository):
         self.client_repo = client_repo
         self.lead_repo = lead_repo
         self.comm_service = comm_service
         self.payment_repo = payment_repo
         self.document_repo = document_repo
         self.currency_service = currency_service
+        self.quotation_repo = quotation_repo
 
     # ---- lead -> client conversion (admin only) --------------------------------------------------
     def convert_lead(self, lead_id: int, admin_user: User, client_type: str = "Buyer") -> Client:
         if not admin_user.is_admin:
             raise PermissionDeniedError("Only an admin can approve a lead for conversion to client.")
         lead = self.lead_repo.get_by_id(lead_id)
-        if not lead:
+        if not lead or lead.company_id != admin_user.company_id:
             raise NotFoundError(f"Lead #{lead_id} not found.")
         if lead.is_converted:
             raise ValidationError("This lead has already been converted to a client.")
@@ -296,57 +305,62 @@ class ClientService:
             client_type = "Buyer"
 
         client = Client(
-            id=None, lead_id=lead.id, company_name=lead.company_name, phone=lead.phone,
-            email=lead.email, facebook=lead.facebook, instagram=lead.instagram,
+            id=None, company_id=lead.company_id, lead_id=lead.id, company_name=lead.company_name,
+            phone=lead.phone, email=lead.email, facebook=lead.facebook, instagram=lead.instagram,
             other_social=lead.other_social, client_type=client_type,
             status="proforma_invoice_submission_pending", created_by=admin_user.id,
         )
         return self.client_repo.convert_from_lead(client, lead.contacts)
 
     # ---- reads --------------------------------------------------
-    def get(self, client_id: int) -> Client:
+    def get(self, client_id: int, company_id: int) -> Client:
         client = self.client_repo.get_by_id(client_id)
-        if not client:
+        if not client or client.company_id != company_id:
+            # 404, not 403 - don't reveal that another company's client exists.
             raise NotFoundError(f"Client #{client_id} not found.")
         return client
 
-    def list_all(self, client_type: Optional[str] = None, status: Optional[str] = None) -> List[Client]:
-        return self.client_repo.list_all(client_type, status)
+    def list_all(self, company_id: int, client_type: Optional[str] = None,
+                 status: Optional[str] = None) -> List[Client]:
+        return self.client_repo.list_all(company_id, client_type, status)
 
     # ---- writes --------------------------------------------------
     def update_compulsory_fields(self, client_id: int, current_user: User, fields: dict) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can change a client's compulsory fields.")
+        self.get(client_id, current_user.company_id)  # 404s if missing/another company's
         if not fields.get("company_name") or not fields.get("phone") or not fields.get("email"):
             raise ValidationError("Company name, phone and email are all compulsory.")
         self.client_repo.update_compulsory_fields(client_id, fields)
 
     def update_status(self, client_id: int, current_user: User, status: str) -> None:
+        self.get(client_id, current_user.company_id)  # 404s if missing/another company's
         valid_statuses = {s for s, _ in CLIENT_STATUSES}
         if status not in valid_statuses:
             raise ValidationError("Invalid client status.")
         self.client_repo.update_status(client_id, status)
 
-    def add_contact(self, client_id: int, name: str, phone: str, email: str) -> ContactPerson:
+    def add_contact(self, client_id: int, current_user: User, name: str, phone: str, email: str) -> ContactPerson:
+        self.get(client_id, current_user.company_id)  # 404s if missing/another company's
         if not name or not name.strip():
             raise ValidationError("Contact person name is required.")
         return self.client_repo.contacts.add(client_id, ContactPerson(
             id=None, name=name.strip(), phone=phone or None, email=email or None, is_primary=False
         ))
 
-    def set_primary_contact(self, client_id: int, contact_id: int) -> None:
-        client = self.get(client_id)
+    def set_primary_contact(self, client_id: int, current_user: User, contact_id: int) -> None:
+        client = self.get(client_id, current_user.company_id)
         if not any(c.id == contact_id for c in client.contacts):
             raise ValidationError("That contact does not belong to this client.")
         self.client_repo.contacts.set_primary(client_id, contact_id)
 
     def add_communication(self, client_id: int, current_user: User, **comm_kwargs) -> Communication:
-        self.get(client_id)  # 404s if missing
+        self.get(client_id, current_user.company_id)  # 404s if missing/another company's
         return self.comm_service.add("client", client_id, current_user.id, **comm_kwargs)
 
-    def add_payment(self, client_id: int, account_name: str, payment_datetime: str,
+    def add_payment(self, client_id: int, current_user: User, account_name: str, payment_datetime: str,
                      amount_original: float, currency_code: str) -> PaymentEntry:
-        self.get(client_id)
+        self.get(client_id, current_user.company_id)
         if not account_name or not account_name.strip():
             raise ValidationError("Account name is required for a payment entry.")
         if amount_original is None or amount_original <= 0:
@@ -360,9 +374,9 @@ class ClientService:
         )
         return self.payment_repo.add(payment)
 
-    def add_document(self, client_id: int, document_name: str, document_type: str,
+    def add_document(self, client_id: int, current_user: User, document_name: str, document_type: str,
                       document_date: str, notes: str) -> DocumentEntry:
-        self.get(client_id)
+        self.get(client_id, current_user.company_id)
         if not document_name or not document_name.strip():
             raise ValidationError("Document name is required.")
         if not document_type or not document_type.strip():
@@ -374,6 +388,29 @@ class ClientService:
         )
         return self.document_repo.add(doc)
 
+    def document_feed(self, client: Client) -> List[dict]:
+        """One combined, date-sorted list for the client's 'Documents' card:
+        manually recorded DocumentEntry rows plus every quotation made
+        against the client's originating lead (Quotation isn't a separate
+        section here - it's just another auto-generated document type, the
+        first one this app can actually produce). Future auto-generated
+        document types should feed into this the same way."""
+        rows = [
+            {
+                "name": d.document_name, "type": d.document_type, "date": d.document_date,
+                "notes": d.notes, "link": None,
+            }
+            for d in self.document_repo.list_for_client(client.id)
+        ]
+        for q in self.quotation_repo.list_for_lead(client.lead_id) if client.lead_id else []:
+            rows.append({
+                "name": q.quotation_number, "type": "Quotation", "date": q.quotation_date,
+                "notes": f"{q.buyer_name} · $ {q.invoice_value_usd:,.2f}",
+                "link": ("quotations.view_quotation", q.id),
+            })
+        rows.sort(key=lambda r: r["date"], reverse=True)
+        return rows
+
 
 # ============================================================
 # COMPANY SERVICE (our own company profile - admin only)
@@ -382,8 +419,8 @@ class CompanyService:
     def __init__(self, company_repo: CompanyRepository):
         self.company_repo = company_repo
 
-    def get(self):
-        return self.company_repo.get()
+    def get(self, company_id: int):
+        return self.company_repo.get(company_id)
 
     def save(self, current_user: User, company_name: str, address: str, gstin: str, pan_no: str, iec: str,
               bin_no: str, contact_details: list, contact_persons: list, bank_details: list, lut_details: list) -> None:
@@ -422,11 +459,13 @@ class CompanyService:
             if not l.get("lut_number", "").strip() or not l.get("financial_year", "").strip():
                 raise ValidationError("Every LUT row needs both a LUT number and a financial year.")
 
-        self.company_repo.upsert(company_name.strip(), address, gstin, pan_no, iec, bin_no)
-        self.company_repo.replace_contact_details(valid_details)
-        self.company_repo.replace_contact_persons(valid_persons)
-        self.company_repo.replace_bank_details(valid_banks)
-        self.company_repo.replace_lut_details(lut_details)
+        our_company_id = self.company_repo.upsert(
+            current_user.company_id, company_name.strip(), address, gstin, pan_no, iec, bin_no
+        )
+        self.company_repo.replace_contact_details(our_company_id, valid_details)
+        self.company_repo.replace_contact_persons(our_company_id, valid_persons)
+        self.company_repo.replace_bank_details(our_company_id, valid_banks)
+        self.company_repo.replace_lut_details(our_company_id, lut_details)
 
 
 # ============================================================
@@ -440,14 +479,14 @@ class StatsService:
         self.comm_repo = comm_repo
         self.client_repo = client_repo
 
-    def employee_performance(self) -> List[dict]:
+    def employee_performance(self, company_id: int) -> List[dict]:
         """One row per employee: leads generated + communications logged.
         This directly satisfies 'admin ... can see how many leads is
         generated by each employee and how many communications is done by
         each employee'."""
-        employees = self.user_repo.list_all(role="employee")
-        lead_counts = self.lead_repo.count_by_employee()
-        comm_counts = self.comm_repo.count_by_employee()
+        employees = self.user_repo.list_all(company_id, role="employee")
+        lead_counts = self.lead_repo.count_by_employee(company_id)
+        comm_counts = self.comm_repo.count_by_employee(company_id)
         return [
             {
                 "employee": emp,
@@ -457,9 +496,9 @@ class StatsService:
             for emp in employees
         ]
 
-    def overview_counts(self) -> dict:
-        all_leads = self.lead_repo.list_all()
-        all_clients = self.client_repo.list_all()
+    def overview_counts(self, company_id: int) -> dict:
+        all_leads = self.lead_repo.list_all(company_id)
+        all_clients = self.client_repo.list_all(company_id)
         status_breakdown = {}
         for lead in all_leads:
             status_breakdown[lead.status] = status_breakdown.get(lead.status, 0) + 1
@@ -487,34 +526,37 @@ class ReportService:
     def __init__(self, db):
         self.db = db  # direct Database access - reports run ad-hoc aggregate SQL
 
-    def activity_report(self, start_date: str, end_date: str) -> List[dict]:
+    def activity_report(self, company_id: int, start_date: str, end_date: str) -> List[dict]:
         rows = self.db.query(
             """
             SELECT u.id, u.full_name,
                    (SELECT COUNT(*) FROM leads l
-                     WHERE l.created_by = u.id AND date(l.created_at) BETWEEN date(?) AND date(?)
+                     WHERE l.created_by = u.id AND l.company_id = ?
+                       AND date(l.created_at) BETWEEN date(?) AND date(?)
                    ) AS leads_generated,
                    (SELECT COUNT(*) FROM communications c
                      WHERE c.employee_id = u.id AND date(c.comm_date) BETWEEN date(?) AND date(?)
                    ) AS communications_logged,
                    (SELECT COUNT(*) FROM clients cl
                      WHERE cl.lead_id IN (SELECT id FROM leads WHERE created_by = u.id)
+                       AND cl.company_id = ?
                        AND date(cl.created_at) BETWEEN date(?) AND date(?)
                    ) AS clients_converted
             FROM users u
-            WHERE u.role = 'employee'
+            WHERE u.role = 'employee' AND u.company_id = ?
             ORDER BY u.full_name
             """,
-            (start_date, end_date, start_date, end_date, start_date, end_date),
+            (company_id, start_date, end_date, start_date, end_date,
+             company_id, start_date, end_date, company_id),
         )
         return [dict(r) for r in rows]
 
-    def payments_received_total(self, start_date: str, end_date: str) -> dict:
+    def payments_received_total(self, company_id: int, start_date: str, end_date: str) -> dict:
         row = self.db.query_one(
-            """SELECT COUNT(*) AS payment_count, COALESCE(SUM(amount_inr), 0) AS total_inr
-               FROM payment_history
-               WHERE date(payment_datetime) BETWEEN date(?) AND date(?)""",
-            (start_date, end_date),
+            """SELECT COUNT(*) AS payment_count, COALESCE(SUM(ph.amount_inr), 0) AS total_inr
+               FROM payment_history ph JOIN clients c ON c.id = ph.client_id
+               WHERE c.company_id = ? AND date(ph.payment_datetime) BETWEEN date(?) AND date(?)""",
+            (company_id, start_date, end_date),
         )
         return dict(row) if row else {"payment_count": 0, "total_inr": 0}
 
@@ -532,22 +574,28 @@ class ProductService:
         self.allowed_extensions = allowed_extensions
 
     # ---- browsing --------------------------------------------------
-    def get_group(self, group_id: int) -> ProductGroup:
+    def get_group(self, group_id: int, company_id: int) -> ProductGroup:
         group = self.group_repo.get_by_id(group_id)
-        if not group:
+        if not group or group.company_id != company_id:
             raise NotFoundError(f"Product group #{group_id} not found.")
         return group
 
-    def breadcrumb(self, group_id: Optional[int]) -> List[ProductGroup]:
-        return self.group_repo.list_ancestors(group_id) if group_id else []
+    def breadcrumb(self, company_id: int, group_id: Optional[int]) -> List[ProductGroup]:
+        if not group_id:
+            return []
+        self.get_group(group_id, company_id)  # 404s if missing/another company's before walking up
+        return self.group_repo.list_ancestors(group_id)
 
-    def list_contents(self, group_id: Optional[int]):
+    def list_contents(self, company_id: int, group_id: Optional[int]):
         """Returns (subgroups, products) for a folder - group_id=None is the catalog root."""
-        return self.group_repo.list_children(group_id), self.product_repo.list_in_group(group_id)
+        if group_id is not None:
+            self.get_group(group_id, company_id)  # 404s if missing/another company's
+        return (self.group_repo.list_children(company_id, group_id),
+                self.product_repo.list_in_group(company_id, group_id))
 
-    def get_product(self, product_id: int) -> Product:
+    def get_product(self, product_id: int, company_id: int) -> Product:
         product = self.product_repo.get_by_id(product_id)
-        if not product:
+        if not product or product.company_id != company_id:
             raise NotFoundError(f"Product #{product_id} not found.")
         return product
 
@@ -558,32 +606,32 @@ class ProductService:
         if not name or not name.strip():
             raise ValidationError("Group name is compulsory.")
         if parent_id is not None:
-            self.get_group(parent_id)  # 404s if the parent doesn't exist
-        return self.group_repo.create(name.strip(), parent_id)
+            self.get_group(parent_id, current_user.company_id)  # 404s if the parent doesn't exist
+        return self.group_repo.create(current_user.company_id, name.strip(), parent_id)
 
     def rename_group(self, current_user: User, group_id: int, name: str) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
         if not name or not name.strip():
             raise ValidationError("Group name is compulsory.")
-        self.get_group(group_id)
+        self.get_group(group_id, current_user.company_id)
         self.group_repo.update(group_id, name.strip())
 
     def delete_group(self, current_user: User, group_id: int) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
-        self.get_group(group_id)
-        self._delete_group_images_recursive(group_id)
+        self.get_group(group_id, current_user.company_id)
+        self._delete_group_images_recursive(current_user.company_id, group_id)
         self.group_repo.delete(group_id)  # cascades to subgroups/products in the DB
 
-    def _delete_group_images_recursive(self, group_id: int) -> None:
+    def _delete_group_images_recursive(self, company_id: int, group_id: int) -> None:
         """Product image files live on disk, not in the DB, so cascading
         deletes don't clean them up on their own - walk the subtree first."""
-        for product in self.product_repo.list_in_group(group_id):
+        for product in self.product_repo.list_in_group(company_id, group_id):
             self._delete_image_file(product.photo_path)
             self._delete_image_file(product.dimension_photo_path)
-        for subgroup in self.group_repo.list_children(group_id):
-            self._delete_group_images_recursive(subgroup.id)
+        for subgroup in self.group_repo.list_children(company_id, group_id):
+            self._delete_group_images_recursive(company_id, subgroup.id)
 
     # ---- products --------------------------------------------------
     def create_product(self, current_user: User, group_id: Optional[int], product_name: str,
@@ -595,12 +643,12 @@ class ProductService:
         if not product_name or not product_name.strip():
             raise ValidationError("Product name is compulsory.")
         if group_id is not None:
-            self.get_group(group_id)
+            self.get_group(group_id, current_user.company_id)
 
         photo_path = self._save_image(photo_file)
         dimension_photo_path = self._save_image(dimension_photo_file)
         product = Product(
-            id=None, group_id=group_id, product_name=product_name.strip(),
+            id=None, company_id=current_user.company_id, group_id=group_id, product_name=product_name.strip(),
             description=description or None, hsn_code=hsn_code or None, packing=packing or None,
             quantity=quantity or None, alternate_quantity=alternate_quantity or None,
             weight_class=weight_class or None, price_usd=self._parse_price(price_usd),
@@ -616,7 +664,7 @@ class ProductService:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
         if not product_name or not product_name.strip():
             raise ValidationError("Product name is compulsory.")
-        existing = self.get_product(product_id)
+        existing = self.get_product(product_id, current_user.company_id)
 
         fields = {
             "product_name": product_name.strip(), "description": description or None,
@@ -636,7 +684,7 @@ class ProductService:
     def delete_product(self, current_user: User, product_id: int) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
-        product = self.get_product(product_id)
+        product = self.get_product(product_id, current_user.company_id)
         self._delete_image_file(product.photo_path)
         self._delete_image_file(product.dimension_photo_path)
         self.product_repo.delete(product_id)
@@ -678,19 +726,32 @@ class ProductService:
 # QUOTATION SERVICE
 # ============================================================
 class QuotationService:
-    def __init__(self, quotation_repo: QuotationRepository, product_repo: ProductRepository):
+    def __init__(self, quotation_repo: QuotationRepository, product_repo: ProductRepository,
+                 lead_repo: LeadRepositoryBase):
         self.quotation_repo = quotation_repo
         self.product_repo = product_repo
+        self.lead_repo = lead_repo
 
     # ---- reads --------------------------------------------------
-    def get(self, quotation_id: int) -> Quotation:
+    def get(self, quotation_id: int, company_id: int) -> Quotation:
         quotation = self.quotation_repo.get_by_id(quotation_id)
-        if not quotation:
+        if not quotation or quotation.company_id != company_id:
+            # 404, not 403 - don't reveal that another company's quotation exists.
             raise NotFoundError(f"Quotation #{quotation_id} not found.")
         return quotation
 
-    def list_all(self) -> List[Quotation]:
-        return self.quotation_repo.list_all()
+    def list_all(self, company_id: int) -> List[Quotation]:
+        return self.quotation_repo.list_all(company_id)
+
+    def list_for_lead(self, lead_id: Optional[int]) -> List[Quotation]:
+        """Used by both the lead detail page and the client detail page -
+        see QuotationRepository.list_for_lead for why a client doesn't need
+        its own quotation link. Unscoped by company_id because the caller
+        always already owns (has fetched-and-checked) the lead/client this
+        is being looked up for."""
+        if not lead_id:
+            return []
+        return self.quotation_repo.list_for_lead(lead_id)
 
     # ---- permission --------------------------------------------------
     def _assert_can_modify(self, quotation: Quotation, current_user: User):
@@ -700,16 +761,16 @@ class QuotationService:
             raise PermissionDeniedError("You can only manage quotations you created yourself.")
 
     # ---- number generation --------------------------------------------------
-    def _generate_number(self, quotation_date: str) -> str:
-        """QT{YYYYMMDD}{seq} where seq is that day's quotation count + 1,
-        zero-padded to 3 digits (e.g. QT20260702001)."""
+    def _generate_number(self, company_id: int, quotation_date: str) -> str:
+        """QT{YYYYMMDD}{seq} where seq is that day's quotation count + 1 for
+        this company, zero-padded to 3 digits (e.g. QT20260702001)."""
         date_part = quotation_date.replace("-", "")
         prefix = f"QT{date_part}"
-        seq = self.quotation_repo.count_for_date_prefix(prefix) + 1
+        seq = self.quotation_repo.count_for_date_prefix(company_id, prefix) + 1
         return f"{prefix}{seq:03d}"
 
     # ---- validation --------------------------------------------------
-    def _build_items(self, raw_items: list) -> List[QuotationItem]:
+    def _build_items(self, company_id: int, raw_items: list) -> List[QuotationItem]:
         items = []
         for i, raw in enumerate(raw_items, start=1):
             product_name = (raw.get("product_name") or "").strip()
@@ -725,10 +786,12 @@ class QuotationService:
 
             # Qty is authoritatively boxes x the catalog product's Alternate
             # Quantity whenever both are known - the client-side value is only
-            # a convenience preview, not trusted for the stored total.
+            # a convenience preview, not trusted for the stored total. Only
+            # trust a product from this same company - otherwise a crafted
+            # product_id could pull another company's catalog data in.
             if product_id and quantity_boxes:
                 product = self.product_repo.get_by_id(product_id)
-                if product and product.alternate_quantity:
+                if product and product.company_id == company_id and product.alternate_quantity:
                     try:
                         quantity_value = round(quantity_boxes * float(product.alternate_quantity), 2)
                     except ValueError:
@@ -770,10 +833,16 @@ class QuotationService:
                 raise ValidationError(f"'{key}' must be a whole number.")
 
         lead_id = int(fields["lead_id"]) if fields.get("lead_id") else None
+        if lead_id is not None:
+            # Only trust a lead from this same company - otherwise a crafted
+            # lead_id could attach this quotation to another company's lead.
+            lead = self.lead_repo.get_by_id(lead_id)
+            if not lead or lead.company_id != current_user.company_id:
+                lead_id = None
 
         quotation = Quotation(
-            id=None, quotation_number="", quotation_date=quotation_date, buyer_name=buyer_name,
-            created_by=current_user.id, lead_id=lead_id,
+            id=None, company_id=current_user.company_id, quotation_number="", quotation_date=quotation_date,
+            buyer_name=buyer_name, created_by=current_user.id, lead_id=lead_id,
             buyer_address=(fields.get("buyer_address") or "").strip() or None,
             buyer_reference_no=(fields.get("buyer_reference_no") or "").strip() or None,
             port_of_loading=(fields.get("port_of_loading") or "").strip() or None,
@@ -802,20 +871,20 @@ class QuotationService:
 
     # ---- writes --------------------------------------------------
     def create(self, current_user: User, fields: dict, raw_items: list) -> Quotation:
-        items = self._build_items(raw_items)
+        items = self._build_items(current_user.company_id, raw_items)
         quotation = self._build_header(current_user, fields, items)
-        quotation.quotation_number = self._generate_number(quotation.quotation_date)
+        quotation.quotation_number = self._generate_number(current_user.company_id, quotation.quotation_date)
         return self.quotation_repo.create(quotation)
 
     def update(self, current_user: User, quotation_id: int, fields: dict, raw_items: list) -> Quotation:
-        existing = self.get(quotation_id)
+        existing = self.get(quotation_id, current_user.company_id)
         self._assert_can_modify(existing, current_user)
-        items = self._build_items(raw_items)
+        items = self._build_items(current_user.company_id, raw_items)
         quotation = self._build_header(current_user, fields, items)
         self.quotation_repo.update(quotation_id, quotation)
-        return self.get(quotation_id)
+        return self.get(quotation_id, current_user.company_id)
 
     def delete(self, current_user: User, quotation_id: int) -> None:
-        existing = self.get(quotation_id)
+        existing = self.get(quotation_id, current_user.company_id)
         self._assert_can_modify(existing, current_user)
         self.quotation_repo.delete(quotation_id)

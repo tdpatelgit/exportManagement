@@ -165,6 +165,191 @@ class Database:
                     )
                 conn.execute("UPDATE our_company SET lut = NULL WHERE id = 1")
 
+            # ---- MULTI-TENANCY ----
+            # Everything below gives every pre-existing single-tenant install
+            # a home ("Company #1" in `tenants`) and adds `company_id`
+            # everywhere so multiple independent businesses can share one
+            # install. Gated on `users` lacking `company_id`: a brand-new
+            # install's schema.sql already includes it on every table, so
+            # this whole block only ever runs once, only for databases that
+            # predate multi-tenancy.
+            #
+            # `PRAGMA foreign_keys`/`legacy_alter_table` are no-ops inside an
+            # active transaction, and the UPDATE statements in the migration
+            # steps above (e.g. the lut nulling-out) already opened one
+            # implicitly - commit first so the toggle below actually applies.
+            conn.commit()
+            users_existing = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+            if users_existing and "company_id" not in users_existing:
+                conn.execute("PRAGMA foreign_keys = OFF")
+                # Same reasoning as the `leads` rebuild above: without this,
+                # SQLite silently rewrites every other table's REFERENCES
+                # clause that points at a table we're about to rename (users,
+                # quotations) to point at the "_old" name instead, which
+                # breaks once that table is dropped. One bracket covers all
+                # three rebuilds below.
+                conn.execute("PRAGMA legacy_alter_table = ON")
+
+                # `tenants` already exists (created by the executescript
+                # above) but is empty on a legacy install - seed Company #1,
+                # named after the existing Our Company profile if one was
+                # ever filled in, so the upcoming backfills have a home.
+                if not conn.execute("SELECT id FROM tenants WHERE id = 1").fetchone():
+                    company_cols = {r["name"] for r in conn.execute("PRAGMA table_info(our_company)")}
+                    company_row = conn.execute("SELECT company_name FROM our_company WHERE id = 1").fetchone() \
+                        if company_cols else None
+                    default_name = (company_row["company_name"] if company_row else None) or "Company 1"
+                    conn.execute(
+                        "INSERT INTO tenants (id, name, slug, is_active) VALUES (1, ?, 'company-1', 1)",
+                        (default_name,),
+                    )
+
+                # leads / clients / product_groups / products: plain ADD
+                # COLUMN + backfill, no constraint changes needed.
+                for table in ("leads", "clients", "product_groups", "products"):
+                    cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+                    if cols and "company_id" not in cols:
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN company_id INTEGER REFERENCES tenants(id)")
+                        conn.execute(f"UPDATE {table} SET company_id = 1 WHERE company_id IS NULL")
+
+                # users: rebuild for the new UNIQUE(company_id, username).
+                # Every existing `id` is preserved explicitly - leads.created_by,
+                # communications.employee_id, clients.created_by and
+                # quotations.created_by all reference these ids by number and
+                # must not shift.
+                conn.execute("ALTER TABLE users RENAME TO users_old")
+                conn.execute("""
+                    CREATE TABLE users (
+                        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                        company_id      INTEGER NOT NULL REFERENCES tenants(id),
+                        username        TEXT NOT NULL,
+                        password_hash   TEXT NOT NULL,
+                        full_name       TEXT NOT NULL,
+                        role            TEXT NOT NULL CHECK (role IN ('admin', 'employee')),
+                        is_active       INTEGER NOT NULL DEFAULT 1,
+                        created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                        UNIQUE (company_id, username)
+                    )
+                """)
+                conn.execute("""
+                    INSERT INTO users (id, company_id, username, password_hash, full_name, role, is_active, created_at)
+                    SELECT id, 1, username, password_hash, full_name, role, is_active, created_at FROM users_old
+                """)
+                conn.execute("DROP TABLE users_old")
+
+                # quotations: rebuild for UNIQUE(company_id, quotation_number).
+                # By this point every earlier migration step in this function
+                # (lead_id, sea_freight/insurance/certification/other_charges)
+                # has already run, so `quotations_old` already has those
+                # columns and the copy below carries them across.
+                q_cols = {r["name"] for r in conn.execute("PRAGMA table_info(quotations)")}
+                if q_cols and "company_id" not in q_cols:
+                    conn.execute("ALTER TABLE quotations RENAME TO quotations_old")
+                    conn.execute("""
+                        CREATE TABLE quotations (
+                            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id              INTEGER NOT NULL REFERENCES tenants(id),
+                            quotation_number        TEXT NOT NULL,
+                            quotation_date          TEXT NOT NULL,
+                            lead_id                  INTEGER REFERENCES leads(id),
+                            buyer_name              TEXT NOT NULL,
+                            buyer_address           TEXT,
+                            buyer_reference_no      TEXT,
+                            port_of_loading         TEXT,
+                            port_of_discharge       TEXT,
+                            packing_details         TEXT,
+                            container_details       TEXT,
+                            shipping_mode           TEXT,
+                            shipping_terms          TEXT,
+                            payment_terms           TEXT,
+                            price_validity_days     INTEGER NOT NULL DEFAULT 30,
+                            remarks                 TEXT,
+                            sea_freight              REAL NOT NULL DEFAULT 0,
+                            insurance                REAL NOT NULL DEFAULT 0,
+                            certification            REAL NOT NULL DEFAULT 0,
+                            other_charges            REAL NOT NULL DEFAULT 0,
+                            discount_amount         REAL NOT NULL DEFAULT 0,
+                            bank_name               TEXT,
+                            bank_account_number     TEXT,
+                            bank_ifsc_code          TEXT,
+                            bank_swift_code         TEXT,
+                            bank_branch             TEXT,
+                            bank_address            TEXT,
+                            created_by              INTEGER NOT NULL REFERENCES users(id),
+                            created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+                            updated_at              TEXT NOT NULL DEFAULT (datetime('now')),
+                            UNIQUE (company_id, quotation_number)
+                        )
+                    """)
+                    conn.execute("""
+                        INSERT INTO quotations (id, company_id, quotation_number, quotation_date, lead_id,
+                            buyer_name, buyer_address, buyer_reference_no, port_of_loading, port_of_discharge,
+                            packing_details, container_details, shipping_mode, shipping_terms, payment_terms,
+                            price_validity_days, remarks, sea_freight, insurance, certification, other_charges,
+                            discount_amount, bank_name, bank_account_number, bank_ifsc_code, bank_swift_code,
+                            bank_branch, bank_address, created_by, created_at, updated_at)
+                        SELECT id, 1, quotation_number, quotation_date, lead_id,
+                            buyer_name, buyer_address, buyer_reference_no, port_of_loading, port_of_discharge,
+                            packing_details, container_details, shipping_mode, shipping_terms, payment_terms,
+                            price_validity_days, remarks, sea_freight, insurance, certification, other_charges,
+                            discount_amount, bank_name, bank_account_number, bank_ifsc_code, bank_swift_code,
+                            bank_branch, bank_address, created_by, created_at, updated_at
+                        FROM quotations_old
+                    """)
+                    conn.execute("DROP TABLE quotations_old")
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_quotations_created_by ON quotations(created_by)")
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_quotations_date ON quotations(quotation_date)")
+
+                # our_company: drop the old `id = 1` singleton CHECK, key by
+                # company_id instead (one row per tenant instead of one row
+                # total). `id` is preserved so the child detail tables' new
+                # `our_company_id` FK (backfilled below) stays valid.
+                oc_cols = {r["name"] for r in conn.execute("PRAGMA table_info(our_company)")}
+                if oc_cols and "company_id" not in oc_cols:
+                    conn.execute("ALTER TABLE our_company RENAME TO our_company_old")
+                    conn.execute("""
+                        CREATE TABLE our_company (
+                            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id      INTEGER NOT NULL UNIQUE REFERENCES tenants(id),
+                            company_name    TEXT NOT NULL,
+                            address         TEXT,
+                            gstin           TEXT,
+                            pan_no          TEXT,
+                            iec             TEXT,
+                            bin             TEXT,
+                            updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+                        )
+                    """)
+                    conn.execute("""
+                        INSERT INTO our_company (id, company_id, company_name, address, gstin, pan_no, iec, bin, updated_at)
+                        SELECT id, 1, company_name, address, gstin, pan_no, iec, bin, updated_at FROM our_company_old
+                    """)
+                    conn.execute("DROP TABLE our_company_old")
+
+                # our_company_* child tables: plain ADD COLUMN + backfill,
+                # pointing at whichever our_company.id belongs to company_id 1
+                # (at most one existing row on a legacy install).
+                for table in ("our_company_lut_details", "our_company_contact_details",
+                              "our_company_contact_persons", "our_company_bank_details"):
+                    cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+                    if cols and "our_company_id" not in cols:
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN our_company_id INTEGER REFERENCES our_company(id)")
+                        conn.execute(
+                            f"UPDATE {table} SET our_company_id = "
+                            f"(SELECT id FROM our_company WHERE company_id = 1) "
+                            f"WHERE our_company_id IS NULL"
+                        )
+
+                conn.execute("PRAGMA legacy_alter_table = OFF")
+                conn.execute("PRAGMA foreign_keys = ON")
+
+            # Company-scoped queries filter by company_id constantly - index
+            # it on every root table now that the column is guaranteed to
+            # exist (either from a fresh install's schema.sql, or from the
+            # legacy-upgrade block above). Safe to run unconditionally.
+            for table in ("users", "leads", "clients", "product_groups", "products", "quotations"):
+                conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_company ON {table}(company_id)")
+
     def query(self, sql: str, params: tuple = ()) -> list:
         """Run a SELECT and return a list of sqlite3.Row objects."""
         with self.get_connection() as conn:

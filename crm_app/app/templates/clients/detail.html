@@ -4,7 +4,7 @@
 
 <div class="topbar">
   <div>
-    <div class="eyebrow">Client #{{ client.id }} {% if client.lead_id %}· converted from Lead #{{ client.lead_id }}{% endif %}</div>
+    <div class="eyebrow">Client #{{ client.id }} {% if client.lead_id %}· converted from <a href="{{ url_for('leads.view_lead', lead_id=client.lead_id) }}">Lead #{{ client.lead_id }}</a>{% endif %}</div>
     <h1>{{ client.company_name }}</h1>
   </div>
   <div class="topbar-actions">
@@ -137,21 +137,22 @@
       <div class="field"><label>Date<span class="required-mark">*</span></label><input type="date" name="document_date" required></div>
     </div>
     <div class="field"><label>Notes</label><input type="text" name="notes" placeholder="optional"></div>
-    <p class="hint">This stores document metadata only for now. A future update will auto-generate and file-store these documents.</p>
+    <p class="hint">Manually recorded documents are metadata only for now. Quotations made for this client's originating lead (before or after conversion) appear below automatically - future auto-generated document types will too.</p>
     <button type="submit" class="btn btn-primary btn-sm">Record document</button>
   </form>
 
-  {% if documents %}
+  {% if document_rows %}
   <div class="table-wrap">
     <table class="ledger">
-      <thead><tr><th>Name</th><th>Type</th><th>Date</th><th>Notes</th></tr></thead>
+      <thead><tr><th>Name</th><th>Type</th><th>Date</th><th>Notes</th><th></th></tr></thead>
       <tbody>
-        {% for d in documents %}
+        {% for row in document_rows %}
         <tr>
-          <td>{{ d.document_name }}</td>
-          <td><span class="pill">{{ d.document_type }}</span></td>
-          <td class="text-sm">{{ d.document_date }}</td>
-          <td class="text-sm text-soft">{{ d.notes or '—' }}</td>
+          <td>{{ row.name }}</td>
+          <td><span class="pill">{{ row.type }}</span></td>
+          <td class="text-sm">{{ row.date }}</td>
+          <td class="text-sm text-soft">{{ row.notes or '—' }}</td>
+          <td>{% if row.link %}<a href="{{ url_for(row.link[0], quotation_id=row.link[1]) }}" class="text-sm">Open →</a>{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>

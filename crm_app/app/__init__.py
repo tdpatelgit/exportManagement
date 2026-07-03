@@ -16,7 +16,7 @@ from flask import Flask, g, session, render_template
 from config import Config
 from app.database import Database
 from app.repositories import (
-    SqliteUserRepository, SqliteLeadRepository, SqliteClientRepository,
+    TenantRepository, SqliteUserRepository, SqliteLeadRepository, SqliteClientRepository,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
     ProductGroupRepository, ProductRepository, QuotationRepository,
 )
@@ -38,6 +38,7 @@ class ServiceContainer:
         self.db = db
 
         # Repositories (persistence layer)
+        self.tenant_repo = TenantRepository(db)
         self.user_repo = SqliteUserRepository(db)
         self.lead_repo = SqliteLeadRepository(db)
         self.client_repo = SqliteClientRepository(db)
@@ -50,13 +51,14 @@ class ServiceContainer:
         self.quotation_repo = QuotationRepository(db)
 
         # Services (business logic layer)
-        self.auth_service = AuthService(self.user_repo)
+        self.auth_service = AuthService(self.user_repo, self.tenant_repo)
         self.currency_service = CurrencyService(Config.EXCHANGE_RATE_API_URL, Config.FALLBACK_RATES_TO_INR)
         self.communication_service = CommunicationService(self.comm_repo)
         self.lead_service = LeadService(self.lead_repo, self.communication_service)
         self.client_service = ClientService(
             self.client_repo, self.lead_repo, self.communication_service,
             self.payment_repo, self.document_repo, self.currency_service,
+            self.quotation_repo,
         )
         self.stats_service = StatsService(self.user_repo, self.lead_repo, self.comm_repo, self.client_repo)
         self.company_service = CompanyService(self.company_repo)
@@ -65,7 +67,7 @@ class ServiceContainer:
             self.product_group_repo, self.product_repo,
             Config.PRODUCT_UPLOAD_FOLDER, Config.ALLOWED_IMAGE_EXTENSIONS,
         )
-        self.quotation_service = QuotationService(self.quotation_repo, self.product_repo)
+        self.quotation_service = QuotationService(self.quotation_repo, self.product_repo, self.lead_repo)
 
 
 def create_app(config_class=Config) -> Flask:
@@ -81,7 +83,14 @@ def create_app(config_class=Config) -> Flask:
     @app.before_request
     def load_logged_in_user():
         user_id = session.get("user_id")
-        g.user = app.container.user_repo.get_by_id(user_id) if user_id else None
+        user = app.container.user_repo.get_by_id(user_id) if user_id else None
+        # Enforce a whole-company lockout immediately, not just at next
+        # login - a tenant deactivated mid-session shouldn't stay usable
+        # until the session cookie happens to expire.
+        if user and not app.container.tenant_repo.is_active(user.company_id):
+            session.clear()
+            user = None
+        g.user = user
 
     # --- make the current user + status constants available in every template --------------------------------------------------
     @app.context_processor

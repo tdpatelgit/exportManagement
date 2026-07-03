@@ -24,8 +24,17 @@
 
       <form method="POST" action="{{ url_for('auth.login') }}">
         <div class="field">
+          <label for="company_id">Company</label>
+          <select id="company_id" name="company_id" autofocus required>
+            <option value="">— Select your company —</option>
+            {% for c in companies %}
+              <option value="{{ c.id }}">{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
           <label for="username">Username</label>
-          <input type="text" id="username" name="username" autofocus required>
+          <input type="text" id="username" name="username" required>
         </div>
         <div class="field">
           <label for="password">Password</label>
@@ -36,7 +45,7 @@
 
       <p class="text-sm text-soft" style="margin-top:18px;">
         No account yet? Ask an admin to create one for you, or run
-        <code>python seed.py</code> to create the first admin login.
+        <code>python seed.py</code> to create the first admin login for a new company.
       </p>
     </div>
   </div>

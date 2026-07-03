@@ -8,7 +8,7 @@ create new employee/admin logins.
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort
 
-from app.exceptions import ValidationError
+from app.exceptions import ValidationError, NotFoundError
 from app.utils import admin_required
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -17,8 +17,8 @@ admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 @admin_bp.route("/employees")
 @admin_required
 def list_employees():
-    performance = current_app.container.stats_service.employee_performance()
-    admins = current_app.container.user_repo.list_all(role="admin")
+    performance = current_app.container.stats_service.employee_performance(g.user.company_id)
+    admins = current_app.container.user_repo.list_all(g.user.company_id, role="admin")
     return render_template("employees/list.html", performance=performance, admins=admins)
 
 
@@ -27,10 +27,10 @@ def list_employees():
 def employee_detail(user_id):
     container = current_app.container
     employee = container.user_repo.get_by_id(user_id)
-    if not employee:
+    if not employee or employee.company_id != g.user.company_id:
         abort(404)
-    leads = container.lead_repo.list_all(employee_id=user_id)
-    comm_counts = container.comm_repo.count_by_employee()
+    leads = container.lead_repo.list_all(g.user.company_id, employee_id=user_id)
+    comm_counts = container.comm_repo.count_by_employee(g.user.company_id)
     return render_template(
         "employees/detail.html", employee=employee, leads=leads,
         communication_count=comm_counts.get(user_id, 0),
@@ -43,6 +43,7 @@ def new_employee():
     if request.method == "POST":
         try:
             user = current_app.container.auth_service.create_user(
+                company_id=g.user.company_id,
                 username=request.form.get("username", "").strip(),
                 password=request.form.get("password", ""),
                 full_name=request.form.get("full_name", "").strip(),
@@ -61,7 +62,7 @@ def new_employee():
 def edit_username(user_id):
     container = current_app.container
     employee = container.user_repo.get_by_id(user_id)
-    if not employee:
+    if not employee or employee.company_id != g.user.company_id:
         abort(404)
     if request.method == "POST":
         try:
@@ -72,6 +73,8 @@ def edit_username(user_id):
             return redirect(url_for("admin.employee_detail", user_id=user_id))
         except ValidationError as e:
             flash(str(e), "error")
+        except NotFoundError:
+            abort(404)
     return render_template("employees/edit_username.html", employee=employee)
 
 
@@ -80,7 +83,7 @@ def edit_username(user_id):
 def toggle_active(user_id):
     container = current_app.container
     employee = container.user_repo.get_by_id(user_id)
-    if not employee:
+    if not employee or employee.company_id != g.user.company_id:
         abort(404)
     if employee.id == g.user.id:
         flash("You can't lock your own account.", "error")

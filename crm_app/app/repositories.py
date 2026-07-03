@@ -16,10 +16,35 @@ from typing import Optional, List
 
 from app.database import Database
 from app.models import (
-    User, Lead, Client, ContactPerson, Communication,
+    Tenant, User, Lead, Client, ContactPerson, Communication,
     PaymentEntry, DocumentEntry, OurCompany, ProductGroup, Product,
     Quotation, QuotationItem,
 )
+
+
+# ============================================================
+# TENANT REPOSITORY (the company/workspace picker - NOT the same thing as
+# CompanyRepository below, which manages one tenant's own business profile)
+# ============================================================
+class TenantRepository:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def list_active(self) -> List[Tenant]:
+        rows = self.db.query("SELECT * FROM tenants WHERE is_active = 1 ORDER BY name")
+        return [Tenant.from_row(r) for r in rows]
+
+    def get_by_id(self, company_id: int) -> Optional[Tenant]:
+        row = self.db.query_one("SELECT * FROM tenants WHERE id = ?", (company_id,))
+        return Tenant.from_row(row) if row else None
+
+    def is_active(self, company_id: int) -> bool:
+        row = self.db.query_one("SELECT is_active FROM tenants WHERE id = ?", (company_id,))
+        return bool(row["is_active"]) if row else False
+
+    def create(self, name: str, slug: str) -> Tenant:
+        new_id = self.db.execute("INSERT INTO tenants (name, slug) VALUES (?, ?)", (name, slug))
+        return self.get_by_id(new_id)
 
 
 # ============================================================
@@ -30,10 +55,10 @@ class UserRepositoryBase(ABC):
     def get_by_id(self, user_id: int) -> Optional[User]: ...
 
     @abstractmethod
-    def get_by_username(self, username: str) -> Optional[User]: ...
+    def get_by_username(self, company_id: int, username: str) -> Optional[User]: ...
 
     @abstractmethod
-    def list_all(self, role: Optional[str] = None) -> List[User]: ...
+    def list_all(self, company_id: int, role: Optional[str] = None) -> List[User]: ...
 
     @abstractmethod
     def create(self, user: User) -> User: ...
@@ -56,22 +81,30 @@ class SqliteUserRepository(UserRepositoryBase):
         row = self.db.query_one("SELECT * FROM users WHERE id = ?", (user_id,))
         return User.from_row(row) if row else None
 
-    def get_by_username(self, username: str) -> Optional[User]:
-        row = self.db.query_one("SELECT * FROM users WHERE username = ?", (username,))
+    def get_by_username(self, company_id: int, username: str) -> Optional[User]:
+        row = self.db.query_one(
+            "SELECT * FROM users WHERE company_id = ? AND username = ?", (company_id, username)
+        )
         return User.from_row(row) if row else None
 
-    def list_all(self, role: Optional[str] = None) -> List[User]:
+    def list_all(self, company_id: int, role: Optional[str] = None) -> List[User]:
         if role:
-            rows = self.db.query("SELECT * FROM users WHERE role = ? ORDER BY full_name", (role,))
+            rows = self.db.query(
+                "SELECT * FROM users WHERE company_id = ? AND role = ? ORDER BY full_name",
+                (company_id, role),
+            )
         else:
-            rows = self.db.query("SELECT * FROM users ORDER BY full_name")
+            rows = self.db.query(
+                "SELECT * FROM users WHERE company_id = ? ORDER BY full_name", (company_id,)
+            )
         return [User.from_row(r) for r in rows]
 
     def create(self, user: User) -> User:
         new_id = self.db.execute(
-            """INSERT INTO users (username, password_hash, full_name, role, is_active)
-               VALUES (?, ?, ?, ?, ?)""",
-            (user.username, user.password_hash, user.full_name, user.role, int(user.is_active)),
+            """INSERT INTO users (company_id, username, password_hash, full_name, role, is_active)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (user.company_id, user.username, user.password_hash, user.full_name,
+             user.role, int(user.is_active)),
         )
         user.id = new_id
         return user
@@ -137,7 +170,8 @@ class LeadRepositoryBase(ABC):
     def get_by_id(self, lead_id: int) -> Optional[Lead]: ...
 
     @abstractmethod
-    def list_all(self, employee_id: Optional[int] = None, status: Optional[str] = None) -> List[Lead]: ...
+    def list_all(self, company_id: int, employee_id: Optional[int] = None,
+                 status: Optional[str] = None) -> List[Lead]: ...
 
     @abstractmethod
     def create(self, lead: Lead) -> Lead: ...
@@ -149,7 +183,7 @@ class LeadRepositoryBase(ABC):
     def update_status(self, lead_id: int, status: str) -> None: ...
 
     @abstractmethod
-    def count_by_employee(self) -> dict: ...
+    def count_by_employee(self, company_id: int) -> dict: ...
 
 
 class SqliteLeadRepository(LeadRepositoryBase):
@@ -170,9 +204,10 @@ class SqliteLeadRepository(LeadRepositoryBase):
         lead.contacts = self.contacts.list_for(lead_id)
         return lead
 
-    def list_all(self, employee_id: Optional[int] = None, status: Optional[str] = None) -> List[Lead]:
-        sql = self._SELECT + " WHERE 1=1"
-        params: list = []
+    def list_all(self, company_id: int, employee_id: Optional[int] = None,
+                 status: Optional[str] = None) -> List[Lead]:
+        sql = self._SELECT + " WHERE leads.company_id = ?"
+        params: list = [company_id]
         if employee_id:
             sql += " AND leads.created_by = ?"
             params.append(employee_id)
@@ -184,10 +219,10 @@ class SqliteLeadRepository(LeadRepositoryBase):
 
     def create(self, lead: Lead) -> Lead:
         new_id = self.db.execute(
-            """INSERT INTO leads (company_name, phone, email, facebook, instagram,
+            """INSERT INTO leads (company_id, company_name, phone, email, facebook, instagram,
                                    other_social, status, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (lead.company_name, lead.phone, lead.email, lead.facebook, lead.instagram,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (lead.company_id, lead.company_name, lead.phone, lead.email, lead.facebook, lead.instagram,
              lead.other_social, lead.status, lead.created_by),
         )
         lead.id = new_id
@@ -215,9 +250,12 @@ class SqliteLeadRepository(LeadRepositoryBase):
             (status, lead_id),
         )
 
-    def count_by_employee(self) -> dict:
+    def count_by_employee(self, company_id: int) -> dict:
         """Returns {employee_id: lead_count} - powers the admin dashboard."""
-        rows = self.db.query("SELECT created_by, COUNT(*) AS cnt FROM leads GROUP BY created_by")
+        rows = self.db.query(
+            "SELECT created_by, COUNT(*) AS cnt FROM leads WHERE company_id = ? GROUP BY created_by",
+            (company_id,),
+        )
         return {r["created_by"]: r["cnt"] for r in rows}
 
 
@@ -229,7 +267,8 @@ class ClientRepositoryBase(ABC):
     def get_by_id(self, client_id: int) -> Optional[Client]: ...
 
     @abstractmethod
-    def list_all(self, client_type: Optional[str] = None, status: Optional[str] = None) -> List[Client]: ...
+    def list_all(self, company_id: int, client_type: Optional[str] = None,
+                 status: Optional[str] = None) -> List[Client]: ...
 
     @abstractmethod
     def convert_from_lead(self, client: Client, lead_contacts: List[ContactPerson]) -> Client: ...
@@ -254,9 +293,10 @@ class SqliteClientRepository(ClientRepositoryBase):
         client.contacts = self.contacts.list_for(client_id)
         return client
 
-    def list_all(self, client_type: Optional[str] = None, status: Optional[str] = None) -> List[Client]:
-        sql = "SELECT * FROM clients WHERE 1=1"
-        params: list = []
+    def list_all(self, company_id: int, client_type: Optional[str] = None,
+                 status: Optional[str] = None) -> List[Client]:
+        sql = "SELECT * FROM clients WHERE company_id = ?"
+        params: list = [company_id]
         if client_type:
             sql += " AND client_type = ?"
             params.append(client_type)
@@ -277,12 +317,12 @@ class SqliteClientRepository(ClientRepositoryBase):
         client."""
         with self.db.get_connection() as conn:
             cursor = conn.execute(
-                """INSERT INTO clients (lead_id, company_name, phone, email, facebook,
+                """INSERT INTO clients (company_id, lead_id, company_name, phone, email, facebook,
                                          instagram, other_social, client_type, status, created_by)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (client.lead_id, client.company_name, client.phone, client.email, client.facebook,
-                 client.instagram, client.other_social, client.client_type, client.status,
-                 client.created_by),
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (client.company_id, client.lead_id, client.company_name, client.phone, client.email,
+                 client.facebook, client.instagram, client.other_social, client.client_type,
+                 client.status, client.created_by),
             )
             client.id = cursor.lastrowid
             for contact in lead_contacts:
@@ -344,21 +384,32 @@ class CommunicationRepository:
         comm.id = new_id
         return comm
 
-    def count_by_employee(self) -> dict:
-        """{employee_id: communication_count} - powers the admin dashboard."""
-        rows = self.db.query("SELECT employee_id, COUNT(*) AS cnt FROM communications GROUP BY employee_id")
+    def count_by_employee(self, company_id: int) -> dict:
+        """{employee_id: communication_count} - powers the admin dashboard.
+        `communications` has no company_id of its own - joined through the
+        employee who logged it, which is always same-company by construction
+        (an employee can only log communications against their own leads/
+        clients, which are already company-scoped)."""
+        rows = self.db.query(
+            """SELECT c.employee_id, COUNT(*) AS cnt FROM communications c
+               JOIN users u ON u.id = c.employee_id
+               WHERE u.company_id = ? GROUP BY c.employee_id""",
+            (company_id,),
+        )
         return {r["employee_id"]: r["cnt"] for r in rows}
 
-    def upcoming_followups(self, employee_id: Optional[int], within_days: int) -> List[Communication]:
+    def upcoming_followups(self, company_id: int, employee_id: Optional[int],
+                            within_days: int) -> List[Communication]:
         """Communications whose follow_up_date is today or overdue, used for
         the employee notification panel."""
         sql = """
             SELECT communications.*, users.full_name AS employee_name
             FROM communications JOIN users ON users.id = communications.employee_id
-            WHERE follow_up_date IS NOT NULL
+            WHERE users.company_id = ?
+              AND follow_up_date IS NOT NULL
               AND date(follow_up_date) <= date('now', ?)
         """
-        params: list = [f"+{within_days} days"]
+        params: list = [company_id, f"+{within_days} days"]
         if employee_id:
             sql += " AND employee_id = ?"
             params.append(employee_id)
@@ -418,94 +469,107 @@ class DocumentRepository:
 
 
 # ============================================================
-# OUR COMPANY REPOSITORY (singleton row, id = 1)
+# OUR COMPANY REPOSITORY (one row per tenant - that tenant's own business
+# profile shown on quotations. NOT the same thing as TenantRepository above,
+# which manages the `tenants` login/workspace table.)
 # ============================================================
 class CompanyRepository:
     def __init__(self, db: Database):
         self.db = db
 
-    def get(self) -> Optional[OurCompany]:
-        row = self.db.query_one("SELECT * FROM our_company WHERE id = 1")
+    def get(self, company_id: int) -> Optional[OurCompany]:
+        row = self.db.query_one("SELECT * FROM our_company WHERE company_id = ?", (company_id,))
         if not row:
             return None
         company = OurCompany.from_row(row)
         company.contact_details = [
             dict(r) for r in self.db.query(
-                "SELECT * FROM our_company_contact_details ORDER BY is_primary DESC, id"
+                "SELECT * FROM our_company_contact_details WHERE our_company_id = ? ORDER BY is_primary DESC, id",
+                (company.id,),
             )
         ]
         company.contact_persons = [
             dict(r) for r in self.db.query(
-                "SELECT * FROM our_company_contact_persons ORDER BY is_primary DESC, id"
+                "SELECT * FROM our_company_contact_persons WHERE our_company_id = ? ORDER BY is_primary DESC, id",
+                (company.id,),
             )
         ]
         company.bank_details = [
             dict(r) for r in self.db.query(
-                "SELECT * FROM our_company_bank_details ORDER BY is_primary DESC, id"
+                "SELECT * FROM our_company_bank_details WHERE our_company_id = ? ORDER BY is_primary DESC, id",
+                (company.id,),
             )
         ]
         company.lut_details = [
             dict(r) for r in self.db.query(
-                "SELECT * FROM our_company_lut_details ORDER BY is_primary DESC, financial_year DESC, id"
+                "SELECT * FROM our_company_lut_details WHERE our_company_id = ? "
+                "ORDER BY is_primary DESC, financial_year DESC, id",
+                (company.id,),
             )
         ]
         return company
 
-    def upsert(self, company_name: str, address: str, gstin: str, pan_no: str, iec: str, bin_no: str) -> None:
-        existing = self.db.query_one("SELECT id FROM our_company WHERE id = 1")
+    def upsert(self, company_id: int, company_name: str, address: str, gstin: str,
+               pan_no: str, iec: str, bin_no: str) -> int:
+        """Returns the `our_company.id` row (not the tenant's company_id) -
+        callers need it to scope the four detail-table replace_* calls."""
+        existing = self.db.query_one("SELECT id FROM our_company WHERE company_id = ?", (company_id,))
         if existing:
             self.db.execute(
                 """UPDATE our_company SET company_name = ?, address = ?, gstin = ?, pan_no = ?, iec = ?, bin = ?,
-                                           updated_at = datetime('now') WHERE id = 1""",
-                (company_name, address, gstin, pan_no, iec, bin_no),
+                                           updated_at = datetime('now') WHERE company_id = ?""",
+                (company_name, address, gstin, pan_no, iec, bin_no, company_id),
             )
-        else:
-            self.db.execute(
-                "INSERT INTO our_company (id, company_name, address, gstin, pan_no, iec, bin) VALUES (1, ?, ?, ?, ?, ?, ?)",
-                (company_name, address, gstin, pan_no, iec, bin_no),
-            )
+            return existing["id"]
+        return self.db.execute(
+            "INSERT INTO our_company (company_id, company_name, address, gstin, pan_no, iec, bin) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (company_id, company_name, address, gstin, pan_no, iec, bin_no),
+        )
 
-    def replace_lut_details(self, lut_details: list) -> None:
+    def replace_lut_details(self, our_company_id: int, lut_details: list) -> None:
         """lut_details: [{'lut_number': str, 'financial_year': str, 'is_primary': bool}]"""
         with self.db.get_connection() as conn:
-            conn.execute("DELETE FROM our_company_lut_details")
+            conn.execute("DELETE FROM our_company_lut_details WHERE our_company_id = ?", (our_company_id,))
             for l in lut_details:
                 conn.execute(
-                    "INSERT INTO our_company_lut_details (lut_number, financial_year, is_primary) VALUES (?, ?, ?)",
-                    (l["lut_number"], l["financial_year"], int(l["is_primary"])),
+                    "INSERT INTO our_company_lut_details (our_company_id, lut_number, financial_year, is_primary) "
+                    "VALUES (?, ?, ?, ?)",
+                    (our_company_id, l["lut_number"], l["financial_year"], int(l["is_primary"])),
                 )
 
-    def replace_contact_details(self, details: list) -> None:
+    def replace_contact_details(self, our_company_id: int, details: list) -> None:
         """details: [{'type': 'phone'|'email', 'value': str, 'is_primary': bool}]"""
         with self.db.get_connection() as conn:
-            conn.execute("DELETE FROM our_company_contact_details")
+            conn.execute("DELETE FROM our_company_contact_details WHERE our_company_id = ?", (our_company_id,))
             for d in details:
                 conn.execute(
-                    "INSERT INTO our_company_contact_details (type, value, is_primary) VALUES (?, ?, ?)",
-                    (d["type"], d["value"], int(d["is_primary"])),
+                    "INSERT INTO our_company_contact_details (our_company_id, type, value, is_primary) "
+                    "VALUES (?, ?, ?, ?)",
+                    (our_company_id, d["type"], d["value"], int(d["is_primary"])),
                 )
 
-    def replace_contact_persons(self, persons: list) -> None:
+    def replace_contact_persons(self, our_company_id: int, persons: list) -> None:
         """persons: [{'name': str, 'is_primary': bool}]"""
         with self.db.get_connection() as conn:
-            conn.execute("DELETE FROM our_company_contact_persons")
+            conn.execute("DELETE FROM our_company_contact_persons WHERE our_company_id = ?", (our_company_id,))
             for p in persons:
                 conn.execute(
-                    "INSERT INTO our_company_contact_persons (name, is_primary) VALUES (?, ?)",
-                    (p["name"], int(p["is_primary"])),
+                    "INSERT INTO our_company_contact_persons (our_company_id, name, is_primary) VALUES (?, ?, ?)",
+                    (our_company_id, p["name"], int(p["is_primary"])),
                 )
 
-    def replace_bank_details(self, bank_details: list) -> None:
+    def replace_bank_details(self, our_company_id: int, bank_details: list) -> None:
         """bank_details: [{'bank_name': str, 'account_number': str, 'ifsc_code': str,
         'swift_code': str, 'branch': str, 'bank_address': str, 'is_primary': bool}]"""
         with self.db.get_connection() as conn:
-            conn.execute("DELETE FROM our_company_bank_details")
+            conn.execute("DELETE FROM our_company_bank_details WHERE our_company_id = ?", (our_company_id,))
             for b in bank_details:
                 conn.execute(
                     """INSERT INTO our_company_bank_details
-                       (bank_name, account_number, ifsc_code, swift_code, branch, bank_address, is_primary)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (b["bank_name"], b["account_number"], b.get("ifsc_code") or None,
+                       (our_company_id, bank_name, account_number, ifsc_code, swift_code, branch, bank_address, is_primary)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (our_company_id, b["bank_name"], b["account_number"], b.get("ifsc_code") or None,
                      b.get("swift_code") or None, b.get("branch") or None,
                      b.get("bank_address") or None, int(b["is_primary"])),
                 )
@@ -522,11 +586,17 @@ class ProductGroupRepository:
         row = self.db.query_one("SELECT * FROM product_groups WHERE id = ?", (group_id,))
         return ProductGroup.from_row(row) if row else None
 
-    def list_children(self, parent_id: Optional[int]) -> List[ProductGroup]:
+    def list_children(self, company_id: int, parent_id: Optional[int]) -> List[ProductGroup]:
         if parent_id is None:
-            rows = self.db.query("SELECT * FROM product_groups WHERE parent_id IS NULL ORDER BY name")
+            rows = self.db.query(
+                "SELECT * FROM product_groups WHERE company_id = ? AND parent_id IS NULL ORDER BY name",
+                (company_id,),
+            )
         else:
-            rows = self.db.query("SELECT * FROM product_groups WHERE parent_id = ? ORDER BY name", (parent_id,))
+            rows = self.db.query(
+                "SELECT * FROM product_groups WHERE company_id = ? AND parent_id = ? ORDER BY name",
+                (company_id, parent_id),
+            )
         return [ProductGroup.from_row(r) for r in rows]
 
     def list_ancestors(self, group_id: int) -> List[ProductGroup]:
@@ -539,9 +609,10 @@ class ProductGroupRepository:
         trail.reverse()
         return trail
 
-    def create(self, name: str, parent_id: Optional[int]) -> ProductGroup:
+    def create(self, company_id: int, name: str, parent_id: Optional[int]) -> ProductGroup:
         new_id = self.db.execute(
-            "INSERT INTO product_groups (name, parent_id) VALUES (?, ?)", (name, parent_id)
+            "INSERT INTO product_groups (company_id, name, parent_id) VALUES (?, ?, ?)",
+            (company_id, name, parent_id),
         )
         return self.get_by_id(new_id)
 
@@ -566,22 +637,29 @@ class ProductRepository:
         row = self.db.query_one("SELECT * FROM products WHERE id = ?", (product_id,))
         return Product.from_row(row) if row else None
 
-    def list_in_group(self, group_id: Optional[int]) -> List[Product]:
+    def list_in_group(self, company_id: int, group_id: Optional[int]) -> List[Product]:
         if group_id is None:
-            rows = self.db.query("SELECT * FROM products WHERE group_id IS NULL ORDER BY product_name")
+            rows = self.db.query(
+                "SELECT * FROM products WHERE company_id = ? AND group_id IS NULL ORDER BY product_name",
+                (company_id,),
+            )
         else:
-            rows = self.db.query("SELECT * FROM products WHERE group_id = ? ORDER BY product_name", (group_id,))
+            rows = self.db.query(
+                "SELECT * FROM products WHERE company_id = ? AND group_id = ? ORDER BY product_name",
+                (company_id, group_id),
+            )
         return [Product.from_row(r) for r in rows]
 
     def create(self, product: Product) -> Product:
         new_id = self.db.execute(
             """INSERT INTO products
-               (group_id, product_name, description, hsn_code, packing, quantity,
+               (company_id, group_id, product_name, description, hsn_code, packing, quantity,
                 alternate_quantity, weight_class, price_usd, photo_path, dimension_photo_path, alt_text)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (product.group_id, product.product_name, product.description, product.hsn_code,
-             product.packing, product.quantity, product.alternate_quantity, product.weight_class,
-             product.price_usd, product.photo_path, product.dimension_photo_path, product.alt_text),
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (product.company_id, product.group_id, product.product_name, product.description,
+             product.hsn_code, product.packing, product.quantity, product.alternate_quantity,
+             product.weight_class, product.price_usd, product.photo_path,
+             product.dimension_photo_path, product.alt_text),
         )
         return self.get_by_id(new_id)
 
@@ -604,12 +682,13 @@ class QuotationRepository:
     def __init__(self, db: Database):
         self.db = db
 
-    def count_for_date_prefix(self, number_prefix: str) -> int:
+    def count_for_date_prefix(self, company_id: int, number_prefix: str) -> int:
         """Counts existing quotations whose number starts with QT{YYYYMMDD} -
-        used to compute the next sequence for that day."""
+        used to compute the next sequence for that day. Scoped per company so
+        two tenants generating a quotation on the same day both start at 001."""
         row = self.db.query_one(
-            "SELECT COUNT(*) AS cnt FROM quotations WHERE quotation_number LIKE ?",
-            (f"{number_prefix}%",),
+            "SELECT COUNT(*) AS cnt FROM quotations WHERE company_id = ? AND quotation_number LIKE ?",
+            (company_id, f"{number_prefix}%"),
         )
         return row["cnt"] if row else 0
 
@@ -628,27 +707,48 @@ class QuotationRepository:
         quotation.items = [QuotationItem.from_row(r) for r in item_rows]
         return quotation
 
-    def list_all(self) -> List[Quotation]:
+    def list_all(self, company_id: int) -> List[Quotation]:
         rows = self.db.query(
             """SELECT q.*, u.full_name AS created_by_name,
                       COALESCE((SELECT SUM(total_usd) FROM quotation_items WHERE quotation_id = q.id), 0) AS items_total
                FROM quotations q
-               JOIN users u ON u.id = q.created_by ORDER BY q.quotation_date DESC, q.id DESC"""
+               JOIN users u ON u.id = q.created_by
+               WHERE q.company_id = ?
+               ORDER BY q.quotation_date DESC, q.id DESC""",
+            (company_id,),
+        )
+        return [Quotation.from_row(r) for r in rows]
+
+    def list_for_lead(self, lead_id: int) -> List[Quotation]:
+        """Quotations created against a given lead. This is also how a
+        converted client 'sees' its quotations - a client never has its own
+        quotation link; the client's originating `lead_id` (Client.lead_id)
+        is reused to look them up here, so a quotation made while the
+        company was still a lead automatically stays visible once it
+        becomes a client, with nothing to keep in sync by hand."""
+        rows = self.db.query(
+            """SELECT q.*, u.full_name AS created_by_name,
+                      COALESCE((SELECT SUM(total_usd) FROM quotation_items WHERE quotation_id = q.id), 0) AS items_total
+               FROM quotations q
+               JOIN users u ON u.id = q.created_by
+               WHERE q.lead_id = ?
+               ORDER BY q.quotation_date DESC, q.id DESC""",
+            (lead_id,),
         )
         return [Quotation.from_row(r) for r in rows]
 
     def create(self, quotation: Quotation) -> Quotation:
         new_id = self.db.execute(
             """INSERT INTO quotations
-               (quotation_number, quotation_date, lead_id, buyer_name, buyer_address,
+               (company_id, quotation_number, quotation_date, lead_id, buyer_name, buyer_address,
                 buyer_reference_no, port_of_loading, port_of_discharge, packing_details,
                 container_details, shipping_mode, shipping_terms, payment_terms,
                 price_validity_days, remarks,
                 sea_freight, insurance, certification, other_charges,
                 discount_amount, bank_name, bank_account_number, bank_ifsc_code,
                 bank_swift_code, bank_branch, bank_address, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (quotation.quotation_number, quotation.quotation_date, quotation.lead_id,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (quotation.company_id, quotation.quotation_number, quotation.quotation_date, quotation.lead_id,
              quotation.buyer_name, quotation.buyer_address, quotation.buyer_reference_no,
              quotation.port_of_loading, quotation.port_of_discharge, quotation.packing_details,
              quotation.container_details, quotation.shipping_mode, quotation.shipping_terms,

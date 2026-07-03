@@ -98,5 +98,5 @@ def settings():
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
 
-    company = container.company_service.get()
+    company = container.company_service.get(g.user.company_id)
     return render_template("company/settings.html", company=company)

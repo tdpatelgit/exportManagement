@@ -94,6 +94,36 @@
 </div>
 
 <div class="card">
+  <div class="card-header">
+    <h3>Quotations</h3>
+    <a href="{{ url_for('quotations.new_quotation', lead_id=lead.id) }}" class="btn btn-ghost btn-sm">+ New quotation</a>
+  </div>
+  {% if quotations %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead><tr><th>Number</th><th>Date</th><th>Buyer</th><th class="num">Invoice value (USD)</th><th></th></tr></thead>
+      <tbody>
+        {% for q in quotations %}
+        <tr>
+          <td class="mono text-sm">{{ q.quotation_number }}</td>
+          <td class="text-sm">{{ q.quotation_date }}</td>
+          <td>{{ q.buyer_name }}</td>
+          <td class="num">$ {{ '{:,.2f}'.format(q.invoice_value_usd) }}</td>
+          <td><a href="{{ url_for('quotations.view_quotation', quotation_id=q.id) }}" class="text-sm">Open →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if lead.is_converted %}
+  <div class="hint" style="margin-top:10px;">These quotations also appear on the converted client's page automatically.</div>
+  {% endif %}
+  {% else %}
+  <div class="empty-state">No quotations yet for this lead. <a href="{{ url_for('quotations.new_quotation', lead_id=lead.id) }}">Create one →</a></div>
+  {% endif %}
+</div>
+
+<div class="card">
   <div class="card-header"><h3>Communications</h3><span class="text-sm text-soft">{{ communications|length }} logged</span></div>
 
   <form method="POST" action="{{ url_for('leads.add_communication', lead_id=lead.id) }}" style="margin-bottom:18px;">

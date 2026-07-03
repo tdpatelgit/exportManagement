@@ -19,7 +19,7 @@ clients_bp = Blueprint("clients", __name__, url_prefix="/clients")
 def list_clients():
     client_type = request.args.get("client_type") or None
     status = request.args.get("status") or None
-    clients = current_app.container.client_service.list_all(client_type=client_type, status=status)
+    clients = current_app.container.client_service.list_all(g.user.company_id, client_type=client_type, status=status)
     return render_template("clients/list.html", clients=clients,
                             client_type_filter=client_type, status_filter=status)
 
@@ -29,16 +29,19 @@ def list_clients():
 def view_client(client_id):
     container = current_app.container
     try:
-        client = container.client_service.get(client_id)
+        client = container.client_service.get(client_id, g.user.company_id)
     except NotFoundError:
         abort(404)
     communications = container.communication_service.list_for("client", client_id)
     payments = container.payment_repo.list_for_client(client_id)
-    documents = container.document_repo.list_for_client(client_id)
     total_received_inr = sum(p.amount_inr for p in payments)
+    # Documents card shows manually recorded entries plus every auto-generated
+    # document (currently just quotations) made against this client's
+    # originating lead - see ClientService.document_feed.
+    document_rows = container.client_service.document_feed(client)
     return render_template(
         "clients/detail.html", client=client, communications=communications,
-        payments=payments, documents=documents, total_received_inr=total_received_inr,
+        payments=payments, document_rows=document_rows, total_received_inr=total_received_inr,
     )
 
 
@@ -47,7 +50,7 @@ def view_client(client_id):
 def edit_client(client_id):
     container = current_app.container
     try:
-        client = container.client_service.get(client_id)
+        client = container.client_service.get(client_id, g.user.company_id)
     except NotFoundError:
         abort(404)
 
@@ -91,7 +94,7 @@ def update_status(client_id):
 def add_contact(client_id):
     try:
         current_app.container.client_service.add_contact(
-            client_id,
+            client_id, g.user,
             name=request.form.get("name", ""),
             phone=request.form.get("phone", ""),
             email=request.form.get("email", ""),
@@ -108,7 +111,7 @@ def add_contact(client_id):
 @login_required
 def set_primary_contact(client_id, contact_id):
     try:
-        current_app.container.client_service.set_primary_contact(client_id, contact_id)
+        current_app.container.client_service.set_primary_contact(client_id, g.user, contact_id)
         flash("Primary contact updated.", "success")
     except ValidationError as e:
         flash(str(e), "error")
@@ -143,7 +146,7 @@ def add_payment(client_id):
         amount_raw = request.form.get("amount_original", "0")
         amount = float(amount_raw) if amount_raw else 0
         payment = current_app.container.client_service.add_payment(
-            client_id,
+            client_id, g.user,
             account_name=request.form.get("account_name", ""),
             payment_datetime=request.form.get("payment_datetime", ""),
             amount_original=amount,
@@ -168,7 +171,7 @@ def add_payment(client_id):
 def add_document(client_id):
     try:
         current_app.container.client_service.add_document(
-            client_id,
+            client_id, g.user,
             document_name=request.form.get("document_name", ""),
             document_type=request.form.get("document_type", ""),
             document_date=request.form.get("document_date", ""),
