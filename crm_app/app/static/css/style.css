@@ -295,6 +295,7 @@ select, textarea {
   transition: border-color .12s ease, box-shadow .12s ease;
 }
 textarea { resize: vertical; min-height: 70px; }
+#items-table .js-product-name { min-height: 44px; margin-bottom: 4px; }
 input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--color-accent);

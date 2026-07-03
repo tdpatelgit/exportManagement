@@ -101,7 +101,7 @@
         {% for item in quotation.items %}
         <tr>
           <td class="num">{{ item.sr_no }}</td>
-          <td>{{ item.product_name }}</td>
+          <td>{{ item.product_name|replace('\n', '<br>')|safe }}</td>
           <td>{{ item.hsn_code or '—' }}</td>
           <td class="num">{{ '{:,.0f}'.format(item.quantity_boxes) if item.quantity_boxes else '—' }}</td>
           <td class="num">{{ '{:,.2f}'.format(item.quantity_value) }}</td>

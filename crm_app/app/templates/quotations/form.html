@@ -79,7 +79,7 @@
             <td class="js-sr">{{ loop.index }}</td>
             <td>
               <input type="hidden" name="item_product_id[]" class="js-product-id" value="{{ row.product_id or '' }}">
-              <input type="text" name="item_product_name[]" class="js-product-name" required value="{{ row.product_name }}">
+              <textarea name="item_product_name[]" class="js-product-name" rows="2" required>{{ row.product_name }}</textarea>
               <button type="button" class="btn btn-ghost btn-sm js-choose-product">📁 Choose</button>
             </td>
             <td><input type="text" name="item_hsn_code[]" class="js-hsn" value="{{ row.hsn_code or '' }}"></td>
@@ -209,7 +209,7 @@
       <td class="js-sr"></td>
       <td>
         <input type="hidden" name="item_product_id[]" class="js-product-id">
-        <input type="text" name="item_product_name[]" class="js-product-name" required>
+        <textarea name="item_product_name[]" class="js-product-name" rows="2" required></textarea>
         <button type="button" class="btn btn-ghost btn-sm js-choose-product">📁 Choose</button>
       </td>
       <td><input type="text" name="item_hsn_code[]" class="js-hsn"></td>
@@ -410,7 +410,7 @@
 
   function selectProduct(p) {
     if (!activeRow) return;
-    const pathName = currentBreadcrumb.map(g => g.name).concat(p.name).join(' ');
+    const pathName = currentBreadcrumb.map(g => g.name).concat(p.name).join('\n');
     activeRow.querySelector('.js-product-id').value = p.id;
     activeRow.querySelector('.js-product-name').value = pathName;
     activeRow.querySelector('.js-hsn').value = p.hsn_code || '';
