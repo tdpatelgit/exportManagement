@@ -151,9 +151,15 @@ CREATE TABLE IF NOT EXISTS our_company (
     gstin           TEXT,
     pan_no          TEXT,
     iec             TEXT,
-    lut             TEXT,
     bin             TEXT,
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS our_company_lut_details (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    lut_number      TEXT NOT NULL,
+    financial_year  TEXT NOT NULL,
+    is_primary      INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS our_company_contact_details (

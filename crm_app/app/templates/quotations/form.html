@@ -156,9 +156,39 @@
   <div class="modal-box">
     <div class="modal-header">
       <h3>Choose a product</h3>
-      <button type="button" class="btn-link-danger" id="picker-close">✕ Close</button>
+      <div class="flex gap-8">
+        {% if current_user.is_admin %}
+        <button type="button" class="btn btn-ghost btn-sm" id="picker-add-new-toggle">+ Add new product</button>
+        {% endif %}
+        <button type="button" class="btn-link-danger" id="picker-close">✕ Close</button>
+      </div>
     </div>
     <div class="breadcrumb-trail" id="picker-breadcrumb"></div>
+
+    {% if current_user.is_admin %}
+    <div id="picker-add-new-panel" class="card" hidden style="margin-bottom:14px;">
+      <div class="card-header"><h3>Add new product to this folder</h3></div>
+      <form id="picker-add-new-form">
+        <div class="form-row">
+          <div class="field"><label>Product name<span class="required-mark">*</span></label><input type="text" name="product_name" required></div>
+          <div class="field"><label>HSN code</label><input type="text" name="hsn_code"></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label>Packing</label><input type="text" name="packing"></div>
+          <div class="field"><label>Quantity</label><input type="text" name="quantity"></div>
+          <div class="field"><label>Alternate quantity (per box)</label><input type="text" name="alternate_quantity"></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label>Weight class</label><input type="text" name="weight_class"></div>
+          <div class="field"><label>Price (USD)</label><input type="number" step="0.01" name="price_usd"></div>
+        </div>
+        <div class="hint">Adds the product to the folder currently open below. Photos can be attached later from the full Products page.</div>
+        <button type="submit" class="btn btn-primary btn-sm">Save &amp; select</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="picker-add-new-cancel">Cancel</button>
+      </form>
+    </div>
+    {% endif %}
+
     <div id="picker-subgroups" class="folder-grid"></div>
     <div id="picker-products" class="table-wrap"></div>
   </div>
@@ -276,17 +306,47 @@
   const productsEl = document.getElementById('picker-products');
   let activeRow = null;
   let currentBreadcrumb = [];
+  let currentGroupId = null;
+  const addNewPanel = document.getElementById('picker-add-new-panel');
+  const addNewToggle = document.getElementById('picker-add-new-toggle');
+  const addNewForm = document.getElementById('picker-add-new-form');
+
+  function closeAddNewPanel() {
+    if (!addNewPanel) return;
+    addNewPanel.hidden = true;
+    addNewForm.reset();
+  }
 
   function openPicker(row) {
     activeRow = row;
     overlay.hidden = false;
+    closeAddNewPanel();
     loadFolder(null);
   }
 
-  document.getElementById('picker-close').addEventListener('click', () => { overlay.hidden = true; });
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.hidden = true; });
+  document.getElementById('picker-close').addEventListener('click', () => { overlay.hidden = true; closeAddNewPanel(); });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.hidden = true; closeAddNewPanel(); } });
+
+  if (addNewToggle) {
+    addNewToggle.addEventListener('click', () => { addNewPanel.hidden = !addNewPanel.hidden; });
+    document.getElementById('picker-add-new-cancel').addEventListener('click', closeAddNewPanel);
+    addNewForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const formData = new FormData(addNewForm);
+      formData.set('group_id', currentGroupId === null ? '' : currentGroupId);
+      fetch('/products/api/quick-create', { method: 'POST', body: formData })
+        .then(r => r.json().then(data => ({ ok: r.ok, data })))
+        .then(({ ok, data }) => {
+          if (!ok) { alert(data.error || 'Could not create the product.'); return; }
+          selectProduct(data);
+          closeAddNewPanel();
+        })
+        .catch(() => alert('Something went wrong creating the product.'));
+    });
+  }
 
   function loadFolder(groupId) {
+    currentGroupId = groupId;
     const url = groupId ? `/products/api/browse?group_id=${groupId}` : '/products/api/browse';
     fetch(url).then(r => r.json()).then(data => {
       currentBreadcrumb = data.breadcrumb;

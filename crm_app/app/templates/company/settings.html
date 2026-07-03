@@ -27,10 +27,30 @@
         <div class="field"><label for="pan_no">PAN No.</label><input type="text" id="pan_no" name="pan_no" value="{{ company.pan_no | default('', true) }}"></div>
         <div class="field"><label for="iec">IEC</label><input type="text" id="iec" name="iec" value="{{ company.iec | default('', true) }}"></div>
       </div>
-      <div class="form-row">
-        <div class="field"><label for="lut">LUT</label><input type="text" id="lut" name="lut" value="{{ company.lut | default('', true) }}"></div>
-        <div class="field"><label for="bin_no">BIN</label><input type="text" id="bin_no" name="bin_no" value="{{ company.bin | default('', true) }}"></div>
+      <div class="field"><label for="bin_no">BIN</label><input type="text" id="bin_no" name="bin_no" value="{{ company.bin | default('', true) }}"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>LUT (Letter of Undertaking) <span class="text-soft text-sm">— one row per financial year registered; leave empty if not applicable</span></legend>
+      <div id="lut-rows">
+        {% set luts = company.lut_details if company and company.lut_details else [] %}
+        {% if luts %}
+          {% for l in luts %}
+          <div class="repeatable-row">
+            <div class="field"><label>LUT number</label><input type="text" name="lut_number[]" value="{{ l.lut_number }}"></div>
+            <div class="field" style="max-width:160px;"><label>Financial year</label><input type="text" name="lut_financial_year[]" placeholder="e.g. 2025-26" value="{{ l.financial_year }}"></div>
+            <div class="radio-wrap"><input type="checkbox" name="lut_primary[]" value="{{ loop.index0 }}" id="lp-{{ loop.index0 }}" {{ 'checked' if l.is_primary }}><label for="lp-{{ loop.index0 }}">Current</label></div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="repeatable-row">
+            <div class="field"><label>LUT number</label><input type="text" name="lut_number[]"></div>
+            <div class="field" style="max-width:160px;"><label>Financial year</label><input type="text" name="lut_financial_year[]" placeholder="e.g. 2025-26"></div>
+            <div class="radio-wrap"><input type="checkbox" name="lut_primary[]" value="0" id="lp-0"><label for="lp-0">Current</label></div>
+          </div>
+        {% endif %}
       </div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addLutRow()">+ Add LUT</button>
     </fieldset>
 
     <fieldset>
@@ -146,6 +166,18 @@
       <div class="radio-wrap"><input type="checkbox" name="person_primary[]" value="${personCount}" id="pp-${personCount}"><label for="pp-${personCount}">Primary</label></div>`;
     wrap.appendChild(row);
     personCount++;
+  }
+  let lutCount = {{ (luts|length) if luts else 1 }};
+  function addLutRow() {
+    const wrap = document.getElementById('lut-rows');
+    const row = document.createElement('div');
+    row.className = 'repeatable-row';
+    row.innerHTML = `
+      <div class="field"><label>LUT number</label><input type="text" name="lut_number[]"></div>
+      <div class="field" style="max-width:160px;"><label>Financial year</label><input type="text" name="lut_financial_year[]" placeholder="e.g. 2025-26"></div>
+      <div class="radio-wrap"><input type="checkbox" name="lut_primary[]" value="${lutCount}" id="lp-${lutCount}"><label for="lp-${lutCount}">Current</label></div>`;
+    wrap.appendChild(row);
+    lutCount++;
   }
   let bankCount = {{ (banks|length) if banks else 1 }};
   function addBankRow() {

@@ -444,21 +444,36 @@ class CompanyRepository:
                 "SELECT * FROM our_company_bank_details ORDER BY is_primary DESC, id"
             )
         ]
+        company.lut_details = [
+            dict(r) for r in self.db.query(
+                "SELECT * FROM our_company_lut_details ORDER BY is_primary DESC, financial_year DESC, id"
+            )
+        ]
         return company
 
-    def upsert(self, company_name: str, address: str, gstin: str, pan_no: str, iec: str, lut: str, bin_no: str) -> None:
+    def upsert(self, company_name: str, address: str, gstin: str, pan_no: str, iec: str, bin_no: str) -> None:
         existing = self.db.query_one("SELECT id FROM our_company WHERE id = 1")
         if existing:
             self.db.execute(
-                """UPDATE our_company SET company_name = ?, address = ?, gstin = ?, pan_no = ?, iec = ?, lut = ?, bin = ?,
+                """UPDATE our_company SET company_name = ?, address = ?, gstin = ?, pan_no = ?, iec = ?, bin = ?,
                                            updated_at = datetime('now') WHERE id = 1""",
-                (company_name, address, gstin, pan_no, iec, lut, bin_no),
+                (company_name, address, gstin, pan_no, iec, bin_no),
             )
         else:
             self.db.execute(
-                "INSERT INTO our_company (id, company_name, address, gstin, pan_no, iec, lut, bin) VALUES (1, ?, ?, ?, ?, ?, ?, ?)",
-                (company_name, address, gstin, pan_no, iec, lut, bin_no),
+                "INSERT INTO our_company (id, company_name, address, gstin, pan_no, iec, bin) VALUES (1, ?, ?, ?, ?, ?, ?)",
+                (company_name, address, gstin, pan_no, iec, bin_no),
             )
+
+    def replace_lut_details(self, lut_details: list) -> None:
+        """lut_details: [{'lut_number': str, 'financial_year': str, 'is_primary': bool}]"""
+        with self.db.get_connection() as conn:
+            conn.execute("DELETE FROM our_company_lut_details")
+            for l in lut_details:
+                conn.execute(
+                    "INSERT INTO our_company_lut_details (lut_number, financial_year, is_primary) VALUES (?, ?, ?)",
+                    (l["lut_number"], l["financial_year"], int(l["is_primary"])),
+                )
 
     def replace_contact_details(self, details: list) -> None:
         """details: [{'type': 'phone'|'email', 'value': str, 'is_primary': bool}]"""

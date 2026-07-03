@@ -386,7 +386,7 @@ class CompanyService:
         return self.company_repo.get()
 
     def save(self, current_user: User, company_name: str, address: str, gstin: str, pan_no: str, iec: str,
-              lut: str, bin_no: str, contact_details: list, contact_persons: list, bank_details: list) -> None:
+              bin_no: str, contact_details: list, contact_persons: list, bank_details: list, lut_details: list) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can edit our company's profile.")
         if not company_name or not company_name.strip():
@@ -418,10 +418,15 @@ class CompanyService:
                 raise ValidationError(f"Bank detail '{b.get('bank_name') or '(unnamed)'}' is missing: {', '.join(missing)}.")
         valid_banks = bank_details
 
-        self.company_repo.upsert(company_name.strip(), address, gstin, pan_no, iec, lut, bin_no)
+        for l in lut_details:
+            if not l.get("lut_number", "").strip() or not l.get("financial_year", "").strip():
+                raise ValidationError("Every LUT row needs both a LUT number and a financial year.")
+
+        self.company_repo.upsert(company_name.strip(), address, gstin, pan_no, iec, bin_no)
         self.company_repo.replace_contact_details(valid_details)
         self.company_repo.replace_contact_persons(valid_persons)
         self.company_repo.replace_bank_details(valid_banks)
+        self.company_repo.replace_lut_details(lut_details)
 
 
 # ============================================================

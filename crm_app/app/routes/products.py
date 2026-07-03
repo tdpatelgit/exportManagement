@@ -65,6 +65,43 @@ def api_browse():
     })
 
 
+@products_bp.route("/api/quick-create", methods=["POST"])
+@admin_required
+def api_quick_create():
+    """Lets an admin add a brand new catalog product without leaving the
+    product picker modal (used from the quotation form), so a missing
+    product doesn't force a detour to the full Products page. Deliberately
+    skips photo uploads to keep the inline form quick - those can be added
+    later from the full product edit page."""
+    container = current_app.container
+    group_id = _int_or_none(request.form.get("group_id"))
+    try:
+        product = container.product_service.create_product(
+            current_user=g.user, group_id=group_id,
+            product_name=request.form.get("product_name", ""),
+            description="",
+            hsn_code=request.form.get("hsn_code", ""),
+            packing=request.form.get("packing", ""),
+            quantity=request.form.get("quantity", ""),
+            alternate_quantity=request.form.get("alternate_quantity", ""),
+            weight_class=request.form.get("weight_class", ""),
+            price_usd=request.form.get("price_usd", ""),
+            alt_text="",
+            photo_file=None, dimension_photo_file=None,
+        )
+    except ValidationError as e:
+        return jsonify({"error": str(e)}), 400
+    except NotFoundError:
+        return jsonify({"error": "That folder no longer exists."}), 404
+    return jsonify({
+        "id": product.id, "name": product.product_name, "hsn_code": product.hsn_code,
+        "packing": product.packing, "quantity": product.quantity,
+        "alternate_quantity": product.alternate_quantity, "weight_class": product.weight_class,
+        "price_usd": product.price_usd,
+        "photo_url": url_for("static", filename=product.photo_path) if product.photo_path else None,
+    })
+
+
 @products_bp.route("/group/new", methods=["GET", "POST"])
 @admin_required
 def new_group():

@@ -75,7 +75,7 @@ class Database:
                     conn.execute(f"ALTER TABLE our_company_bank_details ADD COLUMN {column} TEXT")
 
             existing = {r["name"] for r in conn.execute("PRAGMA table_info(our_company)")}
-            for column in ("lut", "bin", "address"):
+            for column in ("bin", "address"):
                 if existing and column not in existing:
                     conn.execute(f"ALTER TABLE our_company ADD COLUMN {column} TEXT")
 
@@ -144,6 +144,22 @@ class Database:
             existing = {r["name"] for r in conn.execute("PRAGMA table_info(quotations)")}
             if existing and "lead_id" not in existing:
                 conn.execute("ALTER TABLE quotations ADD COLUMN lead_id INTEGER REFERENCES leads(id)")
+
+            # `our_company.lut` used to hold a single LUT number; it's now a
+            # list in `our_company_lut_details` (one row per financial year).
+            # Carry over any existing value once, then null the old column
+            # out so this seed never fires again even if every LUT row is
+            # later deleted on purpose.
+            existing = {r["name"] for r in conn.execute("PRAGMA table_info(our_company)")}
+            if existing and "lut" in existing:
+                row = conn.execute("SELECT lut FROM our_company WHERE id = 1").fetchone()
+                if row and row["lut"]:
+                    conn.execute(
+                        "INSERT INTO our_company_lut_details (lut_number, financial_year, is_primary) "
+                        "VALUES (?, '', 1)",
+                        (row["lut"],),
+                    )
+                conn.execute("UPDATE our_company SET lut = NULL WHERE id = 1")
 
     def query(self, sql: str, params: tuple = ()) -> list:
         """Run a SELECT and return a list of sqlite3.Row objects."""

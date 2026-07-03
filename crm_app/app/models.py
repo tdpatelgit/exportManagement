@@ -257,13 +257,13 @@ class OurCompany:
     gstin: Optional[str]
     pan_no: Optional[str]
     iec: Optional[str]
-    lut: Optional[str] = None
     bin: Optional[str] = None
     address: Optional[str] = None
     updated_at: Optional[str] = None
     contact_details: List[dict] = field(default_factory=list)  # [{type, value, is_primary}]
     contact_persons: List[dict] = field(default_factory=list)  # [{name, is_primary}]
     bank_details: List[dict] = field(default_factory=list)  # [{bank_name, account_number, ifsc_code, branch, is_primary}]
+    lut_details: List[dict] = field(default_factory=list)  # [{lut_number, financial_year, is_primary}]
 
     @staticmethod
     def from_row(row) -> "OurCompany":
@@ -273,7 +273,6 @@ class OurCompany:
             gstin=row["gstin"],
             pan_no=row["pan_no"],
             iec=row["iec"],
-            lut=row["lut"] if "lut" in row.keys() else None,
             bin=row["bin"] if "bin" in row.keys() else None,
             address=row["address"] if "address" in row.keys() else None,
             updated_at=row["updated_at"],

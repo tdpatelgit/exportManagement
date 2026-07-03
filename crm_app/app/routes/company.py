@@ -34,6 +34,18 @@ def _extract_contact_persons(form) -> list:
     return persons
 
 
+def _extract_lut_details(form) -> list:
+    numbers = form.getlist("lut_number[]")
+    years = form.getlist("lut_financial_year[]")
+    primaries = set(form.getlist("lut_primary[]"))
+    entries = []
+    for i, number in enumerate(numbers):
+        year = years[i].strip() if i < len(years) else ""
+        if number.strip() or year:
+            entries.append({"lut_number": number.strip(), "financial_year": year, "is_primary": str(i) in primaries})
+    return entries
+
+
 def _extract_bank_details(form) -> list:
     """Keeps any row that has at least one field filled in (rather than
     silently dropping incomplete rows), so the service layer can reject
@@ -75,11 +87,11 @@ def settings():
                 gstin=request.form.get("gstin", ""),
                 pan_no=request.form.get("pan_no", ""),
                 iec=request.form.get("iec", ""),
-                lut=request.form.get("lut", ""),
                 bin_no=request.form.get("bin_no", ""),
                 contact_details=_extract_contact_details(request.form),
                 contact_persons=_extract_contact_persons(request.form),
                 bank_details=_extract_bank_details(request.form),
+                lut_details=_extract_lut_details(request.form),
             )
             flash("Our Company profile saved.", "success")
             return redirect(url_for("company.settings"))
