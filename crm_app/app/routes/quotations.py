@@ -16,7 +16,7 @@ from app.utils import login_required
 quotations_bp = Blueprint("quotations", __name__, url_prefix="/quotations")
 
 _HEADER_FIELDS = [
-    "quotation_date", "client_id", "buyer_name", "buyer_address", "buyer_reference_no",
+    "quotation_date", "lead_id", "buyer_name", "buyer_address", "buyer_reference_no",
     "port_of_loading", "port_of_discharge", "packing_details", "container_details",
     "shipping_mode", "shipping_terms", "payment_terms", "advance_percent", "against_bl_percent",
     "price_validity_days", "remarks", "discount_amount",
@@ -52,10 +52,10 @@ def _extract_items(form) -> list:
 
 def _form_context():
     container = current_app.container
-    clients = container.client_service.list_all()
+    leads = container.lead_service.list_for_dashboard(g.user)
     company = container.company_service.get()
     bank_options = company.bank_details if company else []
-    return clients, bank_options
+    return leads, bank_options
 
 
 def _alt_qty_map(items) -> dict:
@@ -103,28 +103,28 @@ def new_quotation():
             return redirect(url_for("quotations.view_quotation", quotation_id=quotation.id))
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
-            clients, bank_options = _form_context()
+            leads, bank_options = _form_context()
             items = _extract_items(request.form)
             return render_template(
-                "quotations/form.html", quotation=None, clients=clients, bank_options=bank_options,
+                "quotations/form.html", quotation=None, leads=leads, bank_options=bank_options,
                 form_data=request.form, form_items=items, alt_qty_map=_alt_qty_map(items),
                 today=date.today().isoformat(),
             ), 400
 
-    clients, bank_options = _form_context()
+    leads, bank_options = _form_context()
     prefill = None
     lead_id = request.args.get("lead_id")
     if lead_id:
         try:
             lead = container.lead_service.get(int(lead_id))
             prefill = {
-                "buyer_name": lead.company_name, "quotation_date": date.today().isoformat(),
+                "lead_id": lead.id, "buyer_name": lead.company_name, "quotation_date": date.today().isoformat(),
                 "price_validity_days": 30, "advance_percent": 0, "against_bl_percent": 0, "discount_amount": 0,
             }
         except (NotFoundError, ValueError):
             pass
     return render_template(
-        "quotations/form.html", quotation=None, clients=clients, bank_options=bank_options,
+        "quotations/form.html", quotation=None, leads=leads, bank_options=bank_options,
         form_data=prefill, form_items=None, alt_qty_map={}, today=date.today().isoformat(),
     )
 
@@ -160,17 +160,17 @@ def edit_quotation(quotation_id):
             return redirect(url_for("quotations.view_quotation", quotation_id=quotation_id))
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
-            clients, bank_options = _form_context()
+            leads, bank_options = _form_context()
             items = _extract_items(request.form)
             return render_template(
-                "quotations/form.html", quotation=quotation, clients=clients, bank_options=bank_options,
+                "quotations/form.html", quotation=quotation, leads=leads, bank_options=bank_options,
                 form_data=request.form, form_items=items, alt_qty_map=_alt_qty_map(items),
                 today=date.today().isoformat(),
             ), 400
 
-    clients, bank_options = _form_context()
+    leads, bank_options = _form_context()
     return render_template(
-        "quotations/form.html", quotation=quotation, clients=clients, bank_options=bank_options,
+        "quotations/form.html", quotation=quotation, leads=leads, bank_options=bank_options,
         form_data=None, form_items=None, alt_qty_map=_alt_qty_map(quotation.items), today=date.today().isoformat(),
     )
 

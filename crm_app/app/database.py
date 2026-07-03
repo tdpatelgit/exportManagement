@@ -141,6 +141,10 @@ class Database:
                 conn.execute("PRAGMA legacy_alter_table = OFF")
                 conn.execute("PRAGMA foreign_keys = ON")
 
+            existing = {r["name"] for r in conn.execute("PRAGMA table_info(quotations)")}
+            if existing and "lead_id" not in existing:
+                conn.execute("ALTER TABLE quotations ADD COLUMN lead_id INTEGER REFERENCES leads(id)")
+
     def query(self, sql: str, params: tuple = ()) -> list:
         """Run a SELECT and return a list of sqlite3.Row objects."""
         with self.get_connection() as conn:

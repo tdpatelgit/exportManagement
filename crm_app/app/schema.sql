@@ -217,7 +217,7 @@ CREATE TABLE IF NOT EXISTS quotations (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
     quotation_number        TEXT NOT NULL UNIQUE,
     quotation_date          TEXT NOT NULL,
-    client_id                INTEGER REFERENCES clients(id),   -- optional, just for prefill/reference
+    lead_id                  INTEGER REFERENCES leads(id),   -- optional, just for prefill/reference
     buyer_name              TEXT NOT NULL,
     buyer_address           TEXT,
     buyer_reference_no      TEXT,

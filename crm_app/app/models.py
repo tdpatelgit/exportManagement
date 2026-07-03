@@ -380,7 +380,7 @@ class Quotation:
     quotation_date: str
     buyer_name: str
     created_by: int
-    client_id: Optional[int] = None
+    lead_id: Optional[int] = None
     buyer_address: Optional[str] = None
     buyer_reference_no: Optional[str] = None
     port_of_loading: Optional[str] = None
@@ -413,7 +413,7 @@ class Quotation:
             id=row["id"],
             quotation_number=row["quotation_number"],
             quotation_date=row["quotation_date"],
-            client_id=row["client_id"],
+            lead_id=row["lead_id"] if "lead_id" in row.keys() else None,
             buyer_name=row["buyer_name"],
             buyer_address=row["buyer_address"],
             buyer_reference_no=row["buyer_reference_no"],

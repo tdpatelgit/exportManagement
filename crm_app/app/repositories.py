@@ -625,14 +625,14 @@ class QuotationRepository:
     def create(self, quotation: Quotation) -> Quotation:
         new_id = self.db.execute(
             """INSERT INTO quotations
-               (quotation_number, quotation_date, client_id, buyer_name, buyer_address,
+               (quotation_number, quotation_date, lead_id, buyer_name, buyer_address,
                 buyer_reference_no, port_of_loading, port_of_discharge, packing_details,
                 container_details, shipping_mode, shipping_terms, payment_terms,
                 advance_percent, against_bl_percent, price_validity_days, remarks,
                 discount_amount, bank_name, bank_account_number, bank_ifsc_code,
                 bank_swift_code, bank_branch, bank_address, created_by)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (quotation.quotation_number, quotation.quotation_date, quotation.client_id,
+            (quotation.quotation_number, quotation.quotation_date, quotation.lead_id,
              quotation.buyer_name, quotation.buyer_address, quotation.buyer_reference_no,
              quotation.port_of_loading, quotation.port_of_discharge, quotation.packing_details,
              quotation.container_details, quotation.shipping_mode, quotation.shipping_terms,
@@ -647,7 +647,7 @@ class QuotationRepository:
 
     def update(self, quotation_id: int, quotation: Quotation) -> None:
         self.db.execute(
-            """UPDATE quotations SET quotation_date = ?, client_id = ?, buyer_name = ?,
+            """UPDATE quotations SET quotation_date = ?, lead_id = ?, buyer_name = ?,
                                       buyer_address = ?, buyer_reference_no = ?, port_of_loading = ?,
                                       port_of_discharge = ?, packing_details = ?, container_details = ?,
                                       shipping_mode = ?, shipping_terms = ?, payment_terms = ?,
@@ -656,7 +656,7 @@ class QuotationRepository:
                                       bank_ifsc_code = ?, bank_swift_code = ?, bank_branch = ?, bank_address = ?,
                                       updated_at = datetime('now')
                WHERE id = ?""",
-            (quotation.quotation_date, quotation.client_id, quotation.buyer_name,
+            (quotation.quotation_date, quotation.lead_id, quotation.buyer_name,
              quotation.buyer_address, quotation.buyer_reference_no, quotation.port_of_loading,
              quotation.port_of_discharge, quotation.packing_details, quotation.container_details,
              quotation.shipping_mode, quotation.shipping_terms, quotation.payment_terms,

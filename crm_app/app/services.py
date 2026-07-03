@@ -764,11 +764,11 @@ class QuotationService:
             except ValueError:
                 raise ValidationError(f"'{key}' must be a whole number.")
 
-        client_id = int(fields["client_id"]) if fields.get("client_id") else None
+        lead_id = int(fields["lead_id"]) if fields.get("lead_id") else None
 
         quotation = Quotation(
             id=None, quotation_number="", quotation_date=quotation_date, buyer_name=buyer_name,
-            created_by=current_user.id, client_id=client_id,
+            created_by=current_user.id, lead_id=lead_id,
             buyer_address=(fields.get("buyer_address") or "").strip() or None,
             buyer_reference_no=(fields.get("buyer_reference_no") or "").strip() or None,
             port_of_loading=(fields.get("port_of_loading") or "").strip() or None,

@@ -15,15 +15,15 @@
   <div class="card">
     <div class="card-header"><h3>Buyer / Importer</h3></div>
     <div class="field">
-      <label for="client_select">Prefill from an existing client <span class="text-soft text-sm">(optional)</span></label>
-      <select id="client_select">
-        <option value="">— Select a client to prefill —</option>
-        {% for c in clients %}
-          <option value="{{ c.id }}" data-name="{{ c.company_name }}" data-address="{{ c.address or '' }}">{{ c.company_name }}</option>
+      <label for="lead_select">Prefill from an existing lead <span class="text-soft text-sm">(optional)</span></label>
+      <select id="lead_select">
+        <option value="">— Select a lead to prefill —</option>
+        {% for l in leads %}
+          <option value="{{ l.id }}" data-name="{{ l.company_name }}">{{ l.company_name }}</option>
         {% endfor %}
       </select>
     </div>
-    <input type="hidden" name="client_id" id="client_id" value="{{ data.client_id | default('', true) }}">
+    <input type="hidden" name="lead_id" id="lead_id" value="{{ data.lead_id | default('', true) }}">
     <div class="form-row">
       <div class="field"><label for="buyer_name">Buyer name<span class="required-mark">*</span></label><input type="text" id="buyer_name" name="buyer_name" required value="{{ data.buyer_name | default('', true) }}"></div>
       <div class="field"><label for="buyer_reference_no">Buyer reference no.</label><input type="text" id="buyer_reference_no" name="buyer_reference_no" value="{{ data.buyer_reference_no | default('', true) }}"></div>
@@ -249,13 +249,12 @@
   });
   document.getElementById('discount_amount').addEventListener('input', recalcTotals);
 
-  // ---- client dropdown prefill --------------------------------------------------
-  document.getElementById('client_select').addEventListener('change', (e) => {
+  // ---- lead dropdown prefill --------------------------------------------------
+  document.getElementById('lead_select').addEventListener('change', (e) => {
     const opt = e.target.selectedOptions[0];
-    if (!opt.value) { document.getElementById('client_id').value = ''; return; }
-    document.getElementById('client_id').value = opt.value;
+    if (!opt.value) { document.getElementById('lead_id').value = ''; return; }
+    document.getElementById('lead_id').value = opt.value;
     document.getElementById('buyer_name').value = opt.dataset.name || '';
-    document.getElementById('buyer_address').value = opt.dataset.address || '';
   });
 
   // ---- bank dropdown prefill --------------------------------------------------
