@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}My Account{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Account</div>
+    <h1>Account settings</h1>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <div class="card-header"><h3>Username</h3></div>
+    <form method="POST" action="{{ url_for('profile.change_username') }}">
+      <div class="field">
+        <label for="username">Username<span class="required-mark">*</span></label>
+        <input type="text" id="username" name="username" value="{{ current_user.username }}" required>
+      </div>
+      <button type="submit" class="btn btn-primary">Update username</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Password</h3></div>
+    <form method="POST" action="{{ url_for('profile.change_password') }}">
+      <div class="field">
+        <label for="current_password">Current password<span class="required-mark">*</span></label>
+        <input type="password" id="current_password" name="current_password" required>
+      </div>
+      <div class="field">
+        <label for="new_password">New password<span class="required-mark">*</span></label>
+        <input type="password" id="new_password" name="new_password" required minlength="6">
+      </div>
+      <div class="field">
+        <label for="confirm_password">Confirm new password<span class="required-mark">*</span></label>
+        <input type="password" id="confirm_password" name="confirm_password" required minlength="6">
+      </div>
+      <button type="submit" class="btn btn-primary">Update password</button>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

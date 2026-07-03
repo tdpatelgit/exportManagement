@@ -56,6 +56,25 @@ def new_employee():
     return render_template("employees/form.html")
 
 
+@admin_bp.route("/employees/<int:user_id>/edit-username", methods=["GET", "POST"])
+@admin_required
+def edit_username(user_id):
+    container = current_app.container
+    employee = container.user_repo.get_by_id(user_id)
+    if not employee:
+        abort(404)
+    if request.method == "POST":
+        try:
+            container.auth_service.change_username(
+                g.user, user_id, request.form.get("username", "")
+            )
+            flash("Username updated.", "success")
+            return redirect(url_for("admin.employee_detail", user_id=user_id))
+        except ValidationError as e:
+            flash(str(e), "error")
+    return render_template("employees/edit_username.html", employee=employee)
+
+
 @admin_bp.route("/employees/<int:user_id>/toggle-active", methods=["POST"])
 @admin_required
 def toggle_active(user_id):
@@ -64,8 +83,11 @@ def toggle_active(user_id):
     if not employee:
         abort(404)
     if employee.id == g.user.id:
-        flash("You can't deactivate your own account.", "error")
+        flash("You can't lock your own account.", "error")
+        return redirect(url_for("admin.list_employees"))
+    if employee.role != "employee":
+        flash("Only employee accounts can be locked from here.", "error")
         return redirect(url_for("admin.list_employees"))
     container.user_repo.set_active(user_id, not employee.is_active)
-    flash(f"{employee.full_name} is now {'inactive' if employee.is_active else 'active'}.", "success")
+    flash(f"{employee.full_name}'s account is now {'locked' if employee.is_active else 'unlocked'}.", "success")
     return redirect(url_for("admin.list_employees"))

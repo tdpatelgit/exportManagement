@@ -107,6 +107,7 @@ def create_app(config_class=Config) -> Flask:
     from app.routes.reports import reports_bp
     from app.routes.products import products_bp
     from app.routes.quotations import quotations_bp
+    from app.routes.profile import profile_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -117,6 +118,7 @@ def create_app(config_class=Config) -> Flask:
     app.register_blueprint(reports_bp)
     app.register_blueprint(products_bp)
     app.register_blueprint(quotations_bp)
+    app.register_blueprint(profile_bp)
 
     # --- friendly error pages --------------------------------------------------
     @app.errorhandler(403)

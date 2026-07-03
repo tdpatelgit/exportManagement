@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Edit Username{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Administration</div>
+    <h1>Change {{ employee.full_name }}'s username</h1>
+  </div>
+  <a href="{{ url_for('admin.employee_detail', user_id=employee.id) }}" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card" style="max-width:480px;">
+  <form method="POST">
+    <div class="field">
+      <label for="username">Username<span class="required-mark">*</span></label>
+      <input type="text" id="username" name="username" value="{{ employee.username }}" required>
+    </div>
+    <button type="submit" class="btn btn-primary">Save</button>
+    <a href="{{ url_for('admin.employee_detail', user_id=employee.id) }}" class="btn btn-ghost">Cancel</a>
+  </form>
+</div>
+
+{% endblock %}

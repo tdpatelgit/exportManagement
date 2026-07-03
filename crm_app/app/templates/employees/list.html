@@ -27,12 +27,13 @@
           <td class="num">{{ row.communication_count }}</td>
           <td>
             {% if row.employee.is_active %}<span class="pill" style="background:var(--color-success-bg); color:var(--color-success);">Active</span>
-            {% else %}<span class="pill" style="background:var(--color-danger-bg); color:var(--color-danger);">Inactive</span>{% endif %}
+            {% else %}<span class="pill" style="background:var(--color-danger-bg); color:var(--color-danger);">Locked</span>{% endif %}
           </td>
           <td class="flex gap-8">
             <a href="{{ url_for('admin.employee_detail', user_id=row.employee.id) }}" class="text-sm">View →</a>
+            <a href="{{ url_for('admin.edit_username', user_id=row.employee.id) }}" class="text-sm">Edit username</a>
             <form method="POST" action="{{ url_for('admin.toggle_active', user_id=row.employee.id) }}">
-              <button type="submit" class="btn btn-ghost btn-sm">{{ 'Deactivate' if row.employee.is_active else 'Activate' }}</button>
+              <button type="submit" class="btn btn-ghost btn-sm">{{ 'Lock' if row.employee.is_active else 'Unlock' }}</button>
             </form>
           </td>
         </tr>

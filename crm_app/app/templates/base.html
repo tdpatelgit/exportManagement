@@ -32,7 +32,8 @@
       <div class="sidebar-footer">
         <div class="sidebar-user">{{ current_user.full_name }}</div>
         <div class="sidebar-role">{{ current_user.role }}</div>
-        <a class="logout-link" href="{{ url_for('auth.logout') }}">Log out →</a>
+        <a class="logout-link" style="display:block; margin-bottom:6px;" href="{{ url_for('profile.settings') }}">⚙️ Account settings</a>
+        <a class="logout-link" style="display:block;" href="{{ url_for('auth.logout') }}">Log out →</a>
       </div>
       {% endif %}
     </aside>

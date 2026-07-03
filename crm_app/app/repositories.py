@@ -41,6 +41,12 @@ class UserRepositoryBase(ABC):
     @abstractmethod
     def set_active(self, user_id: int, is_active: bool) -> None: ...
 
+    @abstractmethod
+    def update_username(self, user_id: int, username: str) -> None: ...
+
+    @abstractmethod
+    def update_password_hash(self, user_id: int, password_hash: str) -> None: ...
+
 
 class SqliteUserRepository(UserRepositoryBase):
     def __init__(self, db: Database):
@@ -72,6 +78,12 @@ class SqliteUserRepository(UserRepositoryBase):
 
     def set_active(self, user_id: int, is_active: bool) -> None:
         self.db.execute("UPDATE users SET is_active = ? WHERE id = ?", (int(is_active), user_id))
+
+    def update_username(self, user_id: int, username: str) -> None:
+        self.db.execute("UPDATE users SET username = ? WHERE id = ?", (username, user_id))
+
+    def update_password_hash(self, user_id: int, password_hash: str) -> None:
+        self.db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
 
 
 # ============================================================

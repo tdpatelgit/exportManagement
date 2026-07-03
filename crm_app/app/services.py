@@ -64,6 +64,33 @@ class AuthService:
         )
         return self.user_repo.create(user)
 
+    def change_username(self, current_user: User, target_user_id: int, new_username: str) -> User:
+        """Employees may only rename themselves; admins may rename anyone
+        (including themselves)."""
+        if current_user.id != target_user_id and not current_user.is_admin:
+            raise PermissionDeniedError("You can only change your own username.")
+        target = self.user_repo.get_by_id(target_user_id)
+        if not target:
+            raise NotFoundError(f"User #{target_user_id} not found.")
+        new_username = (new_username or "").strip()
+        if not new_username:
+            raise ValidationError("Username is required.")
+        existing = self.user_repo.get_by_username(new_username)
+        if existing and existing.id != target.id:
+            raise ValidationError(f"Username '{new_username}' is already taken.")
+        self.user_repo.update_username(target.id, new_username)
+        target.username = new_username
+        return target
+
+    def change_password(self, user: User, current_password: str, new_password: str) -> None:
+        """Self-service only - the caller must already know their current
+        password, so there's no separate permission check to make here."""
+        if not check_password_hash(user.password_hash, current_password):
+            raise ValidationError("Current password is incorrect.")
+        if not new_password or len(new_password) < 6:
+            raise ValidationError("New password must be at least 6 characters.")
+        self.user_repo.update_password_hash(user.id, generate_password_hash(new_password))
+
 
 # ============================================================
 # CURRENCY CONVERSION SERVICE

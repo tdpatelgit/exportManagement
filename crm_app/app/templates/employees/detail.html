@@ -7,7 +7,15 @@
     <div class="eyebrow">Employee record</div>
     <h1>{{ employee.full_name }}</h1>
   </div>
-  <a href="{{ url_for('admin.list_employees') }}" class="btn btn-ghost">← Back to employees</a>
+  <div class="topbar-actions">
+    <a href="{{ url_for('admin.edit_username', user_id=employee.id) }}" class="btn btn-ghost">Edit username</a>
+    {% if employee.role == 'employee' %}
+    <form method="POST" action="{{ url_for('admin.toggle_active', user_id=employee.id) }}">
+      <button type="submit" class="btn btn-ghost">{{ 'Lock account' if employee.is_active else 'Unlock account' }}</button>
+    </form>
+    {% endif %}
+    <a href="{{ url_for('admin.list_employees') }}" class="btn btn-ghost">← Back to employees</a>
+  </div>
 </div>
 
 <div class="grid grid-3" style="margin-bottom:20px;">
