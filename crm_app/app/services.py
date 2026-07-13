@@ -24,11 +24,12 @@ from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
 from app.models import (
     User, Lead, Client, ContactPerson, Communication, PaymentEntry, DocumentEntry,
     LEAD_STATUSES, CLIENT_STATUSES, ProductGroup, Product, Quotation, QuotationItem,
+    ProformaInvoice, ProformaInvoiceItem,
 )
 from app.repositories import (
     TenantRepository, UserRepositoryBase, LeadRepositoryBase, ClientRepositoryBase,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
-    ProductGroupRepository, ProductRepository, QuotationRepository,
+    ProductGroupRepository, ProductRepository, QuotationRepository, ProformaInvoiceRepository,
 )
 
 
@@ -283,7 +284,8 @@ class ClientService:
     def __init__(self, client_repo: ClientRepositoryBase, lead_repo: LeadRepositoryBase,
                  comm_service: CommunicationService, payment_repo: PaymentRepository,
                  document_repo: DocumentRepository, currency_service: CurrencyService,
-                 quotation_repo: QuotationRepository):
+                 quotation_repo: QuotationRepository,
+                 proforma_invoice_repo: Optional[ProformaInvoiceRepository] = None):
         self.client_repo = client_repo
         self.lead_repo = lead_repo
         self.comm_service = comm_service
@@ -291,6 +293,7 @@ class ClientService:
         self.document_repo = document_repo
         self.currency_service = currency_service
         self.quotation_repo = quotation_repo
+        self.proforma_invoice_repo = proforma_invoice_repo
 
     # ---- lead -> client conversion (admin only) --------------------------------------------------
     def convert_lead(self, lead_id: int, admin_user: User, client_type: str = "Buyer") -> Client:
@@ -390,11 +393,12 @@ class ClientService:
 
     def document_feed(self, client: Client) -> List[dict]:
         """One combined, date-sorted list for the client's 'Documents' card:
-        manually recorded DocumentEntry rows plus every quotation made
-        against the client's originating lead (Quotation isn't a separate
-        section here - it's just another auto-generated document type, the
-        first one this app can actually produce). Future auto-generated
-        document types should feed into this the same way."""
+        manually recorded DocumentEntry rows plus every quotation/proforma
+        invoice made against the client's originating lead (these aren't
+        separate sections here - they're just auto-generated document types
+        feeding the same card). Future auto-generated document types should
+        feed into this the same way. `link` carries its own kwarg dict so
+        each document type's route can name its id param however it likes."""
         rows = [
             {
                 "name": d.document_name, "type": d.document_type, "date": d.document_date,
@@ -406,8 +410,15 @@ class ClientService:
             rows.append({
                 "name": q.quotation_number, "type": "Quotation", "date": q.quotation_date,
                 "notes": f"{q.buyer_name} · $ {q.invoice_value_usd:,.2f}",
-                "link": ("quotations.view_quotation", q.id),
+                "link": ("quotations.view_quotation", {"quotation_id": q.id}),
             })
+        if self.proforma_invoice_repo:
+            for pi in self.proforma_invoice_repo.list_for_lead(client.lead_id) if client.lead_id else []:
+                rows.append({
+                    "name": pi.invoice_number, "type": "Proforma Invoice", "date": pi.invoice_date,
+                    "notes": f"{pi.consignee_name} · $ {pi.invoice_value_usd:,.2f}",
+                    "link": ("proforma_invoices.view_proforma_invoice", {"proforma_invoice_id": pi.id}),
+                })
         rows.sort(key=lambda r: r["date"], reverse=True)
         return rows
 
@@ -888,3 +899,223 @@ class QuotationService:
         existing = self.get(quotation_id, current_user.company_id)
         self._assert_can_modify(existing, current_user)
         self.quotation_repo.delete(quotation_id)
+
+
+# ============================================================
+# PROFORMA INVOICE SERVICE
+# ============================================================
+class ProformaInvoiceService:
+    """Mirrors QuotationService layer-for-layer. The one thing it adds is
+    build_prefill_from_quotation - a Proforma Invoice can be started from an
+    existing Quotation, copying its buyer/product/bank data in as a one-time
+    prefill (not a live link) the same way `?lead_id=` prefills a new
+    Quotation from a Lead."""
+
+    def __init__(self, invoice_repo: ProformaInvoiceRepository, product_repo: ProductRepository,
+                 lead_repo: LeadRepositoryBase, quotation_repo: QuotationRepository):
+        self.invoice_repo = invoice_repo
+        self.product_repo = product_repo
+        self.lead_repo = lead_repo
+        self.quotation_repo = quotation_repo
+
+    # ---- reads --------------------------------------------------
+    def get(self, invoice_id: int, company_id: int) -> ProformaInvoice:
+        invoice = self.invoice_repo.get_by_id(invoice_id)
+        if not invoice or invoice.company_id != company_id:
+            # 404, not 403 - don't reveal that another company's invoice exists.
+            raise NotFoundError(f"Proforma invoice #{invoice_id} not found.")
+        return invoice
+
+    def list_all(self, company_id: int) -> List[ProformaInvoice]:
+        return self.invoice_repo.list_all(company_id)
+
+    def list_for_lead(self, lead_id: Optional[int]) -> List[ProformaInvoice]:
+        """Same shape as QuotationService.list_for_lead - unscoped by
+        company_id because the caller already owns the lead/client."""
+        if not lead_id:
+            return []
+        return self.invoice_repo.list_for_lead(lead_id)
+
+    # ---- permission --------------------------------------------------
+    def _assert_can_modify(self, invoice: ProformaInvoice, current_user: User):
+        if current_user.is_admin:
+            return
+        if invoice.created_by != current_user.id:
+            raise PermissionDeniedError("You can only manage proforma invoices you created yourself.")
+
+    # ---- number generation --------------------------------------------------
+    def _generate_number(self, company_id: int, invoice_date: str) -> str:
+        """PI{YYYYMMDD}{seq} where seq is that day's proforma invoice count + 1
+        for this company, zero-padded to 3 digits (e.g. PI20260702001)."""
+        date_part = invoice_date.replace("-", "")
+        prefix = f"PI{date_part}"
+        seq = self.invoice_repo.count_for_date_prefix(company_id, prefix) + 1
+        return f"{prefix}{seq:03d}"
+
+    # ---- prefill from an existing quotation --------------------------------------------------
+    def build_prefill_from_quotation(self, quotation: Quotation) -> dict:
+        """Caller must have already loaded `quotation` via
+        QuotationService.get(quotation_id, current_user.company_id) so
+        cross-company ownership is already verified."""
+        fields = {
+            "quotation_id": quotation.id,
+            "lead_id": quotation.lead_id,
+            "consignee_name": quotation.buyer_name,
+            "consignee_address": quotation.buyer_address,
+            "buyer_order_no": quotation.buyer_reference_no,
+            "port_of_loading": quotation.port_of_loading,
+            "port_of_discharge": quotation.port_of_discharge,
+            "container_details": quotation.container_details,
+            "terms_of_delivery": quotation.shipping_terms,
+            "payment_terms": quotation.payment_terms,
+            "sea_freight": quotation.sea_freight,
+            "insurance": quotation.insurance,
+            "certification": quotation.certification,
+            "other_charges": quotation.other_charges,
+            "discount_amount": quotation.discount_amount,
+            "bank_name": quotation.bank_name,
+            "bank_account_number": quotation.bank_account_number,
+            "bank_ifsc_code": quotation.bank_ifsc_code,
+            "bank_swift_code": quotation.bank_swift_code,
+            "bank_branch": quotation.bank_branch,
+            "bank_address": quotation.bank_address,
+        }
+        items = [
+            {
+                "product_id": item.product_id, "product_name": item.product_name,
+                "hsn_code": item.hsn_code, "quantity_boxes": item.quantity_boxes,
+                "quantity_value": item.quantity_value, "unit": item.unit,
+                "price_usd": item.price_usd,
+            }
+            for item in quotation.items
+        ]
+        return {"fields": fields, "items": items}
+
+    # ---- validation --------------------------------------------------
+    def _build_items(self, company_id: int, raw_items: list) -> List[ProformaInvoiceItem]:
+        items = []
+        for i, raw in enumerate(raw_items, start=1):
+            product_name = (raw.get("product_name") or "").strip()
+            if not product_name:
+                continue
+            try:
+                quantity_value = float(raw.get("quantity_value") or 0)
+                price_usd = float(raw.get("price_usd") or 0)
+                quantity_boxes = float(raw["quantity_boxes"]) if raw.get("quantity_boxes") else None
+                pallets = float(raw["pallets"]) if raw.get("pallets") else None
+            except ValueError:
+                raise ValidationError(f"Row {i}: quantity, pallets and price must be numbers.")
+            product_id = int(raw["product_id"]) if raw.get("product_id") else None
+
+            # Same trust boundary as QuotationService._build_items - only
+            # trust a product from this same company for the Boxes x
+            # Alternate Quantity auto-calc.
+            if product_id and quantity_boxes:
+                product = self.product_repo.get_by_id(product_id)
+                if product and product.company_id == company_id and product.alternate_quantity:
+                    try:
+                        quantity_value = round(quantity_boxes * float(product.alternate_quantity), 2)
+                    except ValueError:
+                        pass
+
+            if quantity_value <= 0:
+                raise ValidationError(f"Row {i} ('{product_name}'): quantity is compulsory and must be greater than zero.")
+            if price_usd < 0:
+                raise ValidationError(f"Row {i} ('{product_name}'): price can't be negative.")
+            items.append(ProformaInvoiceItem(
+                id=None, proforma_invoice_id=None, sr_no=i, product_id=product_id, product_name=product_name,
+                hsn_code=(raw.get("hsn_code") or "").strip() or None,
+                pallets=pallets, quantity_boxes=quantity_boxes, quantity_value=quantity_value,
+                unit=(raw.get("unit") or "SQM").strip() or "SQM",
+                price_usd=price_usd, total_usd=round(quantity_value * price_usd, 2),
+            ))
+        if not items:
+            raise ValidationError("At least one product line is compulsory.")
+        return items
+
+    def _build_header(self, current_user: User, fields: dict, items: List[ProformaInvoiceItem]) -> ProformaInvoice:
+        consignee_name = (fields.get("consignee_name") or "").strip()
+        if not consignee_name:
+            raise ValidationError("Consignee name is compulsory.")
+        invoice_date = (fields.get("invoice_date") or "").strip() or date.today().isoformat()
+
+        def _float(key, default=0):
+            raw = fields.get(key)
+            try:
+                return float(raw) if raw not in (None, "") else default
+            except ValueError:
+                raise ValidationError(f"'{key}' must be a number.")
+
+        lead_id = int(fields["lead_id"]) if fields.get("lead_id") else None
+        if lead_id is not None:
+            # Only trust a lead from this same company - otherwise a crafted
+            # lead_id could attach this invoice to another company's lead.
+            lead = self.lead_repo.get_by_id(lead_id)
+            if not lead or lead.company_id != current_user.company_id:
+                lead_id = None
+
+        quotation_id = int(fields["quotation_id"]) if fields.get("quotation_id") else None
+        if quotation_id is not None:
+            # Only trust a quotation from this same company - same reasoning as lead_id above.
+            quotation = self.quotation_repo.get_by_id(quotation_id)
+            if not quotation or quotation.company_id != current_user.company_id:
+                quotation_id = None
+
+        invoice = ProformaInvoice(
+            id=None, company_id=current_user.company_id, invoice_number="", invoice_date=invoice_date,
+            consignee_name=consignee_name, created_by=current_user.id, lead_id=lead_id,
+            quotation_id=quotation_id,
+            export_ref_no=(fields.get("export_ref_no") or "").strip() or None,
+            buyer_order_no=(fields.get("buyer_order_no") or "").strip() or None,
+            other_reference=(fields.get("other_reference") or "").strip() or None,
+            consignee_address=(fields.get("consignee_address") or "").strip() or None,
+            notify_name=(fields.get("notify_name") or "").strip() or None,
+            notify_address=(fields.get("notify_address") or "").strip() or None,
+            country_of_origin=(fields.get("country_of_origin") or "").strip() or "INDIA",
+            country_of_destination=(fields.get("country_of_destination") or "").strip() or None,
+            vessel_flight=(fields.get("vessel_flight") or "").strip() or None,
+            port_of_loading=(fields.get("port_of_loading") or "").strip() or None,
+            port_of_discharge=(fields.get("port_of_discharge") or "").strip() or None,
+            final_destination=(fields.get("final_destination") or "").strip() or None,
+            transhipment=(fields.get("transhipment") or "").strip() or None,
+            partial_shipment=(fields.get("partial_shipment") or "").strip() or None,
+            variation_in_qty=(fields.get("variation_in_qty") or "").strip() or None,
+            delivery_period=(fields.get("delivery_period") or "").strip() or None,
+            container_details=(fields.get("container_details") or "").strip() or None,
+            terms_of_delivery=(fields.get("terms_of_delivery") or "").strip() or None,
+            payment_terms=(fields.get("payment_terms") or "").strip() or None,
+            remarks=(fields.get("remarks") or "").strip() or None,
+            sea_freight=_float("sea_freight", 0),
+            insurance=_float("insurance", 0),
+            certification=_float("certification", 0),
+            other_charges=_float("other_charges", 0),
+            discount_amount=_float("discount_amount", 0),
+            bank_name=(fields.get("bank_name") or "").strip() or None,
+            bank_account_number=(fields.get("bank_account_number") or "").strip() or None,
+            bank_ifsc_code=(fields.get("bank_ifsc_code") or "").strip() or None,
+            bank_swift_code=(fields.get("bank_swift_code") or "").strip() or None,
+            bank_branch=(fields.get("bank_branch") or "").strip() or None,
+            bank_address=(fields.get("bank_address") or "").strip() or None,
+            items=items,
+        )
+        return invoice
+
+    # ---- writes --------------------------------------------------
+    def create(self, current_user: User, fields: dict, raw_items: list) -> ProformaInvoice:
+        items = self._build_items(current_user.company_id, raw_items)
+        invoice = self._build_header(current_user, fields, items)
+        invoice.invoice_number = self._generate_number(current_user.company_id, invoice.invoice_date)
+        return self.invoice_repo.create(invoice)
+
+    def update(self, current_user: User, invoice_id: int, fields: dict, raw_items: list) -> ProformaInvoice:
+        existing = self.get(invoice_id, current_user.company_id)
+        self._assert_can_modify(existing, current_user)
+        items = self._build_items(current_user.company_id, raw_items)
+        invoice = self._build_header(current_user, fields, items)
+        self.invoice_repo.update(invoice_id, invoice)
+        return self.get(invoice_id, current_user.company_id)
+
+    def delete(self, current_user: User, invoice_id: int) -> None:
+        existing = self.get(invoice_id, current_user.company_id)
+        self._assert_can_modify(existing, current_user)
+        self.invoice_repo.delete(invoice_id)

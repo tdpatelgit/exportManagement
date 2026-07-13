@@ -18,12 +18,12 @@ from app.database import Database
 from app.repositories import (
     TenantRepository, SqliteUserRepository, SqliteLeadRepository, SqliteClientRepository,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
-    ProductGroupRepository, ProductRepository, QuotationRepository,
+    ProductGroupRepository, ProductRepository, QuotationRepository, ProformaInvoiceRepository,
 )
 from app.services import (
     AuthService, LeadService, ClientService, CurrencyService,
     CommunicationService, StatsService, CompanyService, ReportService, ProductService,
-    QuotationService,
+    QuotationService, ProformaInvoiceService,
 )
 from app.utils import register_template_helpers
 
@@ -49,6 +49,7 @@ class ServiceContainer:
         self.product_group_repo = ProductGroupRepository(db)
         self.product_repo = ProductRepository(db)
         self.quotation_repo = QuotationRepository(db)
+        self.proforma_invoice_repo = ProformaInvoiceRepository(db)
 
         # Services (business logic layer)
         self.auth_service = AuthService(self.user_repo, self.tenant_repo)
@@ -58,7 +59,7 @@ class ServiceContainer:
         self.client_service = ClientService(
             self.client_repo, self.lead_repo, self.communication_service,
             self.payment_repo, self.document_repo, self.currency_service,
-            self.quotation_repo,
+            self.quotation_repo, self.proforma_invoice_repo,
         )
         self.stats_service = StatsService(self.user_repo, self.lead_repo, self.comm_repo, self.client_repo)
         self.company_service = CompanyService(self.company_repo)
@@ -68,6 +69,9 @@ class ServiceContainer:
             Config.PRODUCT_UPLOAD_FOLDER, Config.ALLOWED_IMAGE_EXTENSIONS,
         )
         self.quotation_service = QuotationService(self.quotation_repo, self.product_repo, self.lead_repo)
+        self.proforma_invoice_service = ProformaInvoiceService(
+            self.proforma_invoice_repo, self.product_repo, self.lead_repo, self.quotation_repo,
+        )
 
 
 def create_app(config_class=Config) -> Flask:
@@ -116,6 +120,7 @@ def create_app(config_class=Config) -> Flask:
     from app.routes.reports import reports_bp
     from app.routes.products import products_bp
     from app.routes.quotations import quotations_bp
+    from app.routes.proforma_invoices import proforma_invoices_bp
     from app.routes.profile import profile_bp
 
     app.register_blueprint(auth_bp)
@@ -127,6 +132,7 @@ def create_app(config_class=Config) -> Flask:
     app.register_blueprint(reports_bp)
     app.register_blueprint(products_bp)
     app.register_blueprint(quotations_bp)
+    app.register_blueprint(proforma_invoices_bp)
     app.register_blueprint(profile_bp)
 
     # --- friendly error pages --------------------------------------------------

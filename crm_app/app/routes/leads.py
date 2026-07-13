@@ -81,7 +81,11 @@ def view_lead(lead_id):
         abort(403)
     communications = container.communication_service.list_for("lead", lead_id)
     quotations = container.quotation_service.list_for_lead(lead_id)
-    return render_template("leads/detail.html", lead=lead, communications=communications, quotations=quotations)
+    proforma_invoices = container.proforma_invoice_service.list_for_lead(lead_id)
+    return render_template(
+        "leads/detail.html", lead=lead, communications=communications,
+        quotations=quotations, proforma_invoices=proforma_invoices,
+    )
 
 
 @leads_bp.route("/<int:lead_id>/edit", methods=["GET", "POST"])

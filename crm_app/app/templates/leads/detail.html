@@ -109,7 +109,10 @@
           <td class="text-sm">{{ q.quotation_date }}</td>
           <td>{{ q.buyer_name }}</td>
           <td class="num">$ {{ '{:,.2f}'.format(q.invoice_value_usd) }}</td>
-          <td><a href="{{ url_for('quotations.view_quotation', quotation_id=q.id) }}" class="text-sm">Open →</a></td>
+          <td class="flex gap-8">
+            <a href="{{ url_for('quotations.view_quotation', quotation_id=q.id) }}" class="text-sm">Open →</a>
+            <a href="{{ url_for('proforma_invoices.new_proforma_invoice', quotation_id=q.id) }}" class="text-sm">Generate PI →</a>
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -120,6 +123,36 @@
   {% endif %}
   {% else %}
   <div class="empty-state">No quotations yet for this lead. <a href="{{ url_for('quotations.new_quotation', lead_id=lead.id) }}">Create one →</a></div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h3>Proforma Invoices</h3>
+    <a href="{{ url_for('proforma_invoices.new_proforma_invoice', lead_id=lead.id) }}" class="btn btn-ghost btn-sm">+ New proforma invoice</a>
+  </div>
+  {% if proforma_invoices %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead><tr><th>Number</th><th>Date</th><th>Consignee</th><th class="num">Invoice value (USD)</th><th></th></tr></thead>
+      <tbody>
+        {% for pi in proforma_invoices %}
+        <tr>
+          <td class="mono text-sm">{{ pi.invoice_number }}</td>
+          <td class="text-sm">{{ pi.invoice_date }}</td>
+          <td>{{ pi.consignee_name }}</td>
+          <td class="num">$ {{ '{:,.2f}'.format(pi.invoice_value_usd) }}</td>
+          <td><a href="{{ url_for('proforma_invoices.view_proforma_invoice', proforma_invoice_id=pi.id) }}" class="text-sm">Open →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if lead.is_converted %}
+  <div class="hint" style="margin-top:10px;">These proforma invoices also appear on the converted client's page automatically.</div>
+  {% endif %}
+  {% else %}
+  <div class="empty-state">No proforma invoices yet for this lead. <a href="{{ url_for('proforma_invoices.new_proforma_invoice', lead_id=lead.id) }}">Create one →</a></div>
   {% endif %}
 </div>
 

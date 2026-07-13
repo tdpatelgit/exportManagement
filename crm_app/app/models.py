@@ -501,3 +501,145 @@ class Quotation:
     def invoice_value_usd(self) -> float:
         return (self.subtotal_usd + self.sea_freight + self.insurance
                 + self.certification + self.other_charges - self.discount_amount)
+
+
+@dataclass
+class ProformaInvoiceItem:
+    id: Optional[int]
+    proforma_invoice_id: Optional[int]
+    sr_no: int
+    product_name: str
+    product_id: Optional[int] = None
+    dimension_mm: Optional[str] = None
+    hsn_code: Optional[str] = None
+    pallets: Optional[float] = None
+    quantity_boxes: Optional[float] = None
+    quantity_value: float = 0
+    unit: str = "SQM"
+    price_usd: float = 0
+    total_usd: float = 0
+
+    @staticmethod
+    def from_row(row) -> "ProformaInvoiceItem":
+        return ProformaInvoiceItem(
+            id=row["id"],
+            proforma_invoice_id=row["proforma_invoice_id"],
+            sr_no=row["sr_no"],
+            product_id=row["product_id"],
+            product_name=row["product_name"],
+            dimension_mm=row["dimension_mm"],
+            hsn_code=row["hsn_code"],
+            pallets=row["pallets"],
+            quantity_boxes=row["quantity_boxes"],
+            quantity_value=row["quantity_value"],
+            unit=row["unit"],
+            price_usd=row["price_usd"],
+            total_usd=row["total_usd"],
+        )
+
+
+@dataclass
+class ProformaInvoice:
+    id: Optional[int]
+    company_id: int
+    invoice_number: str
+    invoice_date: str
+    consignee_name: str
+    created_by: int
+    lead_id: Optional[int] = None
+    quotation_id: Optional[int] = None
+    export_ref_no: Optional[str] = None
+    buyer_order_no: Optional[str] = None
+    other_reference: Optional[str] = None
+    consignee_address: Optional[str] = None
+    notify_name: Optional[str] = None
+    notify_address: Optional[str] = None
+    country_of_origin: Optional[str] = "INDIA"
+    country_of_destination: Optional[str] = None
+    vessel_flight: Optional[str] = None
+    port_of_loading: Optional[str] = None
+    port_of_discharge: Optional[str] = None
+    final_destination: Optional[str] = None
+    transhipment: Optional[str] = None
+    partial_shipment: Optional[str] = None
+    variation_in_qty: Optional[str] = None
+    delivery_period: Optional[str] = None
+    container_details: Optional[str] = None
+    terms_of_delivery: Optional[str] = None
+    payment_terms: Optional[str] = None
+    remarks: Optional[str] = None
+    sea_freight: float = 0
+    insurance: float = 0
+    certification: float = 0
+    other_charges: float = 0
+    discount_amount: float = 0
+    bank_name: Optional[str] = None
+    bank_account_number: Optional[str] = None
+    bank_ifsc_code: Optional[str] = None
+    bank_swift_code: Optional[str] = None
+    bank_branch: Optional[str] = None
+    bank_address: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    created_by_name: Optional[str] = None  # populated by joined queries only
+    items: List[ProformaInvoiceItem] = field(default_factory=list)
+    computed_subtotal_usd: Optional[float] = None  # precomputed by list queries that don't load items
+
+    @staticmethod
+    def from_row(row) -> "ProformaInvoice":
+        return ProformaInvoice(
+            id=row["id"],
+            company_id=row["company_id"],
+            invoice_number=row["invoice_number"],
+            invoice_date=row["invoice_date"],
+            lead_id=row["lead_id"],
+            quotation_id=row["quotation_id"],
+            export_ref_no=row["export_ref_no"],
+            buyer_order_no=row["buyer_order_no"],
+            other_reference=row["other_reference"],
+            consignee_name=row["consignee_name"],
+            consignee_address=row["consignee_address"],
+            notify_name=row["notify_name"],
+            notify_address=row["notify_address"],
+            country_of_origin=row["country_of_origin"],
+            country_of_destination=row["country_of_destination"],
+            vessel_flight=row["vessel_flight"],
+            port_of_loading=row["port_of_loading"],
+            port_of_discharge=row["port_of_discharge"],
+            final_destination=row["final_destination"],
+            transhipment=row["transhipment"],
+            partial_shipment=row["partial_shipment"],
+            variation_in_qty=row["variation_in_qty"],
+            delivery_period=row["delivery_period"],
+            container_details=row["container_details"],
+            terms_of_delivery=row["terms_of_delivery"],
+            payment_terms=row["payment_terms"],
+            remarks=row["remarks"],
+            sea_freight=row["sea_freight"],
+            insurance=row["insurance"],
+            certification=row["certification"],
+            other_charges=row["other_charges"],
+            discount_amount=row["discount_amount"],
+            bank_name=row["bank_name"],
+            bank_account_number=row["bank_account_number"],
+            bank_ifsc_code=row["bank_ifsc_code"],
+            bank_swift_code=row["bank_swift_code"],
+            bank_branch=row["bank_branch"],
+            bank_address=row["bank_address"],
+            created_by=row["created_by"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            created_by_name=row["created_by_name"] if "created_by_name" in row.keys() else None,
+            computed_subtotal_usd=row["items_total"] if "items_total" in row.keys() else None,
+        )
+
+    @property
+    def subtotal_usd(self) -> float:
+        if self.computed_subtotal_usd is not None:
+            return self.computed_subtotal_usd
+        return sum(item.total_usd for item in self.items)
+
+    @property
+    def invoice_value_usd(self) -> float:
+        return (self.subtotal_usd + self.sea_freight + self.insurance
+                + self.certification + self.other_charges - self.discount_amount)

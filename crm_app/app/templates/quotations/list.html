@@ -34,7 +34,10 @@
           <td><strong>{{ q.buyer_name }}</strong></td>
           <td class="text-sm">{{ q.created_by_name }}</td>
           <td class="num">$ {{ '{:,.2f}'.format(q.invoice_value_usd) }}</td>
-          <td><a href="{{ url_for('quotations.view_quotation', quotation_id=q.id) }}" class="text-sm">Open →</a></td>
+          <td class="flex gap-8">
+            <a href="{{ url_for('quotations.view_quotation', quotation_id=q.id) }}" class="text-sm">Open →</a>
+            <a href="{{ url_for('proforma_invoices.new_proforma_invoice', quotation_id=q.id) }}" class="text-sm">Generate PI →</a>
+          </td>
         </tr>
         {% endfor %}
       </tbody>

@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ invoice.invoice_number }} · Proforma Invoice</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="quote-print-body">
+
+  <div class="quote-toolbar no-print">
+    <a href="{{ url_for('proforma_invoices.list_proforma_invoices') }}" class="btn btn-ghost btn-sm">← All proforma invoices</a>
+    <div class="flex gap-8">
+      <a href="{{ url_for('proforma_invoices.edit_proforma_invoice', proforma_invoice_id=invoice.id) }}" class="btn btn-ghost btn-sm">Edit</a>
+      <form method="POST" action="{{ url_for('proforma_invoices.delete_proforma_invoice', proforma_invoice_id=invoice.id) }}" onsubmit="return confirm('Delete this proforma invoice?');">
+        <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+      </form>
+      <button type="button" class="btn btn-primary btn-sm" onclick="window.print()">🖨 Print / Save as PDF</button>
+    </div>
+  </div>
+
+  {% set phone = (company.contact_details | selectattr('type', 'equalto', 'phone') | list | first) if company else None %}
+  {% set email = (company.contact_details | selectattr('type', 'equalto', 'email') | list | first) if company else None %}
+
+  <div class="quote-sheet">
+    <div class="quote-banner">PROFORMA INVOICE</div>
+
+    <table class="quote-meta-table">
+      <tr>
+        <td class="quote-side-label" rowspan="4">EXPORTER</td>
+        <td class="quote-block" rowspan="4">
+          <strong>{{ company.company_name if company else '' }}</strong><br>
+          {{ (company.address or '')|replace('\n', '<br>')|safe if company else '' }}
+          {% if email %}<br>EMAIL: {{ email.value }}{% endif %}
+          {% if phone %}&nbsp;&nbsp;MOBILE: {{ phone.value }}{% endif %}
+          {% if company and company.gstin %}<br>GSTIN: {{ company.gstin }}{% endif %}
+          {% if company and company.iec %}<br>IEC: {{ company.iec }}{% endif %}
+        </td>
+        <td class="quote-field-label">INVOICE NO</td>
+        <td class="quote-field-value mono">{{ invoice.invoice_number }}</td>
+        <td class="quote-field-label">DATE</td>
+        <td class="quote-field-value">{{ invoice.invoice_date }}</td>
+      </tr>
+      <tr>
+        <td class="quote-field-label">EXPORT REF. NO</td>
+        <td class="quote-field-value">{{ invoice.export_ref_no or '—' }}</td>
+        <td class="quote-field-label">DATE</td>
+        <td class="quote-field-value">{{ invoice.export_ref_no and invoice.invoice_date or '—' }}</td>
+      </tr>
+      <tr>
+        <td class="quote-field-label">BUYER ORDER NO &amp; DATE</td>
+        <td class="quote-field-value" colspan="3">{{ invoice.buyer_order_no or '—' }}</td>
+      </tr>
+      <tr>
+        <td class="quote-field-label">OTHER REFERENCE(S)</td>
+        <td class="quote-field-value" colspan="3">{{ invoice.other_reference or '—' }}</td>
+      </tr>
+
+      <tr>
+        <td class="quote-side-label">CONSIGNEE</td>
+        <td class="quote-block">
+          <strong>{{ invoice.consignee_name }}</strong><br>
+          {{ (invoice.consignee_address or '')|replace('\n', '<br>')|safe }}
+        </td>
+        <td class="quote-side-label-upright">Buyer if Other<br>Than<br>Consignee<br>[NOTIFY]</td>
+        <td class="quote-block">
+          {% if invoice.notify_name or invoice.notify_address %}
+          <strong>{{ invoice.notify_name or '' }}</strong><br>
+          {{ (invoice.notify_address or '')|replace('\n', '<br>')|safe }}
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+
+      <tr>
+        <td class="quote-field-label">COUNTRY OF ORIGIN</td>
+        <td class="quote-field-value">{{ invoice.country_of_origin or '—' }}</td>
+        <td class="quote-field-label">COUNTRY OF FINAL DESTINATION</td>
+        <td class="quote-field-value">{{ invoice.country_of_destination or '—' }}</td>
+      </tr>
+      <tr>
+        <td class="quote-field-label">VESSEL / FLIGHT NAME &amp; NO</td>
+        <td class="quote-field-value">{{ invoice.vessel_flight or 'N/A' }}</td>
+        <td class="quote-field-label">PORT OF LOADING</td>
+        <td class="quote-field-value">{{ invoice.port_of_loading or '—' }}</td>
+      </tr>
+      <tr>
+        <td class="quote-field-label">TRANSHIPMENT</td>
+        <td class="quote-field-value">{{ invoice.transhipment or '—' }}</td>
+        <td class="quote-field-label">PARTIAL SHIPMENT</td>
+        <td class="quote-field-value">{{ invoice.partial_shipment or '—' }}</td>
+      </tr>
+      <tr>
+        <td class="quote-field-label">PORT OF DISCHARGE</td>
+        <td class="quote-field-value">{{ invoice.port_of_discharge or '—' }}</td>
+        <td class="quote-field-label">FINAL DESTINATION</td>
+        <td class="quote-field-value">{{ invoice.final_destination or '—' }}</td>
+      </tr>
+      <tr>
+        <td class="quote-field-label">VARIATION IN QUANTITY</td>
+        <td class="quote-field-value">{{ invoice.variation_in_qty or '—' }}</td>
+        <td class="quote-field-label">DELIVERY PERIOD</td>
+        <td class="quote-field-value">{{ invoice.delivery_period or '—' }}</td>
+      </tr>
+      <tr>
+        <td class="quote-field-label">CONTAINER DETAILS</td>
+        <td class="quote-field-value">{{ invoice.container_details or '—' }}</td>
+        <td class="quote-field-label">TERMS OF DELIVERY</td>
+        <td class="quote-field-value">{{ invoice.terms_of_delivery or '—' }}</td>
+      </tr>
+      <tr>
+        <td class="quote-field-label">PAYMENT TERMS</td>
+        <td class="quote-field-value" colspan="3">{{ invoice.payment_terms or '—' }}</td>
+      </tr>
+    </table>
+
+    {% if invoice.remarks %}
+    <div class="quote-remarks">
+      <strong>REMARKS:</strong>
+      <div>{{ invoice.remarks|replace('\n', '<br>')|safe }}</div>
+    </div>
+    {% endif %}
+
+    {% set ns = namespace(pallets=0, boxes=0, qty=0) %}
+    {% for item in invoice.items %}
+      {% set ns.pallets = ns.pallets + (item.pallets or 0) %}
+      {% set ns.boxes = ns.boxes + (item.quantity_boxes or 0) %}
+      {% set ns.qty = ns.qty + (item.quantity_value or 0) %}
+    {% endfor %}
+    {% set footer_rows = 4 + (1 if invoice.other_charges else 0) %}
+
+    <table class="quote-items-table">
+      <thead>
+        <tr>
+          <th rowspan="2">MARKS &amp; NOS /<br>CONTAINER NO</th>
+          <th rowspan="2">DESCRIPTION OF GOODS</th>
+          <th colspan="3">QUANTITY DETAILS</th>
+          <th rowspan="2">RATE<br>IN USD</th>
+          <th rowspan="2">PER</th>
+          <th rowspan="2">TOTAL<br>AMOUNT</th>
+        </tr>
+        <tr>
+          <th>PLTS</th>
+          <th>BOXES</th>
+          <th>SQM /<br>LM</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in invoice.items %}
+        <tr>
+          <td></td>
+          <td>{{ item.product_name|replace('\n', '<br>')|safe }}{% if item.hsn_code %} - HSNC {{ item.hsn_code }}{% endif %}</td>
+          <td class="num">{{ '{:,.0f}'.format(item.pallets) if item.pallets else '—' }}</td>
+          <td class="num">{{ '{:,.0f}'.format(item.quantity_boxes) if item.quantity_boxes else '—' }}</td>
+          <td class="num">{{ '{:,.2f}'.format(item.quantity_value) }}</td>
+          <td class="num">$ {{ '{:,.2f}'.format(item.price_usd) }}</td>
+          <td>{{ item.unit }}</td>
+          <td class="num">$ {{ '{:,.2f}'.format(item.total_usd) }}</td>
+        </tr>
+        {% endfor %}
+        <tr class="quote-total-row">
+          <td></td>
+          <td class="num"><strong>TOTAL</strong></td>
+          <td class="num"><strong>{{ '{:,.0f}'.format(ns.pallets) if ns.pallets else '—' }}</strong></td>
+          <td class="num"><strong>{{ '{:,.0f}'.format(ns.boxes) if ns.boxes else '—' }}</strong></td>
+          <td class="num"><strong>{{ '{:,.2f}'.format(ns.qty) }}</strong></td>
+          <td></td>
+          <td></td>
+          <td class="num"><strong>$ {{ '{:,.2f}'.format(invoice.subtotal_usd) }}</strong></td>
+        </tr>
+      </tbody>
+      <tfoot>
+        <tr>
+          <td rowspan="{{ footer_rows }}" colspan="2" class="quote-amount-words">
+            AMOUNT IN WORDS<br>
+            <strong>{{ invoice.invoice_value_usd | amount_in_words }}</strong>
+          </td>
+          <td colspan="5" class="num">CERTIFICATION</td>
+          <td class="num">$ {{ '{:,.2f}'.format(invoice.certification) }}</td>
+        </tr>
+        <tr>
+          <td colspan="5" class="num">SEA FREIGHT</td>
+          <td class="num">$ {{ '{:,.2f}'.format(invoice.sea_freight) }}</td>
+        </tr>
+        <tr>
+          <td colspan="5" class="num">INSURANCE</td>
+          <td class="num">$ {{ '{:,.2f}'.format(invoice.insurance) }}</td>
+        </tr>
+        {% if invoice.other_charges %}
+        <tr>
+          <td colspan="5" class="num">OTHER</td>
+          <td class="num">$ {{ '{:,.2f}'.format(invoice.other_charges) }}</td>
+        </tr>
+        {% endif %}
+        <tr>
+          <td colspan="5" class="num">DISCOUNT</td>
+          <td class="num">$ {{ '{:,.2f}'.format(invoice.discount_amount) }}</td>
+        </tr>
+        <tr>
+          <td colspan="5" class="num"><strong>TOTAL INVOICE VALUE (USD)</strong></td>
+          <td class="num"><strong>$ {{ '{:,.2f}'.format(invoice.invoice_value_usd) }}</strong></td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <table class="quote-bank-table">
+      <tr>
+        <th>BENEFICIARY</th>
+        <th>BANK DETAILS</th>
+      </tr>
+      <tr>
+        <td>
+          <strong>{{ company.company_name if company else '' }}</strong><br>
+          {{ (company.address or '')|replace('\n', '<br>')|safe if company else '' }}
+        </td>
+        <td>
+          <strong>{{ invoice.bank_name or '—' }}</strong><br>
+          {{ (invoice.bank_address or '')|replace('\n', '<br>')|safe }}<br>
+          {% if invoice.bank_account_number %}ACCOUNT NO: {{ invoice.bank_account_number }}<br>{% endif %}
+          {% if invoice.bank_swift_code %}BANK SWIFT CODE: {{ invoice.bank_swift_code }}<br>{% endif %}
+          {% if invoice.bank_ifsc_code %}BRANCH IFSC: {{ invoice.bank_ifsc_code }}{% endif %}
+        </td>
+      </tr>
+    </table>
+
+    <div class="quote-footnote">
+      ALL BANKING CHARGES OUTSIDE INDIA WILL BE IN ACCOUNT OF APPLICANT<br>
+      ABOVE OFFER IS VALID PER THE PAYMENT TERMS STATED ABOVE
+    </div>
+
+    <div class="quote-signature">
+      <div>
+        <div class="text-sm text-soft">ACCEPTED BY BUYER</div>
+        <div class="text-sm text-soft">SEAL &amp; SIGNATURE</div>
+      </div>
+      <div class="quote-signature-box">
+        <div>FOR {{ company.company_name if company else '' }}</div>
+        <div class="text-sm text-soft">Authorised Signatory</div>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

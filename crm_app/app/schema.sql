@@ -302,6 +302,74 @@ CREATE TABLE IF NOT EXISTS quotation_items (
     total_usd           REAL NOT NULL DEFAULT 0
 );
 
+-- ============================================================
+-- PROFORMA INVOICES  (header + line items, number generated as
+-- PI{YYYYMMDD}{seq-of-that-day} per company. Can be started from an
+-- existing quotation - quotation_id is a "generated from" reference only,
+-- the row is its own independent record from then on, same as how
+-- quotations reference an optional lead_id.)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS proforma_invoices (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id              INTEGER NOT NULL REFERENCES tenants(id),
+    invoice_number          TEXT NOT NULL,
+    invoice_date            TEXT NOT NULL,
+    lead_id                 INTEGER REFERENCES leads(id),        -- optional, prefill/reference only
+    quotation_id            INTEGER REFERENCES quotations(id),   -- optional, "generated from" reference only
+    export_ref_no           TEXT,
+    buyer_order_no          TEXT,
+    other_reference         TEXT,
+    consignee_name          TEXT NOT NULL,
+    consignee_address       TEXT,
+    notify_name             TEXT,          -- "Buyer if other than consignee"
+    notify_address          TEXT,
+    country_of_origin       TEXT DEFAULT 'INDIA',
+    country_of_destination  TEXT,
+    vessel_flight           TEXT,
+    port_of_loading         TEXT,
+    port_of_discharge       TEXT,
+    final_destination       TEXT,
+    transhipment            TEXT,
+    partial_shipment        TEXT,
+    variation_in_qty        TEXT,
+    delivery_period         TEXT,
+    container_details       TEXT,
+    terms_of_delivery       TEXT,
+    payment_terms           TEXT,
+    remarks                 TEXT,
+    sea_freight              REAL NOT NULL DEFAULT 0,
+    insurance                REAL NOT NULL DEFAULT 0,
+    certification             REAL NOT NULL DEFAULT 0,
+    other_charges             REAL NOT NULL DEFAULT 0,
+    discount_amount          REAL NOT NULL DEFAULT 0,
+    bank_name                TEXT,
+    bank_account_number      TEXT,
+    bank_ifsc_code            TEXT,
+    bank_swift_code           TEXT,
+    bank_branch               TEXT,
+    bank_address               TEXT,
+    created_by                 INTEGER NOT NULL REFERENCES users(id),
+    created_at                  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at                  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (company_id, invoice_number)
+);
+
+CREATE TABLE IF NOT EXISTS proforma_invoice_items (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    proforma_invoice_id   INTEGER NOT NULL REFERENCES proforma_invoices(id) ON DELETE CASCADE,
+    sr_no                 INTEGER NOT NULL,
+    product_id            INTEGER REFERENCES products(id),   -- optional, just for prefill/reference
+    product_name          TEXT NOT NULL,
+    dimension_mm          TEXT,
+    hsn_code              TEXT,
+    pallets                REAL,      -- "Plts" column
+    quantity_boxes        REAL,
+    quantity_value         REAL NOT NULL DEFAULT 0,
+    unit                  TEXT NOT NULL DEFAULT 'SQM',
+    price_usd             REAL NOT NULL DEFAULT 0,
+    total_usd             REAL NOT NULL DEFAULT 0
+);
+
 -- Helpful indexes for the dashboards/reports (grouping by employee, date
 -- range filters, and lookups by parent are the hottest queries).
 CREATE INDEX IF NOT EXISTS idx_leads_created_by ON leads(created_by);
@@ -316,3 +384,7 @@ CREATE INDEX IF NOT EXISTS idx_quotations_created_by ON quotations(created_by);
 CREATE INDEX IF NOT EXISTS idx_quotations_date ON quotations(quotation_date);
 CREATE INDEX IF NOT EXISTS idx_quotation_items_quotation ON quotation_items(quotation_id);
 CREATE INDEX IF NOT EXISTS idx_tenants_active ON tenants(is_active);
+CREATE INDEX IF NOT EXISTS idx_proforma_invoices_created_by ON proforma_invoices(created_by);
+CREATE INDEX IF NOT EXISTS idx_proforma_invoices_date ON proforma_invoices(invoice_date);
+CREATE INDEX IF NOT EXISTS idx_proforma_invoice_items_invoice ON proforma_invoice_items(proforma_invoice_id);
+CREATE INDEX IF NOT EXISTS idx_proforma_invoices_company ON proforma_invoices(company_id);

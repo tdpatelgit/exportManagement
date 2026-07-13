@@ -137,7 +137,7 @@
       <div class="field"><label>Date<span class="required-mark">*</span></label><input type="date" name="document_date" required></div>
     </div>
     <div class="field"><label>Notes</label><input type="text" name="notes" placeholder="optional"></div>
-    <p class="hint">Manually recorded documents are metadata only for now. Quotations made for this client's originating lead (before or after conversion) appear below automatically - future auto-generated document types will too.</p>
+    <p class="hint">Manually recorded documents are metadata only for now. Quotations and proforma invoices made for this client's originating lead (before or after conversion) appear below automatically - future auto-generated document types will too.</p>
     <button type="submit" class="btn btn-primary btn-sm">Record document</button>
   </form>
 
@@ -152,7 +152,7 @@
           <td><span class="pill">{{ row.type }}</span></td>
           <td class="text-sm">{{ row.date }}</td>
           <td class="text-sm text-soft">{{ row.notes or '—' }}</td>
-          <td>{% if row.link %}<a href="{{ url_for(row.link[0], quotation_id=row.link[1]) }}" class="text-sm">Open →</a>{% endif %}</td>
+          <td>{% if row.link %}<a href="{{ url_for(row.link[0], **row.link[1]) }}" class="text-sm">Open →</a>{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>

@@ -20,6 +20,7 @@
       <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('clients.') }}" href="{{ url_for('clients.list_clients') }}">🤝 Clients</a>
       <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('products.') }}" href="{{ url_for('products.browse') }}">📦 Products</a>
       <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('quotations.') }}" href="{{ url_for('quotations.list_quotations') }}">🧾 Quotations</a>
+      <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('proforma_invoices.') }}" href="{{ url_for('proforma_invoices.list_proforma_invoices') }}">📄 Proforma Invoices</a>
 
       {% if current_user and current_user.is_admin %}
         <div class="nav-section-label">Administration</div>

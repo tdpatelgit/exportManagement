@@ -12,6 +12,7 @@
     <a href="{{ url_for('quotations.list_quotations') }}" class="btn btn-ghost btn-sm">← All quotations</a>
     <div class="flex gap-8">
       <a href="{{ url_for('quotations.edit_quotation', quotation_id=quotation.id) }}" class="btn btn-ghost btn-sm">Edit</a>
+      <a href="{{ url_for('proforma_invoices.new_proforma_invoice', quotation_id=quotation.id) }}" class="btn btn-ghost btn-sm">Generate Proforma Invoice</a>
       <form method="POST" action="{{ url_for('quotations.delete_quotation', quotation_id=quotation.id) }}" onsubmit="return confirm('Delete this quotation?');">
         <button type="submit" class="btn btn-danger btn-sm">Delete</button>
       </form>

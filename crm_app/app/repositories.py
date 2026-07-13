@@ -18,7 +18,7 @@ from app.database import Database
 from app.models import (
     Tenant, User, Lead, Client, ContactPerson, Communication,
     PaymentEntry, DocumentEntry, OurCompany, ProductGroup, Product,
-    Quotation, QuotationItem,
+    Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
 )
 
 
@@ -803,3 +803,132 @@ class QuotationRepository:
 
     def delete(self, quotation_id: int) -> None:
         self.db.execute("DELETE FROM quotations WHERE id = ?", (quotation_id,))
+
+
+class ProformaInvoiceRepository:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def count_for_date_prefix(self, company_id: int, number_prefix: str) -> int:
+        """Same purpose as QuotationRepository.count_for_date_prefix - used to
+        compute the next PI{YYYYMMDD} sequence for the day, scoped per company."""
+        row = self.db.query_one(
+            "SELECT COUNT(*) AS cnt FROM proforma_invoices WHERE company_id = ? AND invoice_number LIKE ?",
+            (company_id, f"{number_prefix}%"),
+        )
+        return row["cnt"] if row else 0
+
+    def get_by_id(self, invoice_id: int) -> Optional[ProformaInvoice]:
+        row = self.db.query_one(
+            """SELECT pi.*, u.full_name AS created_by_name FROM proforma_invoices pi
+               JOIN users u ON u.id = pi.created_by WHERE pi.id = ?""",
+            (invoice_id,),
+        )
+        if not row:
+            return None
+        invoice = ProformaInvoice.from_row(row)
+        item_rows = self.db.query(
+            "SELECT * FROM proforma_invoice_items WHERE proforma_invoice_id = ? ORDER BY sr_no", (invoice_id,)
+        )
+        invoice.items = [ProformaInvoiceItem.from_row(r) for r in item_rows]
+        return invoice
+
+    def list_all(self, company_id: int) -> List[ProformaInvoice]:
+        rows = self.db.query(
+            """SELECT pi.*, u.full_name AS created_by_name,
+                      COALESCE((SELECT SUM(total_usd) FROM proforma_invoice_items WHERE proforma_invoice_id = pi.id), 0) AS items_total
+               FROM proforma_invoices pi
+               JOIN users u ON u.id = pi.created_by
+               WHERE pi.company_id = ?
+               ORDER BY pi.invoice_date DESC, pi.id DESC""",
+            (company_id,),
+        )
+        return [ProformaInvoice.from_row(r) for r in rows]
+
+    def list_for_lead(self, lead_id: int) -> List[ProformaInvoice]:
+        """Same 'reference-only' join pattern as QuotationRepository.list_for_lead -
+        a converted client sees its proforma invoices through its originating
+        lead_id, nothing to keep in sync by hand."""
+        rows = self.db.query(
+            """SELECT pi.*, u.full_name AS created_by_name,
+                      COALESCE((SELECT SUM(total_usd) FROM proforma_invoice_items WHERE proforma_invoice_id = pi.id), 0) AS items_total
+               FROM proforma_invoices pi
+               JOIN users u ON u.id = pi.created_by
+               WHERE pi.lead_id = ?
+               ORDER BY pi.invoice_date DESC, pi.id DESC""",
+            (lead_id,),
+        )
+        return [ProformaInvoice.from_row(r) for r in rows]
+
+    def create(self, invoice: ProformaInvoice) -> ProformaInvoice:
+        new_id = self.db.execute(
+            """INSERT INTO proforma_invoices
+               (company_id, invoice_number, invoice_date, lead_id, quotation_id, export_ref_no,
+                buyer_order_no, other_reference, consignee_name, consignee_address, notify_name,
+                notify_address, country_of_origin, country_of_destination, vessel_flight,
+                port_of_loading, port_of_discharge, final_destination, transhipment, partial_shipment,
+                variation_in_qty, delivery_period, container_details, terms_of_delivery, payment_terms,
+                remarks, sea_freight, insurance, certification, other_charges, discount_amount,
+                bank_name, bank_account_number, bank_ifsc_code, bank_swift_code, bank_branch,
+                bank_address, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (invoice.company_id, invoice.invoice_number, invoice.invoice_date, invoice.lead_id,
+             invoice.quotation_id, invoice.export_ref_no, invoice.buyer_order_no, invoice.other_reference,
+             invoice.consignee_name, invoice.consignee_address, invoice.notify_name, invoice.notify_address,
+             invoice.country_of_origin, invoice.country_of_destination, invoice.vessel_flight,
+             invoice.port_of_loading, invoice.port_of_discharge, invoice.final_destination,
+             invoice.transhipment, invoice.partial_shipment, invoice.variation_in_qty,
+             invoice.delivery_period, invoice.container_details, invoice.terms_of_delivery,
+             invoice.payment_terms, invoice.remarks, invoice.sea_freight, invoice.insurance,
+             invoice.certification, invoice.other_charges, invoice.discount_amount, invoice.bank_name,
+             invoice.bank_account_number, invoice.bank_ifsc_code, invoice.bank_swift_code,
+             invoice.bank_branch, invoice.bank_address, invoice.created_by),
+        )
+        self._replace_items(new_id, invoice.items)
+        return self.get_by_id(new_id)
+
+    def update(self, invoice_id: int, invoice: ProformaInvoice) -> None:
+        self.db.execute(
+            """UPDATE proforma_invoices SET invoice_date = ?, lead_id = ?, quotation_id = ?,
+                                             export_ref_no = ?, buyer_order_no = ?, other_reference = ?,
+                                             consignee_name = ?, consignee_address = ?, notify_name = ?,
+                                             notify_address = ?, country_of_origin = ?, country_of_destination = ?,
+                                             vessel_flight = ?, port_of_loading = ?, port_of_discharge = ?,
+                                             final_destination = ?, transhipment = ?, partial_shipment = ?,
+                                             variation_in_qty = ?, delivery_period = ?, container_details = ?,
+                                             terms_of_delivery = ?, payment_terms = ?, remarks = ?,
+                                             sea_freight = ?, insurance = ?, certification = ?,
+                                             other_charges = ?, discount_amount = ?, bank_name = ?,
+                                             bank_account_number = ?, bank_ifsc_code = ?, bank_swift_code = ?,
+                                             bank_branch = ?, bank_address = ?, updated_at = datetime('now')
+               WHERE id = ?""",
+            (invoice.invoice_date, invoice.lead_id, invoice.quotation_id, invoice.export_ref_no,
+             invoice.buyer_order_no, invoice.other_reference, invoice.consignee_name,
+             invoice.consignee_address, invoice.notify_name, invoice.notify_address,
+             invoice.country_of_origin, invoice.country_of_destination, invoice.vessel_flight,
+             invoice.port_of_loading, invoice.port_of_discharge, invoice.final_destination,
+             invoice.transhipment, invoice.partial_shipment, invoice.variation_in_qty,
+             invoice.delivery_period, invoice.container_details, invoice.terms_of_delivery,
+             invoice.payment_terms, invoice.remarks, invoice.sea_freight, invoice.insurance,
+             invoice.certification, invoice.other_charges, invoice.discount_amount, invoice.bank_name,
+             invoice.bank_account_number, invoice.bank_ifsc_code, invoice.bank_swift_code,
+             invoice.bank_branch, invoice.bank_address, invoice_id),
+        )
+        self._replace_items(invoice_id, invoice.items)
+
+    def _replace_items(self, invoice_id: int, items: List[ProformaInvoiceItem]) -> None:
+        with self.db.get_connection() as conn:
+            conn.execute("DELETE FROM proforma_invoice_items WHERE proforma_invoice_id = ?", (invoice_id,))
+            for item in items:
+                conn.execute(
+                    """INSERT INTO proforma_invoice_items
+                       (proforma_invoice_id, sr_no, product_id, product_name, dimension_mm, hsn_code,
+                        pallets, quantity_boxes, quantity_value, unit, price_usd, total_usd)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (invoice_id, item.sr_no, item.product_id, item.product_name, item.dimension_mm,
+                     item.hsn_code, item.pallets, item.quantity_boxes, item.quantity_value, item.unit,
+                     item.price_usd, item.total_usd),
+                )
+
+    def delete(self, invoice_id: int) -> None:
+        self.db.execute("DELETE FROM proforma_invoices WHERE id = ?", (invoice_id,))
