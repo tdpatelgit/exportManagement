@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Packing Lists{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Sales documents</div>
+    <h1>Packing Lists</h1>
+  </div>
+  <div class="topbar-actions">
+    <a href="{{ url_for('packing_lists.new_packing_list') }}" class="btn btn-primary">+ New packing details</a>
+  </div>
+</div>
+
+<div class="card">
+  {% if packing_lists %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th>Proforma invoice no.</th>
+          <th>Date</th>
+          <th>Created by</th>
+          <th class="num">Boxes</th>
+          <th class="num">Pcs</th>
+          <th class="num">SQM / LM</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for pl in packing_lists %}
+        <tr>
+          <td class="mono">{{ pl.proforma_invoice_no or '—' }}</td>
+          <td class="text-sm">{{ pl.packing_date }}</td>
+          <td class="text-sm">{{ pl.created_by_name }}</td>
+          <td class="num">{{ '{:,.0f}'.format(pl.total_boxes) }}</td>
+          <td class="num">{{ '{:,.0f}'.format(pl.total_pcs) }}</td>
+          <td class="num">{{ '{:,.2f}'.format(pl.total_quantity) }}</td>
+          <td><a href="{{ url_for('packing_lists.view_packing_list', packing_list_id=pl.id) }}" class="text-sm">Open →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No packing lists yet. <a href="{{ url_for('packing_lists.new_packing_list') }}">Create one →</a></div>
+  {% endif %}
+</div>
+
+{% endblock %}

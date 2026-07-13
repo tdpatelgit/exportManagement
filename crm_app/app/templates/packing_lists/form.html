@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit packing details' if packing_list else 'New packing details' }}{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Sales documents</div>
+    <h1>{{ 'Edit packing details' if packing_list else 'New packing details' }}</h1>
+  </div>
+</div>
+
+<form method="POST" id="packing-form">
+  {% set data = form_data if form_data else packing_list %}
+  <div class="card">
+    <div class="card-header"><h3>Document details</h3></div>
+    <div class="form-row">
+      <div class="field">
+        <label for="proforma_invoice_id">Proforma invoice</label>
+        <select id="proforma_invoice_id" name="proforma_invoice_id">
+          <option value="">— Not linked to a proforma invoice —</option>
+          {% for pi in invoices %}
+            <option value="{{ pi.id }}" {{ 'selected' if data and data.proforma_invoice_id | string == pi.id | string }}>{{ pi.invoice_number }} — {{ pi.consignee_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field"><label for="packing_date">Date<span class="required-mark">*</span></label><input type="date" id="packing_date" name="packing_date" required value="{{ data.packing_date | default(today, true) }}"></div>
+    </div>
+    <div class="field"><label for="remarks">Remarks</label><input type="text" id="remarks" name="remarks" value="{{ data.remarks | default('MADE IN INDIA', true) }}"></div>
+    {% if not packing_list %}
+    <p class="hint">Choosing a proforma invoice on a fresh form prefills one packing row per invoice line — picking it here reloads the page. The packing list is then its own independent record.</p>
+    {% endif %}
+    <input type="hidden" name="lead_id" value="{{ data.lead_id | default('', true) }}">
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Packing lines</h3></div>
+    <div class="table-wrap">
+      <table class="ledger" id="items-table">
+        <thead>
+          <tr>
+            <th>Sr</th>
+            <th style="min-width:240px;">Description of goods</th>
+            <th>Box per pallet</th>
+            <th style="min-width:130px;">Model no or name</th>
+            <th>No of pallet</th>
+            <th>Boxes</th>
+            <th>Pcs</th>
+            <th>SQM / LM</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="items-body">
+          {% set rows = form_items if form_items is not none else (packing_list.items if packing_list else []) %}
+          {% for row in rows %}
+          <tr class="item-row">
+            <td class="js-sr">{{ loop.index }}</td>
+            <td><textarea name="item_description[]" rows="2" required>{{ row.description }}</textarea></td>
+            <td><input type="number" step="0.01" name="item_box_per_pallet[]" value="{{ row.box_per_pallet or '' }}"></td>
+            <td><input type="text" name="item_model_name[]" value="{{ row.model_name or '' }}"></td>
+            <td><input type="number" step="0.01" name="item_no_of_pallet[]" class="js-pallet" value="{{ row.no_of_pallet or '' }}"></td>
+            <td><input type="number" step="0.01" name="item_boxes[]" class="js-boxes" value="{{ row.boxes or '' }}"></td>
+            <td><input type="number" step="0.01" name="item_pcs[]" class="js-pcs" value="{{ row.pcs or '' }}"></td>
+            <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" value="{{ row.quantity_value or '' }}"></td>
+            <td><button type="button" class="btn-link-danger js-remove-row">Remove</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <button type="button" class="btn btn-ghost btn-sm" id="add-row-btn">+ Add packing line</button>
+    <p class="hint">A row with a description but no numbers prints as a section heading (e.g. "CERAMIC GLAZED VITRIFIED TILES - HSNC 69072100").</p>
+    <div class="flex-between" style="margin-top:14px;">
+      <div></div>
+      <div class="text-sm">
+        <strong>Pallets:</strong> <span id="total-pallets">0</span>
+        &nbsp;·&nbsp; <strong>Boxes:</strong> <span id="total-boxes">0</span>
+        &nbsp;·&nbsp; <strong>Pcs:</strong> <span id="total-pcs">0</span>
+        &nbsp;·&nbsp; <strong>SQM / LM:</strong> <span id="total-qty">0</span>
+      </div>
+    </div>
+  </div>
+
+  <button type="submit" class="btn btn-primary">{{ 'Save changes' if packing_list else 'Create packing details' }}</button>
+  <a href="{{ url_for('packing_lists.view_packing_list', packing_list_id=packing_list.id) if packing_list else url_for('packing_lists.list_packing_lists') }}" class="btn btn-ghost">Cancel</a>
+</form>
+
+<template id="row-template">
+  <tr class="item-row">
+    <td class="js-sr"></td>
+    <td><textarea name="item_description[]" rows="2" required></textarea></td>
+    <td><input type="number" step="0.01" name="item_box_per_pallet[]"></td>
+    <td><input type="text" name="item_model_name[]"></td>
+    <td><input type="number" step="0.01" name="item_no_of_pallet[]" class="js-pallet"></td>
+    <td><input type="number" step="0.01" name="item_boxes[]" class="js-boxes"></td>
+    <td><input type="number" step="0.01" name="item_pcs[]" class="js-pcs"></td>
+    <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty"></td>
+    <td><button type="button" class="btn-link-danger js-remove-row">Remove</button></td>
+  </tr>
+</template>
+
+<script>
+  const itemsBody = document.getElementById('items-body');
+  const rowTemplate = document.getElementById('row-template');
+
+  function renumberRows() {
+    itemsBody.querySelectorAll('tr').forEach((row, i) => {
+      row.querySelector('.js-sr').textContent = i + 1;
+    });
+  }
+
+  function sumColumn(selector) {
+    let total = 0;
+    itemsBody.querySelectorAll(selector).forEach((input) => {
+      total += parseFloat(input.value) || 0;
+    });
+    return total;
+  }
+
+  function recalcTotals() {
+    document.getElementById('total-pallets').textContent = sumColumn('.js-pallet').toLocaleString();
+    document.getElementById('total-boxes').textContent = sumColumn('.js-boxes').toLocaleString();
+    document.getElementById('total-pcs').textContent = sumColumn('.js-pcs').toLocaleString();
+    document.getElementById('total-qty').textContent = sumColumn('.js-qty').toLocaleString();
+  }
+
+  function addRow() {
+    itemsBody.appendChild(rowTemplate.content.cloneNode(true));
+    renumberRows();
+  }
+
+  document.getElementById('add-row-btn').addEventListener('click', addRow);
+  itemsBody.addEventListener('click', (e) => {
+    if (e.target.classList.contains('js-remove-row')) {
+      e.target.closest('tr').remove();
+      renumberRows();
+      recalcTotals();
+    }
+  });
+  itemsBody.addEventListener('input', recalcTotals);
+
+  // Picking a proforma invoice on a fresh form reloads with its lines prefilled
+  {% if not packing_list %}
+  document.getElementById('proforma_invoice_id').addEventListener('change', (e) => {
+    if (!e.target.value) return;
+    window.location = '{{ url_for("packing_lists.new_packing_list") }}?proforma_invoice_id=' + encodeURIComponent(e.target.value);
+  });
+  {% endif %}
+
+  if (!itemsBody.querySelector('tr')) addRow();
+  recalcTotals();
+</script>
+
+{% endblock %}

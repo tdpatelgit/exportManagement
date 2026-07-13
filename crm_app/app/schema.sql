@@ -388,3 +388,42 @@ CREATE INDEX IF NOT EXISTS idx_proforma_invoices_created_by ON proforma_invoices
 CREATE INDEX IF NOT EXISTS idx_proforma_invoices_date ON proforma_invoices(invoice_date);
 CREATE INDEX IF NOT EXISTS idx_proforma_invoice_items_invoice ON proforma_invoice_items(proforma_invoice_id);
 CREATE INDEX IF NOT EXISTS idx_proforma_invoices_company ON proforma_invoices(company_id);
+
+-- ============================================================
+-- PACKING LISTS  ("Packing Details" document - generated from a Proforma
+-- Invoice, either automatically at PI creation or by hand later.
+-- proforma_invoice_id is a "generated from" reference only (same pattern
+-- as quotation_id on proforma_invoices); proforma_invoice_no is a snapshot
+-- so the printed header survives the PI being deleted. lead_id makes the
+-- document surface on the converted client's page automatically.)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS packing_lists (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id            INTEGER NOT NULL REFERENCES tenants(id),
+    proforma_invoice_id   INTEGER REFERENCES proforma_invoices(id) ON DELETE SET NULL,
+    proforma_invoice_no   TEXT,
+    lead_id               INTEGER REFERENCES leads(id),
+    packing_date          TEXT NOT NULL,
+    remarks               TEXT DEFAULT 'MADE IN INDIA',
+    created_by            INTEGER NOT NULL REFERENCES users(id),
+    created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at            TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS packing_list_items (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    packing_list_id  INTEGER NOT NULL REFERENCES packing_lists(id) ON DELETE CASCADE,
+    sr_no            INTEGER NOT NULL,
+    description      TEXT NOT NULL,
+    box_per_pallet   REAL,      -- BOX PER PALLET column
+    model_name       TEXT,      -- MODEL NO OR NAME column
+    no_of_pallet     REAL,
+    boxes            REAL,
+    pcs              REAL,
+    quantity_value   REAL       -- SQM / LM column; rows with no numbers at all print as section headings
+);
+
+CREATE INDEX IF NOT EXISTS idx_packing_lists_company ON packing_lists(company_id);
+CREATE INDEX IF NOT EXISTS idx_packing_lists_proforma ON packing_lists(proforma_invoice_id);
+CREATE INDEX IF NOT EXISTS idx_packing_lists_lead ON packing_lists(lead_id);
+CREATE INDEX IF NOT EXISTS idx_packing_list_items_list ON packing_list_items(packing_list_id);

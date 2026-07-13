@@ -19,6 +19,7 @@ from app.models import (
     Tenant, User, Lead, Client, ContactPerson, Communication,
     PaymentEntry, DocumentEntry, OurCompany, ProductGroup, Product,
     Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
+    PackingList, PackingListItem,
 )
 
 
@@ -932,3 +933,107 @@ class ProformaInvoiceRepository:
 
     def delete(self, invoice_id: int) -> None:
         self.db.execute("DELETE FROM proforma_invoices WHERE id = ?", (invoice_id,))
+
+
+# ============================================================
+# PACKING LIST REPOSITORY (mirrors ProformaInvoiceRepository layer for layer)
+# ============================================================
+class PackingListRepository:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def get_by_id(self, packing_list_id: int) -> Optional[PackingList]:
+        row = self.db.query_one(
+            """SELECT pl.*, u.full_name AS created_by_name FROM packing_lists pl
+               JOIN users u ON u.id = pl.created_by WHERE pl.id = ?""",
+            (packing_list_id,),
+        )
+        if not row:
+            return None
+        packing_list = PackingList.from_row(row)
+        item_rows = self.db.query(
+            "SELECT * FROM packing_list_items WHERE packing_list_id = ? ORDER BY sr_no", (packing_list_id,)
+        )
+        packing_list.items = [PackingListItem.from_row(r) for r in item_rows]
+        return packing_list
+
+    def _attach_items(self, packing_lists: List[PackingList]) -> List[PackingList]:
+        """List pages show totals, which need items - lists stay small enough
+        that one query per row is fine here."""
+        for packing_list in packing_lists:
+            item_rows = self.db.query(
+                "SELECT * FROM packing_list_items WHERE packing_list_id = ? ORDER BY sr_no", (packing_list.id,)
+            )
+            packing_list.items = [PackingListItem.from_row(r) for r in item_rows]
+        return packing_lists
+
+    def list_all(self, company_id: int) -> List[PackingList]:
+        rows = self.db.query(
+            """SELECT pl.*, u.full_name AS created_by_name
+               FROM packing_lists pl
+               JOIN users u ON u.id = pl.created_by
+               WHERE pl.company_id = ?
+               ORDER BY pl.packing_date DESC, pl.id DESC""",
+            (company_id,),
+        )
+        return self._attach_items([PackingList.from_row(r) for r in rows])
+
+    def list_for_lead(self, lead_id: int) -> List[PackingList]:
+        """Same 'reference-only' join pattern as ProformaInvoiceRepository.list_for_lead."""
+        rows = self.db.query(
+            """SELECT pl.*, u.full_name AS created_by_name
+               FROM packing_lists pl
+               JOIN users u ON u.id = pl.created_by
+               WHERE pl.lead_id = ?
+               ORDER BY pl.packing_date DESC, pl.id DESC""",
+            (lead_id,),
+        )
+        return self._attach_items([PackingList.from_row(r) for r in rows])
+
+    def list_for_proforma(self, proforma_invoice_id: int) -> List[PackingList]:
+        rows = self.db.query(
+            """SELECT pl.*, u.full_name AS created_by_name
+               FROM packing_lists pl
+               JOIN users u ON u.id = pl.created_by
+               WHERE pl.proforma_invoice_id = ?
+               ORDER BY pl.id DESC""",
+            (proforma_invoice_id,),
+        )
+        return self._attach_items([PackingList.from_row(r) for r in rows])
+
+    def create(self, packing_list: PackingList) -> PackingList:
+        new_id = self.db.execute(
+            """INSERT INTO packing_lists
+               (company_id, proforma_invoice_id, proforma_invoice_no, lead_id, packing_date, remarks, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (packing_list.company_id, packing_list.proforma_invoice_id, packing_list.proforma_invoice_no,
+             packing_list.lead_id, packing_list.packing_date, packing_list.remarks, packing_list.created_by),
+        )
+        self._replace_items(new_id, packing_list.items)
+        return self.get_by_id(new_id)
+
+    def update(self, packing_list_id: int, packing_list: PackingList) -> None:
+        self.db.execute(
+            """UPDATE packing_lists SET proforma_invoice_id = ?, proforma_invoice_no = ?, lead_id = ?,
+                                        packing_date = ?, remarks = ?, updated_at = datetime('now')
+               WHERE id = ?""",
+            (packing_list.proforma_invoice_id, packing_list.proforma_invoice_no, packing_list.lead_id,
+             packing_list.packing_date, packing_list.remarks, packing_list_id),
+        )
+        self._replace_items(packing_list_id, packing_list.items)
+
+    def _replace_items(self, packing_list_id: int, items: List[PackingListItem]) -> None:
+        with self.db.get_connection() as conn:
+            conn.execute("DELETE FROM packing_list_items WHERE packing_list_id = ?", (packing_list_id,))
+            for item in items:
+                conn.execute(
+                    """INSERT INTO packing_list_items
+                       (packing_list_id, sr_no, description, box_per_pallet, model_name,
+                        no_of_pallet, boxes, pcs, quantity_value)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (packing_list_id, item.sr_no, item.description, item.box_per_pallet, item.model_name,
+                     item.no_of_pallet, item.boxes, item.pcs, item.quantity_value),
+                )
+
+    def delete(self, packing_list_id: int) -> None:
+        self.db.execute("DELETE FROM packing_lists WHERE id = ?", (packing_list_id,))

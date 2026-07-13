@@ -19,11 +19,12 @@ from app.repositories import (
     TenantRepository, SqliteUserRepository, SqliteLeadRepository, SqliteClientRepository,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
     ProductGroupRepository, ProductRepository, QuotationRepository, ProformaInvoiceRepository,
+    PackingListRepository,
 )
 from app.services import (
     AuthService, LeadService, ClientService, CurrencyService,
     CommunicationService, StatsService, CompanyService, ReportService, ProductService,
-    QuotationService, ProformaInvoiceService,
+    QuotationService, ProformaInvoiceService, PackingListService,
 )
 from app.utils import register_template_helpers
 
@@ -50,6 +51,7 @@ class ServiceContainer:
         self.product_repo = ProductRepository(db)
         self.quotation_repo = QuotationRepository(db)
         self.proforma_invoice_repo = ProformaInvoiceRepository(db)
+        self.packing_list_repo = PackingListRepository(db)
 
         # Services (business logic layer)
         self.auth_service = AuthService(self.user_repo, self.tenant_repo)
@@ -59,7 +61,7 @@ class ServiceContainer:
         self.client_service = ClientService(
             self.client_repo, self.lead_repo, self.communication_service,
             self.payment_repo, self.document_repo, self.currency_service,
-            self.quotation_repo, self.proforma_invoice_repo,
+            self.quotation_repo, self.proforma_invoice_repo, self.packing_list_repo,
         )
         self.stats_service = StatsService(self.user_repo, self.lead_repo, self.comm_repo, self.client_repo)
         self.company_service = CompanyService(self.company_repo)
@@ -71,6 +73,9 @@ class ServiceContainer:
         self.quotation_service = QuotationService(self.quotation_repo, self.product_repo, self.lead_repo)
         self.proforma_invoice_service = ProformaInvoiceService(
             self.proforma_invoice_repo, self.product_repo, self.lead_repo, self.quotation_repo,
+        )
+        self.packing_list_service = PackingListService(
+            self.packing_list_repo, self.proforma_invoice_repo, self.lead_repo,
         )
 
 
@@ -121,6 +126,7 @@ def create_app(config_class=Config) -> Flask:
     from app.routes.products import products_bp
     from app.routes.quotations import quotations_bp
     from app.routes.proforma_invoices import proforma_invoices_bp
+    from app.routes.packing_lists import packing_lists_bp
     from app.routes.profile import profile_bp
 
     app.register_blueprint(auth_bp)
@@ -133,6 +139,7 @@ def create_app(config_class=Config) -> Flask:
     app.register_blueprint(products_bp)
     app.register_blueprint(quotations_bp)
     app.register_blueprint(proforma_invoices_bp)
+    app.register_blueprint(packing_lists_bp)
     app.register_blueprint(profile_bp)
 
     # --- friendly error pages --------------------------------------------------
