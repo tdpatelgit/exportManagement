@@ -59,6 +59,10 @@
 
   <div class="card">
     <div class="card-header"><h3>Buyer if other than consignee (Notify)</h3></div>
+    <div class="radio-wrap" style="margin-bottom: 12px;">
+      <input type="checkbox" id="same_as_consignee">
+      <label for="same_as_consignee">Buyer is same as consignee</label>
+    </div>
     <div class="field"><label for="notify_name">Notify party name</label><input type="text" id="notify_name" name="notify_name" value="{{ data.notify_name | default('', true) }}"></div>
     <div class="field"><label for="notify_address">Notify party address</label><textarea id="notify_address" name="notify_address" rows="3">{{ data.notify_address | default('', true) }}</textarea></div>
   </div>
@@ -340,7 +344,36 @@
     if (!opt.value) { document.getElementById('lead_id').value = ''; return; }
     document.getElementById('lead_id').value = opt.value;
     document.getElementById('consignee_name').value = opt.dataset.name || '';
+    syncNotifyWithConsignee();
   });
+
+  // ---- "buyer is same as consignee" toggle --------------------------------------------------
+  const sameAsConsignee = document.getElementById('same_as_consignee');
+  const consigneeNameEl = document.getElementById('consignee_name');
+  const consigneeAddrEl = document.getElementById('consignee_address');
+  const notifyNameEl = document.getElementById('notify_name');
+  const notifyAddrEl = document.getElementById('notify_address');
+
+  function syncNotifyWithConsignee() {
+    if (!sameAsConsignee.checked) return;
+    notifyNameEl.value = consigneeNameEl.value;
+    notifyAddrEl.value = consigneeAddrEl.value;
+  }
+
+  sameAsConsignee.addEventListener('change', () => {
+    notifyNameEl.readOnly = sameAsConsignee.checked;
+    notifyAddrEl.readOnly = sameAsConsignee.checked;
+    syncNotifyWithConsignee();
+  });
+  consigneeNameEl.addEventListener('input', syncNotifyWithConsignee);
+  consigneeAddrEl.addEventListener('input', syncNotifyWithConsignee);
+
+  // when editing an invoice that was saved with identical values, restore the checked state
+  if (notifyNameEl.value && notifyNameEl.value === consigneeNameEl.value && notifyAddrEl.value === consigneeAddrEl.value) {
+    sameAsConsignee.checked = true;
+    notifyNameEl.readOnly = true;
+    notifyAddrEl.readOnly = true;
+  }
 
   // ---- bank dropdown prefill --------------------------------------------------
   document.getElementById('bank_select').addEventListener('change', (e) => {
