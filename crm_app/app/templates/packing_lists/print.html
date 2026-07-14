@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+{% set filler_px = [260 - (packing_list.items|length * 16), 30] | max %}
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ packing_list.packing_list_number }} · Packing List</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    /* ------ Packing list sheet: same Excel-replica styling as the proforma invoice ------ */
+    .pi-sheet {
+      background: #fff;
+      color: #000;
+      width: 205mm;
+      margin: 24px auto 48px;
+      padding: 6mm 6mm 8mm;
+      box-shadow: 0 10px 30px rgba(0,0,0,.25);
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 10px;
+      line-height: 1.25;
+    }
+    .pi-title {
+      border: 1px solid #000;
+      text-align: center;
+      font-size: 14px;
+      font-weight: bold;
+      padding: 3px 0;
+    }
+    .pi-sheet table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: -1px; }
+    .pi-sheet td { border: 1px solid #000; padding: 3px 5px; vertical-align: top; word-wrap: break-word; }
+    .pi-label { font-size: 9px; }
+    .pi-val { font-weight: bold; }
+    .pi-center { text-align: center; }
+    .pi-right { text-align: right; }
+    .pi-mid { vertical-align: middle !important; }
+    .pi-side {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      text-align: center;
+      font-size: 9px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      padding: 2px 1px;
+      vertical-align: middle;
+    }
+    .pi-email-bar { padding: 0; }
+    .pi-email-flex { display: flex; align-items: stretch; }
+    .pi-email-flex > div { padding: 3px 5px; }
+    .pi-email-flex > div + div { border-left: 1px solid #000; }
+    .pi-items thead td { text-align: center; vertical-align: middle; font-size: 9px; }
+    .pi-items tbody tr.pi-goods td, .pi-items tbody tr.pi-filler td { border-top: none; border-bottom: none; padding: 2px 5px; }
+    .pi-items tbody tr.pi-filler td { height: {{ filler_px }}px; }
+    .pi-sign-cell { height: 92px; padding: 4px 6px; }
+    .pi-sign-flex { display: flex; flex-direction: column; justify-content: space-between; height: 100%; }
+    .pi-stamp { text-align: right; }
+    @media print {
+      @page { size: A4 portrait; margin: 6mm; }
+      body { background: #fff !important; }
+      .no-print { display: none !important; }
+      .pi-sheet { width: auto; margin: 0; padding: 0; box-shadow: none; }
+    }
+  </style>
+</head>
+<body class="quote-print-body">
+
+  <div class="quote-toolbar no-print">
+    <a href="{{ url_for('packing_lists.list_packing_lists') }}" class="btn btn-ghost btn-sm">← All packing lists</a>
+    <div class="flex gap-8">
+      {% if packing_list.proforma_invoice_id %}
+      <a href="{{ url_for('proforma_invoices.view_proforma_invoice', proforma_invoice_id=packing_list.proforma_invoice_id) }}" class="btn btn-ghost btn-sm">View proforma</a>
+      {% endif %}
+      <a href="{{ url_for('packing_lists.edit_packing_list', packing_list_id=packing_list.id) }}" class="btn btn-ghost btn-sm">Edit</a>
+      <form method="POST" action="{{ url_for('packing_lists.delete_packing_list', packing_list_id=packing_list.id) }}" onsubmit="return confirm('Delete this packing list?');">
+        <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+      </form>
+      <button type="button" class="btn btn-primary btn-sm" onclick="window.print()">🖨 Print / Save as PDF</button>
+    </div>
+  </div>
+
+  {% macro dmy(val) -%}
+    {%- if val -%}
+      {%- set p = (val|string)[:10].split('-') -%}
+      {%- if p|length == 3 %}{{ p[2]|int }}/{{ p[1]|int }}/{{ p[0] }}{% else %}{{ val }}{% endif -%}
+    {%- else -%}-{%- endif -%}
+  {%- endmacro %}
+
+  {% set phone = (company.contact_details | selectattr('type', 'equalto', 'phone') | list | first) if company else None %}
+  {% set email = (company.contact_details | selectattr('type', 'equalto', 'email') | list | first) if company else None %}
+
+  <div class="pi-sheet">
+    <div class="pi-title">PACKING LIST</div>
+
+    <!-- Exporter / references -->
+    <table>
+      <colgroup>
+        <col style="width:20px"><col><col style="width:15%"><col style="width:20%"><col style="width:7%"><col style="width:12%">
+      </colgroup>
+      <tr>
+        <td class="pi-side" rowspan="4">EXPORTER</td>
+        <td rowspan="3" style="border-bottom:none;">
+          <span class="pi-val">{{ company.company_name|upper if company else '' }}</span><br>
+          <span class="pi-val">{{ (company.address or '')|upper|replace('\n', '<br>')|safe if company else '' }}</span>
+          {% if company and company.gstin %}<br><span class="pi-val">GSTIN : {{ company.gstin }}</span>{% endif %}
+          {% if company and company.iec %}<br><span class="pi-val">IEC : {{ company.iec }}</span>{% endif %}
+        </td>
+        <td class="pi-label">Packing List No</td>
+        <td class="pi-val">{{ packing_list.packing_list_number }}</td>
+        <td class="pi-label">DATE</td>
+        <td class="pi-val">{{ dmy(packing_list.packing_list_date) }}</td>
+      </tr>
+      <tr>
+        <td class="pi-label">Proforma<br>Invoice No</td>
+        <td class="pi-val pi-mid">{{ packing_list.proforma_invoice_number or '-' }}</td>
+        <td class="pi-label">Export<br>Ref. No</td>
+        <td class="pi-val pi-mid">{{ packing_list.export_ref_no or '-' }}</td>
+      </tr>
+      <tr>
+        <td class="pi-label">Buyer Order<br>No &amp; Date</td>
+        <td class="pi-val pi-mid" colspan="3">{{ packing_list.buyer_order_no or '-' }}</td>
+      </tr>
+      <tr>
+        <td class="pi-email-bar">
+          <div class="pi-email-flex">
+            <div class="pi-label">EMAIL</div>
+            <div class="pi-label">:</div>
+            <div class="pi-val" style="flex:1;"><u>{{ email.value|upper if email else '-' }}</u></div>
+            <div class="pi-label">MOBILE</div>
+            <div class="pi-val">{{ phone.value if phone else '-' }}</div>
+          </div>
+        </td>
+        <td class="pi-label">Other<br>Reference(s)</td>
+        <td class="pi-val pi-mid" colspan="3">{{ packing_list.other_reference or '-' }}</td>
+      </tr>
+      <tr>
+        <td class="pi-side">CONSIGNEE</td>
+        <td>
+          <span class="pi-val">{{ (packing_list.consignee_name or '')|upper }}</span><br>
+          <span class="pi-val">{{ (packing_list.consignee_address or '')|upper|replace('\n', '<br>')|safe }}</span>
+        </td>
+        <td class="pi-label pi-mid">Buyer If Other<br>Then<br>Consignee<br>[Notify]</td>
+        <td class="pi-mid" colspan="3">
+          {% if packing_list.notify_name or packing_list.notify_address %}
+            <span class="pi-val">{{ (packing_list.notify_name or '')|upper }}</span><br>
+            <span class="pi-val">{{ (packing_list.notify_address or '')|upper|replace('\n', '<br>')|safe }}</span>
+          {% else %}-{% endif %}
+        </td>
+      </tr>
+    </table>
+
+    <!-- Origin / shipping grid -->
+    <table>
+      <colgroup><col style="width:25%"><col style="width:25%"><col style="width:25%"><col style="width:25%"></colgroup>
+      <tr>
+        <td class="pi-label pi-center">Country of Origin Of Goods</td>
+        <td class="pi-label pi-center">Country of Final Destination</td>
+        <td class="pi-label pi-center">Vessel / Flight Name &amp; No</td>
+        <td class="pi-label pi-center">Container Details</td>
+      </tr>
+      <tr>
+        <td class="pi-val pi-center" style="letter-spacing:4px;">{{ (packing_list.country_of_origin or 'INDIA')|upper }}</td>
+        <td class="pi-val pi-center">{{ (packing_list.country_of_destination or '-')|upper }}</td>
+        <td class="pi-val pi-center">{{ (packing_list.vessel_flight or 'N/A')|upper }}</td>
+        <td class="pi-val pi-center">{{ (packing_list.container_details or '-')|upper }}</td>
+      </tr>
+      <tr>
+        <td class="pi-label pi-center">Port Of Loading</td>
+        <td class="pi-label pi-center">Port Of Discharge</td>
+        <td class="pi-label pi-center">Final Destination</td>
+        <td class="pi-label pi-center">Terms of Delivery</td>
+      </tr>
+      <tr>
+        <td class="pi-val pi-center">{{ (packing_list.port_of_loading or '-')|upper }}</td>
+        <td class="pi-val pi-center">{{ (packing_list.port_of_discharge or '-')|upper }}</td>
+        <td class="pi-val pi-center">{{ (packing_list.final_destination or '-')|upper }}</td>
+        <td class="pi-val pi-center">{{ (packing_list.terms_of_delivery or '-')|upper }}</td>
+      </tr>
+    </table>
+
+    <!-- Goods (per design, no prices - this is a packing list) -->
+    <table class="pi-items">
+      <colgroup>
+        <col style="width:26%"><col style="width:22%"><col style="width:6%"><col style="width:8%">
+        <col style="width:11%"><col style="width:6%"><col style="width:10.5%"><col style="width:10.5%">
+      </colgroup>
+      <thead>
+        <tr>
+          <td rowspan="2">Description Of Goods</td>
+          <td rowspan="2">Design</td>
+          <td colspan="3">Quantity Details</td>
+          <td rowspan="2">Per</td>
+          <td rowspan="2">Net Wt<br>(KG)</td>
+          <td rowspan="2">Gross Wt<br>(KG)</td>
+        </tr>
+        <tr>
+          <td>Plts</td>
+          <td>Boxes</td>
+          <td>SQM /<br>LM</td>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in packing_list.items %}
+        <tr class="pi-goods">
+          <td class="pi-val">{{ item.product_name|upper|replace('\n', '<br>')|safe }}{% if item.hsn_code %} - HSNC {{ item.hsn_code }}{% endif %}</td>
+          <td class="pi-val">{{ (item.design_name or '-')|upper }}</td>
+          <td class="pi-val pi-center">{{ '{:,.0f}'.format(item.pallets) if item.pallets else '' }}</td>
+          <td class="pi-val pi-center">{{ '{:,.0f}'.format(item.quantity_boxes) if item.quantity_boxes else '' }}</td>
+          <td class="pi-val pi-right">{{ '{:,.2f}'.format(item.quantity_value or 0) }}</td>
+          <td class="pi-val pi-center">{{ item.unit }}</td>
+          <td class="pi-val pi-right">{{ '{:,.2f}'.format(item.net_weight_kg) if item.net_weight_kg else '' }}</td>
+          <td class="pi-val pi-right">{{ '{:,.2f}'.format(item.gross_weight_kg) if item.gross_weight_kg else '' }}</td>
+        </tr>
+        {% endfor %}
+        <tr class="pi-filler">
+          <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+        </tr>
+        <tr>
+          <td></td>
+          <td class="pi-val pi-center">TOTAL</td>
+          <td class="pi-val pi-center">{{ '{:,.0f}'.format(packing_list.total_pallets) if packing_list.total_pallets else '' }}</td>
+          <td class="pi-val pi-center">{{ '{:,.0f}'.format(packing_list.total_boxes) if packing_list.total_boxes else '' }}</td>
+          <td class="pi-val pi-right">{{ '{:,.2f}'.format(packing_list.total_quantity) }}</td>
+          <td></td>
+          <td class="pi-val pi-right">{{ '{:,.2f}'.format(packing_list.total_net_weight_kg) if packing_list.total_net_weight_kg else '' }}</td>
+          <td class="pi-val pi-right">{{ '{:,.2f}'.format(packing_list.total_gross_weight_kg) if packing_list.total_gross_weight_kg else '' }}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Remarks + signatures -->
+    <table>
+      <colgroup><col style="width:55%"><col></colgroup>
+      {% if packing_list.remarks %}
+      <tr>
+        <td colspan="2">
+          {% for line in packing_list.remarks.split('\n') %}{{ line|upper }}{% if not loop.last %}<br>{% endif %}{% endfor %}
+        </td>
+      </tr>
+      {% endif %}
+      <tr>
+        <td class="pi-sign-cell">
+          <div class="pi-sign-flex">
+            <div class="pi-val">ACCEPTED BY BUYER</div>
+            <div class="pi-val">SEAL &amp; SIGNATURE</div>
+          </div>
+        </td>
+        <td class="pi-sign-cell">
+          <div class="pi-sign-flex pi-stamp">
+            <div class="pi-val">FOR&nbsp; {{ company.company_name|upper if company else '' }}</div>
+            <div class="pi-val">AUTHORISED SIGNATORY</div>
+          </div>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+</body>
+</html>

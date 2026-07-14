@@ -18,9 +18,10 @@
       <a class="nav-link {{ 'active' if request.endpoint == 'dashboard.home' }}" href="{{ url_for('dashboard.home') }}">📊 Dashboard</a>
       <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('leads.') }}" href="{{ url_for('leads.list_leads') }}">🧭 Leads</a>
       <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('clients.') }}" href="{{ url_for('clients.list_clients') }}">🤝 Clients</a>
-      <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('products.') }}" href="{{ url_for('products.browse') }}">📦 Products</a>
+      <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('products.') }}" href="{{ url_for('products.list_products') }}">📦 Products</a>
       <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('quotations.') }}" href="{{ url_for('quotations.list_quotations') }}">🧾 Quotations</a>
       <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('proforma_invoices.') }}" href="{{ url_for('proforma_invoices.list_proforma_invoices') }}">📄 Proforma Invoices</a>
+      <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('packing_lists.') }}" href="{{ url_for('packing_lists.list_packing_lists') }}">📦 Packing Lists</a>
 
       {% if current_user and current_user.is_admin %}
         <div class="nav-section-label">Administration</div>

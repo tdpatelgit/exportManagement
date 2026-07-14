@@ -13,7 +13,9 @@ every Repository, Service and Route stays untouched (Dependency Inversion).
 
 import sqlite3
 import os
+import shutil
 from contextlib import contextmanager
+from datetime import datetime
 
 
 class Database:
@@ -57,11 +59,51 @@ class Database:
     def init_schema(self, schema_path: str) -> None:
         """Create every table defined in schema.sql if it doesn't exist yet.
         Safe to call on every app startup."""
+        self._pre_schema_migrate()
         with open(schema_path, "r", encoding="utf-8") as f:
             schema_sql = f.read()
         with self.get_connection() as conn:
             conn.executescript(schema_sql)
         self._migrate(conn=None)
+
+    def _pre_schema_migrate(self) -> None:
+        """Drops old-format tables BEFORE schema.sql runs, so its
+        CREATE TABLE IF NOT EXISTS statements recreate them in the new
+        shape (an old-shape survivor would also crash the CREATE INDEX
+        statements at the bottom of schema.sql).
+
+        This is the "start fresh" product/folder/design restructure: the
+        catalog used to be product_groups (nested folders) holding products
+        as the leaves; it is now products (tax + HSN identity) ->
+        product_folders -> designs. Old catalog data is NOT converted - the
+        whole DB file is backed up to instance/backups/ first, then the old
+        tables are dropped. Old-format tables are recognised by columns the
+        new shapes don't have, so this runs exactly once. The same applies
+        to an abandoned early packing_lists experiment some databases carry.
+        """
+        if not os.path.exists(self.db_path):
+            return
+        with self.get_connection() as conn:
+            product_cols = {r["name"] for r in conn.execute("PRAGMA table_info(products)")}
+            packing_cols = {r["name"] for r in conn.execute("PRAGMA table_info(packing_lists)")}
+            legacy_products = bool(product_cols) and "group_id" in product_cols
+            legacy_packing = bool(packing_cols) and "packing_list_number" not in packing_cols
+            if not legacy_products and not legacy_packing:
+                return
+            self._backup_db_file("pre_product_redesign")
+            conn.execute("PRAGMA foreign_keys = OFF")
+            if legacy_products:
+                # Line items keep their snapshot columns (name/hsn/price) but
+                # their product_id points into the dropped catalog - null the
+                # stale references out.
+                conn.execute("UPDATE quotation_items SET product_id = NULL")
+                conn.execute("UPDATE proforma_invoice_items SET product_id = NULL")
+                conn.execute("DROP TABLE products")
+                conn.execute("DROP TABLE IF EXISTS product_groups")
+            if legacy_packing:
+                conn.execute("DROP TABLE IF EXISTS packing_list_items")
+                conn.execute("DROP TABLE packing_lists")
+            conn.execute("PRAGMA foreign_keys = ON")
 
     def _migrate(self, conn=None) -> None:
         """Add columns to already-created tables that predate a schema change.
@@ -82,12 +124,6 @@ class Database:
             existing = {r["name"] for r in conn.execute("PRAGMA table_info(clients)")}
             if existing and "address" not in existing:
                 conn.execute("ALTER TABLE clients ADD COLUMN address TEXT")
-
-            existing = {r["name"] for r in conn.execute("PRAGMA table_info(products)")}
-            if existing and "weight_class" not in existing:
-                conn.execute("ALTER TABLE products ADD COLUMN weight_class TEXT")
-            if existing and "price_usd" not in existing:
-                conn.execute("ALTER TABLE products ADD COLUMN price_usd REAL")
 
             # The original `leads.status` CHECK constraint didn't allow
             # 'in_client', so converting a lead to a client crashed on the
@@ -347,8 +383,21 @@ class Database:
             # it on every root table now that the column is guaranteed to
             # exist (either from a fresh install's schema.sql, or from the
             # legacy-upgrade block above). Safe to run unconditionally.
-            for table in ("users", "leads", "clients", "product_groups", "products", "quotations"):
+            for table in ("users", "leads", "clients", "products", "product_folders", "designs", "quotations"):
                 conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_company ON {table}(company_id)")
+
+    def _backup_db_file(self, tag: str) -> None:
+        """Copies the live DB file into instance/backups/ before a
+        destructive migration, following the crm_<tag>_<timestamp>.db naming
+        already used in that folder. Callers must commit any open
+        transaction first so the copy is consistent."""
+        if not os.path.exists(self.db_path):
+            return
+        backup_dir = os.path.join(os.path.dirname(self.db_path), "backups")
+        os.makedirs(backup_dir, exist_ok=True)
+        stem = os.path.splitext(os.path.basename(self.db_path))[0]
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        shutil.copy2(self.db_path, os.path.join(backup_dir, f"{stem}_{tag}_{stamp}.db"))
 
     def query(self, sql: str, params: tuple = ()) -> list:
         """Run a SELECT and return a list of sqlite3.Row objects."""

@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit design' if design else 'New design' }}{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Catalog · {{ product.product_name }}</div>
+    <h1>{{ 'Edit design' if design else 'New design' }}</h1>
+    <div class="text-sm text-soft">Inside: {{ folder.name if folder else product.product_name + ' (product root)' }}</div>
+  </div>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <form method="POST" enctype="multipart/form-data">
+    {% set data = form_data if form_data else design %}
+    <div class="field">
+      <label for="design_name">Design name<span class="required-mark">*</span></label>
+      <input type="text" id="design_name" name="design_name" required value="{{ data.design_name | default('', true) }}">
+    </div>
+    <div class="field">
+      <label for="description">Description</label>
+      <textarea id="description" name="description" rows="3">{{ data.description | default('', true) }}</textarea>
+    </div>
+    <div class="form-row">
+      <div class="field"><label for="packing">Packing</label><input type="text" id="packing" name="packing" value="{{ data.packing | default('', true) }}"></div>
+      <div class="field"><label for="quantity">Quantity</label><input type="text" id="quantity" name="quantity" value="{{ data.quantity | default('', true) }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="field">
+        <label for="alternate_quantity">Alternate quantity (per box)</label>
+        <input type="text" id="alternate_quantity" name="alternate_quantity" value="{{ data.alternate_quantity | default('', true) }}">
+        <div class="hint">Drives the Boxes × Alternate Quantity auto-calc on packing lists.</div>
+      </div>
+      <div class="field">
+        <label for="weight_class">Weight class</label>
+        <input type="text" id="weight_class" name="weight_class" value="{{ data.weight_class | default('', true) }}" placeholder="e.g. 18.5 KG / box">
+      </div>
+    </div>
+    <div class="field" style="max-width:280px;">
+      <label for="price_usd">Price (USD)</label>
+      <input type="number" step="0.01" id="price_usd" name="price_usd" value="{{ data.price_usd | default('', true) }}">
+    </div>
+
+    <div class="form-row">
+      <div class="field">
+        <label for="photo">Photo</label>
+        {% if design and design.photo_path %}
+          <div class="mb-0"><img class="thumb-lg" src="{{ url_for('static', filename=design.photo_path) }}" alt="{{ design.alt_text or design.design_name }}"></div>
+        {% endif %}
+        <input type="file" id="photo" name="photo" accept="image/*">
+        <div class="hint">{{ 'Leave blank to keep the current photo.' if design and design.photo_path else '' }}</div>
+      </div>
+      <div class="field">
+        <label for="dimension_photo">Dimension photo</label>
+        {% if design and design.dimension_photo_path %}
+          <div class="mb-0"><img class="thumb-lg" src="{{ url_for('static', filename=design.dimension_photo_path) }}" alt="{{ design.design_name }} dimensions"></div>
+        {% endif %}
+        <input type="file" id="dimension_photo" name="dimension_photo" accept="image/*">
+        <div class="hint">{{ 'Leave blank to keep the current photo.' if design and design.dimension_photo_path else '' }}</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="alt_text">Alt text</label>
+      <input type="text" id="alt_text" name="alt_text" value="{{ data.alt_text | default('', true) }}">
+      <div class="hint">Describes the photo for accessibility / when it fails to load.</div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">{{ 'Save' if design else 'Add design' }}</button>
+    <a href="{{ url_for('products.view_design', design_id=design.id) if design else url_for('products.view_product', product_id=product.id, folder_id=(folder.id if folder else None)) }}" class="btn btn-ghost">Cancel</a>
+  </form>
+</div>
+
+{% endblock %}

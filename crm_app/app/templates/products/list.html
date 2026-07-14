@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Products{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Catalog</div>
+    <h1>Products</h1>
+    <div class="text-sm text-soft">Each product carries its HSN code and tax percentages; folders and designs live inside it.</div>
+  </div>
+  {% if current_user.is_admin %}
+  <div class="topbar-actions">
+    <a href="{{ url_for('products.new_product') }}" class="btn btn-primary">+ New product</a>
+  </div>
+  {% endif %}
+</div>
+
+{% if not products %}
+  <div class="empty-state">
+    No products yet.
+    {% if current_user.is_admin %}Create a product to get started — designs and folders are added inside it.{% endif %}
+  </div>
+{% else %}
+<div class="card">
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th>Product name</th>
+          <th>HSN code</th>
+          <th>GST %</th>
+          <th>IGST %</th>
+          <th>SGST %</th>
+          <th>CGST %</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for product in products %}
+        <tr>
+          <td>
+            <strong>{{ product.product_name }}</strong>
+            {% if product.description %}<div class="text-sm text-soft">{{ product.description | truncate(80) }}</div>{% endif %}
+          </td>
+          <td class="text-sm">{{ product.hsn_code or '—' }}</td>
+          <td class="text-sm">{{ product.gst_percent if product.gst_percent is not none else '—' }}</td>
+          <td class="text-sm">{{ product.igst_percent if product.igst_percent is not none else '—' }}</td>
+          <td class="text-sm">{{ product.sgst_percent if product.sgst_percent is not none else '—' }}</td>
+          <td class="text-sm">{{ product.cgst_percent if product.cgst_percent is not none else '—' }}</td>
+          <td><a href="{{ url_for('products.view_product', product_id=product.id) }}" class="text-sm">Open →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

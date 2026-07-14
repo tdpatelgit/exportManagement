@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Packing Lists{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Sales documents</div>
+    <h1>Packing Lists</h1>
+  </div>
+  <div class="topbar-actions">
+    <a href="{{ url_for('packing_lists.new_packing_list') }}" class="btn btn-primary">+ New packing list</a>
+  </div>
+</div>
+
+<div class="card">
+  {% if packing_lists %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th>Packing list no.</th>
+          <th>Date</th>
+          <th>Consignee</th>
+          <th>From proforma</th>
+          <th>Created by</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for pl in packing_lists %}
+        <tr>
+          <td class="mono">{{ pl.packing_list_number }}</td>
+          <td class="text-sm">{{ pl.packing_list_date }}</td>
+          <td><strong>{{ pl.consignee_name }}</strong></td>
+          <td class="text-sm">
+            {% if pl.proforma_invoice_id %}
+              <a href="{{ url_for('proforma_invoices.view_proforma_invoice', proforma_invoice_id=pl.proforma_invoice_id) }}">{{ pl.proforma_invoice_number or ('#' ~ pl.proforma_invoice_id) }}</a>
+            {% else %}—{% endif %}
+          </td>
+          <td class="text-sm">{{ pl.created_by_name }}</td>
+          <td><a href="{{ url_for('packing_lists.view_packing_list', packing_list_id=pl.id) }}" class="text-sm">Open →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No packing lists yet. <a href="{{ url_for('packing_lists.new_packing_list') }}">Create one →</a> (usually started from a proforma invoice)</div>
+  {% endif %}
+</div>
+
+{% endblock %}

@@ -75,16 +75,16 @@
         <tbody id="items-body">
           {% set rows = form_items if form_items is not none else (quotation.items if quotation else []) %}
           {% for row in rows %}
-          <tr class="item-row" data-alt-qty="{{ alt_qty_map.get(row.product_id | int, '') if row.product_id else '' }}">
+          <tr class="item-row">
             <td class="js-sr">{{ loop.index }}</td>
             <td>
               <input type="hidden" name="item_product_id[]" class="js-product-id" value="{{ row.product_id or '' }}">
               <textarea name="item_product_name[]" class="js-product-name" rows="2" required>{{ row.product_name }}</textarea>
-              <button type="button" class="btn btn-ghost btn-sm js-choose-product">📁 Choose</button>
+              <button type="button" class="btn btn-ghost btn-sm js-choose-product">📦 Choose product</button>
             </td>
             <td><input type="text" name="item_hsn_code[]" class="js-hsn" value="{{ row.hsn_code or '' }}"></td>
             <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" value="{{ row.quantity_boxes or '' }}"></td>
-            <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" readonly tabindex="-1" value="{{ row.quantity_value or '' }}"></td>
+            <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required value="{{ row.quantity_value or '' }}"></td>
             <td>
               <select name="item_unit[]" class="js-unit">
                 {% for u in ['SQM', 'LM', 'PCS', 'KG', 'SET'] %}
@@ -101,7 +101,7 @@
       </table>
     </div>
     <button type="button" class="btn btn-ghost btn-sm" id="add-row-btn">+ Add product line</button>
-    <p class="hint">Qty is calculated automatically from Boxes (× the product's Alternate Quantity, when a product is chosen from the catalog) — it isn't typed in directly. Price prefills from the product's catalog price and stays editable per quotation.</p>
+    <p class="hint">Choosing a catalog product prefills its name and HSN code. Quantity and price are typed in per line (designs and their prices are picked later, on the packing list).</p>
     <div class="form-row" style="margin-top:14px;">
       <div class="field" style="max-width:160px;"><label for="sea_freight">Sea freight (USD)</label><input type="number" step="0.01" id="sea_freight" name="sea_freight" value="{{ data.sea_freight | default(0, true) }}"></div>
       <div class="field" style="max-width:160px;"><label for="insurance">Insurance (USD)</label><input type="number" step="0.01" id="insurance" name="insurance" value="{{ data.insurance | default(0, true) }}"></div>
@@ -154,7 +154,9 @@
   <a href="{{ url_for('quotations.view_quotation', quotation_id=quotation.id) if quotation else url_for('quotations.list_quotations') }}" class="btn btn-ghost">Cancel</a>
 </form>
 
-<!-- Product picker modal: browses the catalog folder tree exactly as it was saved -->
+<!-- Product picker modal: products are the top level of the catalog now, so
+     this is a flat, searchable list (no folder tree - folders live inside a
+     product and organise its designs, which quotations don't deal with) -->
 <div id="product-picker-overlay" class="modal-overlay" hidden>
   <div class="modal-box">
     <div class="modal-header">
@@ -166,33 +168,31 @@
         <button type="button" class="btn-link-danger" id="picker-close">✕ Close</button>
       </div>
     </div>
-    <div class="breadcrumb-trail" id="picker-breadcrumb"></div>
 
     {% if current_user.is_admin %}
     <div id="picker-add-new-panel" class="card" hidden style="margin-bottom:14px;">
-      <div class="card-header"><h3>Add new product to this folder</h3></div>
+      <div class="card-header"><h3>Add new product</h3></div>
       <form id="picker-add-new-form">
         <div class="form-row">
           <div class="field"><label>Product name<span class="required-mark">*</span></label><input type="text" name="product_name" required></div>
           <div class="field"><label>HSN code</label><input type="text" name="hsn_code"></div>
         </div>
         <div class="form-row">
-          <div class="field"><label>Packing</label><input type="text" name="packing"></div>
-          <div class="field"><label>Quantity</label><input type="text" name="quantity"></div>
-          <div class="field"><label>Alternate quantity (per box)</label><input type="text" name="alternate_quantity"></div>
+          <div class="field"><label>GST %</label><input type="number" step="0.01" min="0" max="100" name="gst_percent"></div>
+          <div class="field"><label>IGST %</label><input type="number" step="0.01" min="0" max="100" name="igst_percent"></div>
+          <div class="field"><label>SGST %</label><input type="number" step="0.01" min="0" max="100" name="sgst_percent"></div>
+          <div class="field"><label>CGST %</label><input type="number" step="0.01" min="0" max="100" name="cgst_percent"></div>
         </div>
-        <div class="form-row">
-          <div class="field"><label>Weight class</label><input type="text" name="weight_class"></div>
-          <div class="field"><label>Price (USD)</label><input type="number" step="0.01" name="price_usd"></div>
-        </div>
-        <div class="hint">Adds the product to the folder currently open below. Photos can be attached later from the full Products page.</div>
+        <div class="hint">Folders and designs can be added later from the product's page in the catalog.</div>
         <button type="submit" class="btn btn-primary btn-sm">Save &amp; select</button>
         <button type="button" class="btn btn-ghost btn-sm" id="picker-add-new-cancel">Cancel</button>
       </form>
     </div>
     {% endif %}
 
-    <div id="picker-subgroups" class="folder-grid"></div>
+    <div class="field">
+      <input type="text" id="picker-search" placeholder="Search products…" autocomplete="off">
+    </div>
     <div id="picker-products" class="table-wrap"></div>
   </div>
 </div>
@@ -210,11 +210,11 @@
       <td>
         <input type="hidden" name="item_product_id[]" class="js-product-id">
         <textarea name="item_product_name[]" class="js-product-name" rows="2" required></textarea>
-        <button type="button" class="btn btn-ghost btn-sm js-choose-product">📁 Choose</button>
+        <button type="button" class="btn btn-ghost btn-sm js-choose-product">📦 Choose product</button>
       </td>
       <td><input type="text" name="item_hsn_code[]" class="js-hsn"></td>
       <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes"></td>
-      <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" readonly tabindex="-1"></td>
+      <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required></td>
       <td>
         <select name="item_unit[]" class="js-unit">
           <option value="SQM">SQM</option><option value="LM">LM</option><option value="PCS">PCS</option><option value="KG">KG</option><option value="SET">SET</option>
@@ -251,17 +251,6 @@
     document.getElementById('invoice-value-display').textContent = invoiceValue.toFixed(2);
   }
 
-  // Qty is never typed in directly - it's always derived from Boxes.
-  // When the row is tied to a catalog product with a known Alternate Quantity
-  // (per-box SQM/LM), Qty = Boxes x that Alternate Quantity. Otherwise Boxes
-  // itself is used as Qty, since there's no other data to derive it from.
-  function recalcRowQty(tr) {
-    const boxes = parseFloat(tr.querySelector('.js-boxes').value) || 0;
-    const altQty = parseFloat(tr.dataset.altQty);
-    const qty = altQty ? boxes * altQty : boxes;
-    tr.querySelector('.js-qty').value = qty.toFixed(2);
-  }
-
   addRowBtn.addEventListener('click', () => {
     itemsBody.appendChild(rowTemplate());
     renumber();
@@ -278,10 +267,7 @@
   });
 
   itemsBody.addEventListener('input', (e) => {
-    if (e.target.classList.contains('js-boxes')) {
-      recalcRowQty(e.target.closest('tr'));
-      recalcTotals();
-    } else if (e.target.classList.contains('js-price')) {
+    if (e.target.classList.contains('js-qty') || e.target.classList.contains('js-price')) {
       recalcTotals();
     }
   });
@@ -309,14 +295,12 @@
     document.getElementById('bank_address').value = opt.dataset.address || '';
   });
 
-  // ---- product picker modal (browses the same folder tree it was saved in) --------------------------------------------------
+  // ---- product picker modal (flat searchable product list) --------------------------------------------------
   const overlay = document.getElementById('product-picker-overlay');
-  const breadcrumbEl = document.getElementById('picker-breadcrumb');
-  const subgroupsEl = document.getElementById('picker-subgroups');
   const productsEl = document.getElementById('picker-products');
+  const searchEl = document.getElementById('picker-search');
   let activeRow = null;
-  let currentBreadcrumb = [];
-  let currentGroupId = null;
+  let allProducts = [];
   const addNewPanel = document.getElementById('picker-add-new-panel');
   const addNewToggle = document.getElementById('picker-add-new-toggle');
   const addNewForm = document.getElementById('picker-add-new-form');
@@ -331,11 +315,13 @@
     activeRow = row;
     overlay.hidden = false;
     closeAddNewPanel();
-    loadFolder(null);
+    searchEl.value = '';
+    loadProducts();
   }
 
   document.getElementById('picker-close').addEventListener('click', () => { overlay.hidden = true; closeAddNewPanel(); });
   overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.hidden = true; closeAddNewPanel(); } });
+  searchEl.addEventListener('input', () => renderProducts());
 
   if (addNewToggle) {
     addNewToggle.addEventListener('click', () => { addNewPanel.hidden = !addNewPanel.hidden; });
@@ -343,7 +329,6 @@
     addNewForm.addEventListener('submit', (e) => {
       e.preventDefault();
       const formData = new FormData(addNewForm);
-      formData.set('group_id', currentGroupId === null ? '' : currentGroupId);
       fetch('/products/api/quick-create', { method: 'POST', body: formData })
         .then(r => r.json().then(data => ({ ok: r.ok, data })))
         .then(({ ok, data }) => {
@@ -355,70 +340,47 @@
     });
   }
 
-  function loadFolder(groupId) {
-    currentGroupId = groupId;
-    const url = groupId ? `/products/api/browse?group_id=${groupId}` : '/products/api/browse';
-    fetch(url).then(r => r.json()).then(data => {
-      currentBreadcrumb = data.breadcrumb;
-      breadcrumbEl.innerHTML = '';
-      const rootLink = document.createElement('a');
-      rootLink.href = '#'; rootLink.textContent = 'Products';
-      rootLink.addEventListener('click', (e) => { e.preventDefault(); loadFolder(null); });
-      breadcrumbEl.appendChild(rootLink);
-      data.breadcrumb.forEach(g => {
-        const sep = document.createElement('span'); sep.className = 'crumb-sep'; sep.textContent = '/';
-        breadcrumbEl.appendChild(sep);
-        const link = document.createElement('a');
-        link.href = '#'; link.textContent = g.name;
-        link.addEventListener('click', (e) => { e.preventDefault(); loadFolder(g.id); });
-        breadcrumbEl.appendChild(link);
-      });
-
-      subgroupsEl.innerHTML = '';
-      data.subgroups.forEach(g => {
-        const tile = document.createElement('div');
-        tile.className = 'folder-tile';
-        tile.innerHTML = `<a class="folder-tile-link" href="#"><span class="folder-icon">📁</span><span class="folder-name">${g.name}</span></a>`;
-        tile.querySelector('a').addEventListener('click', (e) => { e.preventDefault(); loadFolder(g.id); });
-        subgroupsEl.appendChild(tile);
-      });
-
-      if (data.products.length === 0) {
-        productsEl.innerHTML = '<div class="empty-state">No products in this folder.</div>';
-      } else {
-        const table = document.createElement('table');
-        table.className = 'ledger';
-        table.innerHTML = '<thead><tr><th></th><th>Product</th><th>HSN code</th><th>Packing</th><th></th></tr></thead>';
-        const tbody = document.createElement('tbody');
-        data.products.forEach(p => {
-          const tr = document.createElement('tr');
-          tr.innerHTML = `
-            <td>${p.photo_url ? `<img class="thumb" src="${p.photo_url}">` : ''}</td>
-            <td><strong>${p.name}</strong></td>
-            <td class="text-sm">${p.hsn_code || '—'}</td>
-            <td class="text-sm">${p.packing || '—'}</td>
-            <td><button type="button" class="btn btn-primary btn-sm">Select</button></td>`;
-          tr.querySelector('button').addEventListener('click', () => selectProduct(p));
-          tbody.appendChild(tr);
-        });
-        table.appendChild(tbody);
-        productsEl.innerHTML = '';
-        productsEl.appendChild(table);
-      }
+  function loadProducts() {
+    fetch('/products/api/list').then(r => r.json()).then(data => {
+      allProducts = data.products;
+      renderProducts();
     });
+  }
+
+  function renderProducts() {
+    const term = searchEl.value.trim().toLowerCase();
+    const filtered = term
+      ? allProducts.filter(p => (p.name || '').toLowerCase().includes(term) || (p.hsn_code || '').toLowerCase().includes(term))
+      : allProducts;
+    if (filtered.length === 0) {
+      productsEl.innerHTML = '<div class="empty-state">No matching products.</div>';
+      return;
+    }
+    const table = document.createElement('table');
+    table.className = 'ledger';
+    table.innerHTML = '<thead><tr><th>Product</th><th>HSN code</th><th>GST %</th><th></th></tr></thead>';
+    const tbody = document.createElement('tbody');
+    filtered.forEach(p => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong></strong></td>
+        <td class="text-sm">${p.hsn_code || '—'}</td>
+        <td class="text-sm">${p.gst_percent ?? '—'}</td>
+        <td><button type="button" class="btn btn-primary btn-sm">Select</button></td>`;
+      tr.querySelector('strong').textContent = p.name;
+      tr.querySelector('button').addEventListener('click', () => selectProduct(p));
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    productsEl.innerHTML = '';
+    productsEl.appendChild(table);
   }
 
   function selectProduct(p) {
     if (!activeRow) return;
-    const pathName = currentBreadcrumb.map(g => g.name).concat(p.name).join('\n');
     activeRow.querySelector('.js-product-id').value = p.id;
-    activeRow.querySelector('.js-product-name').value = pathName;
+    activeRow.querySelector('.js-product-name').value = p.name;
     activeRow.querySelector('.js-hsn').value = p.hsn_code || '';
-    if (p.price_usd !== null && p.price_usd !== undefined) {
-      activeRow.querySelector('.js-price').value = p.price_usd;
-    }
-    activeRow.dataset.altQty = p.alternate_quantity || '';
-    recalcRowQty(activeRow);
     recalcTotals();
     overlay.hidden = true;
   }

@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}{{ design.design_name }}{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Catalog · {{ product.product_name }}</div>
+    <h1>{{ design.design_name }}</h1>
+  </div>
+  {% if current_user.is_admin %}
+  <div class="topbar-actions">
+    <a href="{{ url_for('products.edit_design', design_id=design.id) }}" class="btn btn-ghost">Edit</a>
+    <form method="POST" action="{{ url_for('products.delete_design', design_id=design.id) }}" onsubmit="return confirm('Delete this design?');">
+      <button type="submit" class="btn btn-danger">Delete</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+
+<div class="breadcrumb-trail">
+  <a href="{{ url_for('products.list_products') }}">Products</a>
+  <span class="crumb-sep">/</span>
+  <a href="{{ url_for('products.view_product', product_id=product.id) }}">{{ product.product_name }}</a>
+  {% for f in breadcrumb %}
+    <span class="crumb-sep">/</span>
+    <a href="{{ url_for('products.view_product', product_id=product.id, folder_id=f.id) }}">{{ f.name }}</a>
+  {% endfor %}
+  <span class="crumb-sep">/</span>
+  <span>{{ design.design_name }}</span>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <div class="card-header"><h3>Photo</h3></div>
+    {% if design.photo_path %}
+      <img class="thumb-xl" src="{{ url_for('static', filename=design.photo_path) }}" alt="{{ design.alt_text or design.design_name }}">
+    {% else %}
+      <div class="empty-state">No photo uploaded.</div>
+    {% endif %}
+  </div>
+  <div class="card">
+    <div class="card-header"><h3>Dimension photo</h3></div>
+    {% if design.dimension_photo_path %}
+      <img class="thumb-xl" src="{{ url_for('static', filename=design.dimension_photo_path) }}" alt="{{ design.design_name }} dimensions">
+    {% else %}
+      <div class="empty-state">No dimension photo uploaded.</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h3>Design details</h3></div>
+  <div class="grid grid-2">
+    <div><div class="text-sm text-soft">Description</div><div>{{ design.description or '—' }}</div></div>
+    <div><div class="text-sm text-soft">Packing</div><div>{{ design.packing or '—' }}</div></div>
+    <div><div class="text-sm text-soft">Quantity</div><div>{{ design.quantity or '—' }}</div></div>
+    <div><div class="text-sm text-soft">Alternate quantity</div><div>{{ design.alternate_quantity or '—' }}</div></div>
+    <div><div class="text-sm text-soft">Weight class</div><div>{{ design.weight_class or '—' }}</div></div>
+    <div><div class="text-sm text-soft">Price (USD)</div><div>{{ '$ {:,.2f}'.format(design.price_usd) if design.price_usd is not none else '—' }}</div></div>
+    <div><div class="text-sm text-soft">Alt text</div><div>{{ design.alt_text or '—' }}</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h3>Product (tax identity)</h3></div>
+  <div class="grid grid-2">
+    <div><div class="text-sm text-soft">Product</div><div><a href="{{ url_for('products.view_product', product_id=product.id) }}">{{ product.product_name }}</a></div></div>
+    <div><div class="text-sm text-soft">HSN code</div><div>{{ product.hsn_code or '—' }}</div></div>
+    <div><div class="text-sm text-soft">GST / IGST</div><div>{{ (product.gst_percent ~ ' %') if product.gst_percent is not none else '—' }} / {{ (product.igst_percent ~ ' %') if product.igst_percent is not none else '—' }}</div></div>
+    <div><div class="text-sm text-soft">SGST / CGST</div><div>{{ (product.sgst_percent ~ ' %') if product.sgst_percent is not none else '—' }} / {{ (product.cgst_percent ~ ' %') if product.cgst_percent is not none else '—' }}</div></div>
+  </div>
+</div>
+
+{% endblock %}

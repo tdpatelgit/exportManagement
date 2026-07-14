@@ -59,31 +59,6 @@ def _form_context():
     return leads, bank_options
 
 
-def _alt_qty_map(items) -> dict:
-    """Maps product_id -> that product's Alternate Quantity, so the form can
-    reproduce the Boxes x Alternate Quantity auto-calc for rows that are
-    already tied to a catalog product (re-displayed after a validation error,
-    or when editing an existing quotation)."""
-    container = current_app.container
-    result = {}
-    for item in items:
-        raw_id = item.get("product_id") if isinstance(item, dict) else item.product_id
-        if not raw_id or raw_id in result:
-            continue
-        try:
-            product_id = int(raw_id)
-        except (TypeError, ValueError):
-            continue
-        if product_id in result:
-            continue
-        try:
-            product = container.product_service.get_product(product_id, g.user.company_id)
-            result[product_id] = product.alternate_quantity or ""
-        except NotFoundError:
-            pass
-    return result
-
-
 @quotations_bp.route("/")
 @login_required
 def list_quotations():
@@ -108,8 +83,7 @@ def new_quotation():
             items = _extract_items(request.form)
             return render_template(
                 "quotations/form.html", quotation=None, leads=leads, bank_options=bank_options,
-                form_data=request.form, form_items=items, alt_qty_map=_alt_qty_map(items),
-                today=date.today().isoformat(),
+                form_data=request.form, form_items=items, today=date.today().isoformat(),
             ), 400
 
     leads, bank_options = _form_context()
@@ -126,7 +100,7 @@ def new_quotation():
             pass
     return render_template(
         "quotations/form.html", quotation=None, leads=leads, bank_options=bank_options,
-        form_data=prefill, form_items=None, alt_qty_map={}, today=date.today().isoformat(),
+        form_data=prefill, form_items=None, today=date.today().isoformat(),
     )
 
 
@@ -165,14 +139,13 @@ def edit_quotation(quotation_id):
             items = _extract_items(request.form)
             return render_template(
                 "quotations/form.html", quotation=quotation, leads=leads, bank_options=bank_options,
-                form_data=request.form, form_items=items, alt_qty_map=_alt_qty_map(items),
-                today=date.today().isoformat(),
+                form_data=request.form, form_items=items, today=date.today().isoformat(),
             ), 400
 
     leads, bank_options = _form_context()
     return render_template(
         "quotations/form.html", quotation=quotation, leads=leads, bank_options=bank_options,
-        form_data=None, form_items=None, alt_qty_map=_alt_qty_map(quotation.items), today=date.today().isoformat(),
+        form_data=None, form_items=None, today=date.today().isoformat(),
     )
 
 

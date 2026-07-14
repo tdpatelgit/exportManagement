@@ -17,8 +17,9 @@ from typing import Optional, List
 from app.database import Database
 from app.models import (
     Tenant, User, Lead, Client, ContactPerson, Communication,
-    PaymentEntry, DocumentEntry, OurCompany, ProductGroup, Product,
+    PaymentEntry, DocumentEntry, OurCompany, Product, ProductFolder, Design,
     Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
+    PackingList, PackingListItem,
 )
 
 
@@ -576,59 +577,8 @@ class CompanyRepository:
 
 
 # ============================================================
-# PRODUCT CATALOG (groups = folders, products = files)
+# PRODUCT CATALOG (products -> folders -> designs)
 # ============================================================
-class ProductGroupRepository:
-    def __init__(self, db: Database):
-        self.db = db
-
-    def get_by_id(self, group_id: int) -> Optional[ProductGroup]:
-        row = self.db.query_one("SELECT * FROM product_groups WHERE id = ?", (group_id,))
-        return ProductGroup.from_row(row) if row else None
-
-    def list_children(self, company_id: int, parent_id: Optional[int]) -> List[ProductGroup]:
-        if parent_id is None:
-            rows = self.db.query(
-                "SELECT * FROM product_groups WHERE company_id = ? AND parent_id IS NULL ORDER BY name",
-                (company_id,),
-            )
-        else:
-            rows = self.db.query(
-                "SELECT * FROM product_groups WHERE company_id = ? AND parent_id = ? ORDER BY name",
-                (company_id, parent_id),
-            )
-        return [ProductGroup.from_row(r) for r in rows]
-
-    def list_ancestors(self, group_id: int) -> List[ProductGroup]:
-        """Walks parent_id up to the root - powers the breadcrumb trail."""
-        trail = []
-        current = self.get_by_id(group_id)
-        while current:
-            trail.append(current)
-            current = self.get_by_id(current.parent_id) if current.parent_id else None
-        trail.reverse()
-        return trail
-
-    def create(self, company_id: int, name: str, parent_id: Optional[int]) -> ProductGroup:
-        new_id = self.db.execute(
-            "INSERT INTO product_groups (company_id, name, parent_id) VALUES (?, ?, ?)",
-            (company_id, name, parent_id),
-        )
-        return self.get_by_id(new_id)
-
-    def update(self, group_id: int, name: str) -> None:
-        self.db.execute("UPDATE product_groups SET name = ? WHERE id = ?", (name, group_id))
-
-    def delete(self, group_id: int) -> None:
-        """Cascades to subgroups and products via ON DELETE CASCADE."""
-        self.db.execute("DELETE FROM product_groups WHERE id = ?", (group_id,))
-
-    def has_children(self, group_id: int) -> bool:
-        subgroup = self.db.query_one("SELECT id FROM product_groups WHERE parent_id = ? LIMIT 1", (group_id,))
-        product = self.db.query_one("SELECT id FROM products WHERE group_id = ? LIMIT 1", (group_id,))
-        return bool(subgroup or product)
-
-
 class ProductRepository:
     def __init__(self, db: Database):
         self.db = db
@@ -637,34 +587,25 @@ class ProductRepository:
         row = self.db.query_one("SELECT * FROM products WHERE id = ?", (product_id,))
         return Product.from_row(row) if row else None
 
-    def list_in_group(self, company_id: int, group_id: Optional[int]) -> List[Product]:
-        if group_id is None:
-            rows = self.db.query(
-                "SELECT * FROM products WHERE company_id = ? AND group_id IS NULL ORDER BY product_name",
-                (company_id,),
-            )
-        else:
-            rows = self.db.query(
-                "SELECT * FROM products WHERE company_id = ? AND group_id = ? ORDER BY product_name",
-                (company_id, group_id),
-            )
+    def list_all(self, company_id: int) -> List[Product]:
+        rows = self.db.query(
+            "SELECT * FROM products WHERE company_id = ? ORDER BY product_name", (company_id,)
+        )
         return [Product.from_row(r) for r in rows]
 
     def create(self, product: Product) -> Product:
         new_id = self.db.execute(
             """INSERT INTO products
-               (company_id, group_id, product_name, description, hsn_code, packing, quantity,
-                alternate_quantity, weight_class, price_usd, photo_path, dimension_photo_path, alt_text)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (product.company_id, product.group_id, product.product_name, product.description,
-             product.hsn_code, product.packing, product.quantity, product.alternate_quantity,
-             product.weight_class, product.price_usd, product.photo_path,
-             product.dimension_photo_path, product.alt_text),
+               (company_id, product_name, description, hsn_code,
+                gst_percent, igst_percent, sgst_percent, cgst_percent)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (product.company_id, product.product_name, product.description, product.hsn_code,
+             product.gst_percent, product.igst_percent, product.sgst_percent, product.cgst_percent),
         )
         return self.get_by_id(new_id)
 
     def update(self, product_id: int, fields: dict) -> None:
-        """fields may include any column except id/group_id/created_at."""
+        """fields may include any column except id/company_id/created_at."""
         columns = ", ".join(f"{k} = ?" for k in fields)
         self.db.execute(
             f"UPDATE products SET {columns}, updated_at = datetime('now') WHERE id = ?",
@@ -672,7 +613,139 @@ class ProductRepository:
         )
 
     def delete(self, product_id: int) -> None:
-        self.db.execute("DELETE FROM products WHERE id = ?", (product_id,))
+        """Cascades to the product's folders and designs via ON DELETE CASCADE.
+        Document line items keep their snapshot text (name/HSN) - only the
+        catalog reference is nulled out first. Done explicitly rather than
+        relying on ON DELETE SET NULL because quotation/proforma item tables
+        created before this rule existed don't carry it."""
+        with self.db.get_connection() as conn:
+            conn.execute("UPDATE quotation_items SET product_id = NULL WHERE product_id = ?", (product_id,))
+            conn.execute("UPDATE proforma_invoice_items SET product_id = NULL WHERE product_id = ?", (product_id,))
+            conn.execute("UPDATE packing_list_items SET product_id = NULL WHERE product_id = ?", (product_id,))
+            conn.execute(
+                "UPDATE packing_list_items SET design_id = NULL "
+                "WHERE design_id IN (SELECT id FROM designs WHERE product_id = ?)",
+                (product_id,),
+            )
+            conn.execute("DELETE FROM products WHERE id = ?", (product_id,))
+
+
+class ProductFolderRepository:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def get_by_id(self, folder_id: int) -> Optional[ProductFolder]:
+        row = self.db.query_one("SELECT * FROM product_folders WHERE id = ?", (folder_id,))
+        return ProductFolder.from_row(row) if row else None
+
+    def list_children(self, product_id: int, parent_id: Optional[int]) -> List[ProductFolder]:
+        if parent_id is None:
+            rows = self.db.query(
+                "SELECT * FROM product_folders WHERE product_id = ? AND parent_id IS NULL ORDER BY name",
+                (product_id,),
+            )
+        else:
+            rows = self.db.query(
+                "SELECT * FROM product_folders WHERE product_id = ? AND parent_id = ? ORDER BY name",
+                (product_id, parent_id),
+            )
+        return [ProductFolder.from_row(r) for r in rows]
+
+    def list_ancestors(self, folder_id: int) -> List[ProductFolder]:
+        """Walks parent_id up to the product's top level - powers the breadcrumb trail."""
+        trail = []
+        current = self.get_by_id(folder_id)
+        while current:
+            trail.append(current)
+            current = self.get_by_id(current.parent_id) if current.parent_id else None
+        trail.reverse()
+        return trail
+
+    def create(self, company_id: int, product_id: int, name: str, parent_id: Optional[int]) -> ProductFolder:
+        new_id = self.db.execute(
+            "INSERT INTO product_folders (company_id, product_id, name, parent_id) VALUES (?, ?, ?, ?)",
+            (company_id, product_id, name, parent_id),
+        )
+        return self.get_by_id(new_id)
+
+    def update(self, folder_id: int, name: str) -> None:
+        self.db.execute("UPDATE product_folders SET name = ? WHERE id = ?", (name, folder_id))
+
+    def delete(self, folder_id: int) -> None:
+        """Cascades to subfolders and designs via ON DELETE CASCADE. Packing
+        list lines keep their design_name snapshot - the design reference is
+        nulled for every design in the folder's subtree first."""
+        with self.db.get_connection() as conn:
+            conn.execute(
+                """UPDATE packing_list_items SET design_id = NULL WHERE design_id IN (
+                       WITH RECURSIVE subtree(id) AS (
+                           SELECT ?
+                           UNION ALL
+                           SELECT pf.id FROM product_folders pf JOIN subtree s ON pf.parent_id = s.id
+                       )
+                       SELECT d.id FROM designs d WHERE d.folder_id IN (SELECT id FROM subtree)
+                   )""",
+                (folder_id,),
+            )
+            conn.execute("DELETE FROM product_folders WHERE id = ?", (folder_id,))
+
+
+class DesignRepository:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def get_by_id(self, design_id: int) -> Optional[Design]:
+        row = self.db.query_one("SELECT * FROM designs WHERE id = ?", (design_id,))
+        return Design.from_row(row) if row else None
+
+    def list_in(self, product_id: int, folder_id: Optional[int]) -> List[Design]:
+        """Designs sitting in one folder - folder_id=None is the product's top level."""
+        if folder_id is None:
+            rows = self.db.query(
+                "SELECT * FROM designs WHERE product_id = ? AND folder_id IS NULL ORDER BY design_name",
+                (product_id,),
+            )
+        else:
+            rows = self.db.query(
+                "SELECT * FROM designs WHERE product_id = ? AND folder_id = ? ORDER BY design_name",
+                (product_id, folder_id),
+            )
+        return [Design.from_row(r) for r in rows]
+
+    def list_for_product(self, product_id: int) -> List[Design]:
+        """Every design anywhere under the product, regardless of folder."""
+        rows = self.db.query(
+            "SELECT * FROM designs WHERE product_id = ? ORDER BY design_name", (product_id,)
+        )
+        return [Design.from_row(r) for r in rows]
+
+    def create(self, design: Design) -> Design:
+        new_id = self.db.execute(
+            """INSERT INTO designs
+               (company_id, product_id, folder_id, design_name, description, packing, quantity,
+                alternate_quantity, weight_class, price_usd, photo_path, dimension_photo_path, alt_text)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (design.company_id, design.product_id, design.folder_id, design.design_name,
+             design.description, design.packing, design.quantity, design.alternate_quantity,
+             design.weight_class, design.price_usd, design.photo_path,
+             design.dimension_photo_path, design.alt_text),
+        )
+        return self.get_by_id(new_id)
+
+    def update(self, design_id: int, fields: dict) -> None:
+        """fields may include any column except id/product_id/created_at."""
+        columns = ", ".join(f"{k} = ?" for k in fields)
+        self.db.execute(
+            f"UPDATE designs SET {columns}, updated_at = datetime('now') WHERE id = ?",
+            (*fields.values(), design_id),
+        )
+
+    def delete(self, design_id: int) -> None:
+        """Packing list lines keep their design_name snapshot - only the
+        catalog reference is nulled out."""
+        with self.db.get_connection() as conn:
+            conn.execute("UPDATE packing_list_items SET design_id = NULL WHERE design_id = ?", (design_id,))
+            conn.execute("DELETE FROM designs WHERE id = ?", (design_id,))
 
 
 # ============================================================
@@ -932,3 +1005,111 @@ class ProformaInvoiceRepository:
 
     def delete(self, invoice_id: int) -> None:
         self.db.execute("DELETE FROM proforma_invoices WHERE id = ?", (invoice_id,))
+
+
+class PackingListRepository:
+    """Mirrors ProformaInvoiceRepository layer-for-layer: header + line
+    items, day-scoped number sequence, reference-only lead link."""
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    def count_for_date_prefix(self, company_id: int, number_prefix: str) -> int:
+        row = self.db.query_one(
+            "SELECT COUNT(*) AS cnt FROM packing_lists WHERE company_id = ? AND packing_list_number LIKE ?",
+            (company_id, f"{number_prefix}%"),
+        )
+        return row["cnt"] if row else 0
+
+    _SELECT = """
+        SELECT pl.*, u.full_name AS created_by_name, pi.invoice_number AS proforma_invoice_number
+        FROM packing_lists pl
+        JOIN users u ON u.id = pl.created_by
+        LEFT JOIN proforma_invoices pi ON pi.id = pl.proforma_invoice_id
+    """
+
+    def get_by_id(self, packing_list_id: int) -> Optional[PackingList]:
+        row = self.db.query_one(self._SELECT + " WHERE pl.id = ?", (packing_list_id,))
+        if not row:
+            return None
+        packing_list = PackingList.from_row(row)
+        item_rows = self.db.query(
+            "SELECT * FROM packing_list_items WHERE packing_list_id = ? ORDER BY sr_no", (packing_list_id,)
+        )
+        packing_list.items = [PackingListItem.from_row(r) for r in item_rows]
+        return packing_list
+
+    def list_all(self, company_id: int) -> List[PackingList]:
+        rows = self.db.query(
+            self._SELECT + " WHERE pl.company_id = ? ORDER BY pl.packing_list_date DESC, pl.id DESC",
+            (company_id,),
+        )
+        return [PackingList.from_row(r) for r in rows]
+
+    def list_for_lead(self, lead_id: int) -> List[PackingList]:
+        """Same 'reference-only' join pattern as QuotationRepository.list_for_lead -
+        a converted client sees its packing lists through its originating lead_id."""
+        rows = self.db.query(
+            self._SELECT + " WHERE pl.lead_id = ? ORDER BY pl.packing_list_date DESC, pl.id DESC",
+            (lead_id,),
+        )
+        return [PackingList.from_row(r) for r in rows]
+
+    def create(self, packing_list: PackingList) -> PackingList:
+        new_id = self.db.execute(
+            """INSERT INTO packing_lists
+               (company_id, packing_list_number, packing_list_date, lead_id, proforma_invoice_id,
+                export_ref_no, buyer_order_no, other_reference, consignee_name, consignee_address,
+                notify_name, notify_address, country_of_origin, country_of_destination, vessel_flight,
+                port_of_loading, port_of_discharge, final_destination, container_details,
+                terms_of_delivery, remarks, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (packing_list.company_id, packing_list.packing_list_number, packing_list.packing_list_date,
+             packing_list.lead_id, packing_list.proforma_invoice_id, packing_list.export_ref_no,
+             packing_list.buyer_order_no, packing_list.other_reference, packing_list.consignee_name,
+             packing_list.consignee_address, packing_list.notify_name, packing_list.notify_address,
+             packing_list.country_of_origin, packing_list.country_of_destination,
+             packing_list.vessel_flight, packing_list.port_of_loading, packing_list.port_of_discharge,
+             packing_list.final_destination, packing_list.container_details,
+             packing_list.terms_of_delivery, packing_list.remarks, packing_list.created_by),
+        )
+        self._replace_items(new_id, packing_list.items)
+        return self.get_by_id(new_id)
+
+    def update(self, packing_list_id: int, packing_list: PackingList) -> None:
+        self.db.execute(
+            """UPDATE packing_lists SET packing_list_date = ?, lead_id = ?, proforma_invoice_id = ?,
+                                         export_ref_no = ?, buyer_order_no = ?, other_reference = ?,
+                                         consignee_name = ?, consignee_address = ?, notify_name = ?,
+                                         notify_address = ?, country_of_origin = ?, country_of_destination = ?,
+                                         vessel_flight = ?, port_of_loading = ?, port_of_discharge = ?,
+                                         final_destination = ?, container_details = ?, terms_of_delivery = ?,
+                                         remarks = ?, updated_at = datetime('now')
+               WHERE id = ?""",
+            (packing_list.packing_list_date, packing_list.lead_id, packing_list.proforma_invoice_id,
+             packing_list.export_ref_no, packing_list.buyer_order_no, packing_list.other_reference,
+             packing_list.consignee_name, packing_list.consignee_address, packing_list.notify_name,
+             packing_list.notify_address, packing_list.country_of_origin,
+             packing_list.country_of_destination, packing_list.vessel_flight,
+             packing_list.port_of_loading, packing_list.port_of_discharge,
+             packing_list.final_destination, packing_list.container_details,
+             packing_list.terms_of_delivery, packing_list.remarks, packing_list_id),
+        )
+        self._replace_items(packing_list_id, packing_list.items)
+
+    def _replace_items(self, packing_list_id: int, items: List[PackingListItem]) -> None:
+        with self.db.get_connection() as conn:
+            conn.execute("DELETE FROM packing_list_items WHERE packing_list_id = ?", (packing_list_id,))
+            for item in items:
+                conn.execute(
+                    """INSERT INTO packing_list_items
+                       (packing_list_id, sr_no, product_id, product_name, design_id, design_name,
+                        hsn_code, pallets, quantity_boxes, quantity_value, unit, net_weight_kg, gross_weight_kg)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (packing_list_id, item.sr_no, item.product_id, item.product_name, item.design_id,
+                     item.design_name, item.hsn_code, item.pallets, item.quantity_boxes,
+                     item.quantity_value, item.unit, item.net_weight_kg, item.gross_weight_kg),
+                )
+
+    def delete(self, packing_list_id: int) -> None:
+        self.db.execute("DELETE FROM packing_lists WHERE id = ?", (packing_list_id,))

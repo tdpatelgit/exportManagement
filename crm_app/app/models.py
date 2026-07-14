@@ -320,20 +320,57 @@ class OurCompany:
 
 
 @dataclass
-class ProductGroup:
-    """A folder in the product catalog. `parent_id=None` means it's a
-    top-level group; groups can nest to any depth via self-reference."""
+class Product:
+    """Top level of the catalog: the tax/HSN identity that quotations and
+    proforma invoices bill against. Folders and designs live underneath it;
+    price, packing and photos belong to the Design, not the Product."""
     id: Optional[int]
     company_id: int
+    product_name: str
+    description: Optional[str] = None
+    hsn_code: Optional[str] = None
+    gst_percent: Optional[float] = None
+    igst_percent: Optional[float] = None
+    sgst_percent: Optional[float] = None
+    cgst_percent: Optional[float] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    @staticmethod
+    def from_row(row) -> "Product":
+        return Product(
+            id=row["id"],
+            company_id=row["company_id"],
+            product_name=row["product_name"],
+            description=row["description"],
+            hsn_code=row["hsn_code"],
+            gst_percent=row["gst_percent"],
+            igst_percent=row["igst_percent"],
+            sgst_percent=row["sgst_percent"],
+            cgst_percent=row["cgst_percent"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+
+@dataclass
+class ProductFolder:
+    """A folder inside a product. `parent_id=None` means it sits at the
+    product's top level; folders can nest to any depth via self-reference,
+    but always belong to exactly one product."""
+    id: Optional[int]
+    company_id: int
+    product_id: int
     name: str
     parent_id: Optional[int] = None
     created_at: Optional[str] = None
 
     @staticmethod
-    def from_row(row) -> "ProductGroup":
-        return ProductGroup(
+    def from_row(row) -> "ProductFolder":
+        return ProductFolder(
             id=row["id"],
             company_id=row["company_id"],
+            product_id=row["product_id"],
             name=row["name"],
             parent_id=row["parent_id"],
             created_at=row["created_at"],
@@ -341,15 +378,16 @@ class ProductGroup:
 
 
 @dataclass
-class Product:
-    """A file in the product catalog folder tree. `group_id=None` means it
-    sits at the catalog root, alongside top-level groups."""
+class Design:
+    """The sellable leaf of the catalog: one concrete design of a product,
+    carrying the price, packing, per-box quantity, weights and photos.
+    `folder_id=None` means it sits directly under the product."""
     id: Optional[int]
     company_id: int
-    group_id: Optional[int]
-    product_name: str
+    product_id: int
+    design_name: str
+    folder_id: Optional[int] = None
     description: Optional[str] = None
-    hsn_code: Optional[str] = None
     packing: Optional[str] = None
     quantity: Optional[str] = None
     alternate_quantity: Optional[str] = None
@@ -362,19 +400,19 @@ class Product:
     updated_at: Optional[str] = None
 
     @staticmethod
-    def from_row(row) -> "Product":
-        return Product(
+    def from_row(row) -> "Design":
+        return Design(
             id=row["id"],
             company_id=row["company_id"],
-            group_id=row["group_id"],
-            product_name=row["product_name"],
+            product_id=row["product_id"],
+            folder_id=row["folder_id"],
+            design_name=row["design_name"],
             description=row["description"],
-            hsn_code=row["hsn_code"],
             packing=row["packing"],
             quantity=row["quantity"],
             alternate_quantity=row["alternate_quantity"],
-            weight_class=row["weight_class"] if "weight_class" in row.keys() else None,
-            price_usd=row["price_usd"] if "price_usd" in row.keys() else None,
+            weight_class=row["weight_class"],
+            price_usd=row["price_usd"],
             photo_path=row["photo_path"],
             dimension_photo_path=row["dimension_photo_path"],
             alt_text=row["alt_text"],
@@ -501,6 +539,130 @@ class Quotation:
     def invoice_value_usd(self) -> float:
         return (self.subtotal_usd + self.sea_freight + self.insurance
                 + self.certification + self.other_charges - self.discount_amount)
+
+
+@dataclass
+class PackingListItem:
+    """One design of a product packed in a given quantity. product_name and
+    design_name are stored snapshots - product_id/design_id are reference
+    only, same as QuotationItem.product_id."""
+    id: Optional[int]
+    packing_list_id: Optional[int]
+    sr_no: int
+    product_name: str
+    product_id: Optional[int] = None
+    design_id: Optional[int] = None
+    design_name: Optional[str] = None
+    hsn_code: Optional[str] = None
+    pallets: Optional[float] = None
+    quantity_boxes: Optional[float] = None
+    quantity_value: float = 0
+    unit: str = "SQM"
+    net_weight_kg: Optional[float] = None
+    gross_weight_kg: Optional[float] = None
+
+    @staticmethod
+    def from_row(row) -> "PackingListItem":
+        return PackingListItem(
+            id=row["id"],
+            packing_list_id=row["packing_list_id"],
+            sr_no=row["sr_no"],
+            product_id=row["product_id"],
+            product_name=row["product_name"],
+            design_id=row["design_id"],
+            design_name=row["design_name"],
+            hsn_code=row["hsn_code"],
+            pallets=row["pallets"],
+            quantity_boxes=row["quantity_boxes"],
+            quantity_value=row["quantity_value"],
+            unit=row["unit"],
+            net_weight_kg=row["net_weight_kg"],
+            gross_weight_kg=row["gross_weight_kg"],
+        )
+
+
+@dataclass
+class PackingList:
+    id: Optional[int]
+    company_id: int
+    packing_list_number: str
+    packing_list_date: str
+    consignee_name: str
+    created_by: int
+    lead_id: Optional[int] = None
+    proforma_invoice_id: Optional[int] = None
+    export_ref_no: Optional[str] = None
+    buyer_order_no: Optional[str] = None
+    other_reference: Optional[str] = None
+    consignee_address: Optional[str] = None
+    notify_name: Optional[str] = None
+    notify_address: Optional[str] = None
+    country_of_origin: Optional[str] = "INDIA"
+    country_of_destination: Optional[str] = None
+    vessel_flight: Optional[str] = None
+    port_of_loading: Optional[str] = None
+    port_of_discharge: Optional[str] = None
+    final_destination: Optional[str] = None
+    container_details: Optional[str] = None
+    terms_of_delivery: Optional[str] = None
+    remarks: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    created_by_name: Optional[str] = None  # populated by joined queries only
+    proforma_invoice_number: Optional[str] = None  # populated by joined queries only
+    items: List[PackingListItem] = field(default_factory=list)
+
+    @staticmethod
+    def from_row(row) -> "PackingList":
+        return PackingList(
+            id=row["id"],
+            company_id=row["company_id"],
+            packing_list_number=row["packing_list_number"],
+            packing_list_date=row["packing_list_date"],
+            lead_id=row["lead_id"],
+            proforma_invoice_id=row["proforma_invoice_id"],
+            export_ref_no=row["export_ref_no"],
+            buyer_order_no=row["buyer_order_no"],
+            other_reference=row["other_reference"],
+            consignee_name=row["consignee_name"],
+            consignee_address=row["consignee_address"],
+            notify_name=row["notify_name"],
+            notify_address=row["notify_address"],
+            country_of_origin=row["country_of_origin"],
+            country_of_destination=row["country_of_destination"],
+            vessel_flight=row["vessel_flight"],
+            port_of_loading=row["port_of_loading"],
+            port_of_discharge=row["port_of_discharge"],
+            final_destination=row["final_destination"],
+            container_details=row["container_details"],
+            terms_of_delivery=row["terms_of_delivery"],
+            remarks=row["remarks"],
+            created_by=row["created_by"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            created_by_name=row["created_by_name"] if "created_by_name" in row.keys() else None,
+            proforma_invoice_number=row["proforma_invoice_number"] if "proforma_invoice_number" in row.keys() else None,
+        )
+
+    @property
+    def total_pallets(self) -> float:
+        return sum(item.pallets or 0 for item in self.items)
+
+    @property
+    def total_boxes(self) -> float:
+        return sum(item.quantity_boxes or 0 for item in self.items)
+
+    @property
+    def total_quantity(self) -> float:
+        return sum(item.quantity_value or 0 for item in self.items)
+
+    @property
+    def total_net_weight_kg(self) -> float:
+        return sum(item.net_weight_kg or 0 for item in self.items)
+
+    @property
+    def total_gross_weight_kg(self) -> float:
+        return sum(item.gross_weight_kg or 0 for item in self.items)
 
 
 @dataclass

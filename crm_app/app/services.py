@@ -23,13 +23,14 @@ from werkzeug.utils import secure_filename
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
 from app.models import (
     User, Lead, Client, ContactPerson, Communication, PaymentEntry, DocumentEntry,
-    LEAD_STATUSES, CLIENT_STATUSES, ProductGroup, Product, Quotation, QuotationItem,
-    ProformaInvoice, ProformaInvoiceItem,
+    LEAD_STATUSES, CLIENT_STATUSES, Product, ProductFolder, Design, Quotation, QuotationItem,
+    ProformaInvoice, ProformaInvoiceItem, PackingList, PackingListItem,
 )
 from app.repositories import (
     TenantRepository, UserRepositoryBase, LeadRepositoryBase, ClientRepositoryBase,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
-    ProductGroupRepository, ProductRepository, QuotationRepository, ProformaInvoiceRepository,
+    ProductRepository, ProductFolderRepository, DesignRepository,
+    QuotationRepository, ProformaInvoiceRepository, PackingListRepository,
 )
 
 
@@ -285,7 +286,8 @@ class ClientService:
                  comm_service: CommunicationService, payment_repo: PaymentRepository,
                  document_repo: DocumentRepository, currency_service: CurrencyService,
                  quotation_repo: QuotationRepository,
-                 proforma_invoice_repo: Optional[ProformaInvoiceRepository] = None):
+                 proforma_invoice_repo: Optional[ProformaInvoiceRepository] = None,
+                 packing_list_repo: Optional[PackingListRepository] = None):
         self.client_repo = client_repo
         self.lead_repo = lead_repo
         self.comm_service = comm_service
@@ -294,6 +296,7 @@ class ClientService:
         self.currency_service = currency_service
         self.quotation_repo = quotation_repo
         self.proforma_invoice_repo = proforma_invoice_repo
+        self.packing_list_repo = packing_list_repo
 
     # ---- lead -> client conversion (admin only) --------------------------------------------------
     def convert_lead(self, lead_id: int, admin_user: User, client_type: str = "Buyer") -> Client:
@@ -418,6 +421,13 @@ class ClientService:
                     "name": pi.invoice_number, "type": "Proforma Invoice", "date": pi.invoice_date,
                     "notes": f"{pi.consignee_name} · $ {pi.invoice_value_usd:,.2f}",
                     "link": ("proforma_invoices.view_proforma_invoice", {"proforma_invoice_id": pi.id}),
+                })
+        if self.packing_list_repo:
+            for pl in self.packing_list_repo.list_for_lead(client.lead_id) if client.lead_id else []:
+                rows.append({
+                    "name": pl.packing_list_number, "type": "Packing List", "date": pl.packing_list_date,
+                    "notes": pl.consignee_name,
+                    "link": ("packing_lists.view_packing_list", {"packing_list_id": pl.id}),
                 })
         rows.sort(key=lambda r: r["date"], reverse=True)
         return rows
@@ -573,36 +583,22 @@ class ReportService:
 
 
 # ============================================================
-# PRODUCT SERVICE (folder-tree catalog: groups nest to any depth, each
-# group holds any number of subgroups + products)
+# PRODUCT SERVICE (three-level catalog: products carry the tax/HSN
+# identity, folders nest to any depth inside one product, designs are the
+# sellable leaves with price/packing/photos)
 # ============================================================
 class ProductService:
-    def __init__(self, group_repo: ProductGroupRepository, product_repo: ProductRepository,
-                 upload_folder: str, allowed_extensions: set):
-        self.group_repo = group_repo
+    def __init__(self, product_repo: ProductRepository, folder_repo: ProductFolderRepository,
+                 design_repo: DesignRepository, upload_folder: str, allowed_extensions: set):
         self.product_repo = product_repo
+        self.folder_repo = folder_repo
+        self.design_repo = design_repo
         self.upload_folder = upload_folder
         self.allowed_extensions = allowed_extensions
 
-    # ---- browsing --------------------------------------------------
-    def get_group(self, group_id: int, company_id: int) -> ProductGroup:
-        group = self.group_repo.get_by_id(group_id)
-        if not group or group.company_id != company_id:
-            raise NotFoundError(f"Product group #{group_id} not found.")
-        return group
-
-    def breadcrumb(self, company_id: int, group_id: Optional[int]) -> List[ProductGroup]:
-        if not group_id:
-            return []
-        self.get_group(group_id, company_id)  # 404s if missing/another company's before walking up
-        return self.group_repo.list_ancestors(group_id)
-
-    def list_contents(self, company_id: int, group_id: Optional[int]):
-        """Returns (subgroups, products) for a folder - group_id=None is the catalog root."""
-        if group_id is not None:
-            self.get_group(group_id, company_id)  # 404s if missing/another company's
-        return (self.group_repo.list_children(company_id, group_id),
-                self.product_repo.list_in_group(company_id, group_id))
+    # ---- products --------------------------------------------------
+    def list_products(self, company_id: int) -> List[Product]:
+        return self.product_repo.list_all(company_id)
 
     def get_product(self, product_id: int, company_id: int) -> Product:
         product = self.product_repo.get_by_id(product_id)
@@ -610,76 +606,162 @@ class ProductService:
             raise NotFoundError(f"Product #{product_id} not found.")
         return product
 
-    # ---- groups --------------------------------------------------
-    def create_group(self, current_user: User, name: str, parent_id: Optional[int]) -> ProductGroup:
-        if not current_user.is_admin:
-            raise PermissionDeniedError("Only an admin can manage the product catalog.")
-        if not name or not name.strip():
-            raise ValidationError("Group name is compulsory.")
-        if parent_id is not None:
-            self.get_group(parent_id, current_user.company_id)  # 404s if the parent doesn't exist
-        return self.group_repo.create(current_user.company_id, name.strip(), parent_id)
-
-    def rename_group(self, current_user: User, group_id: int, name: str) -> None:
-        if not current_user.is_admin:
-            raise PermissionDeniedError("Only an admin can manage the product catalog.")
-        if not name or not name.strip():
-            raise ValidationError("Group name is compulsory.")
-        self.get_group(group_id, current_user.company_id)
-        self.group_repo.update(group_id, name.strip())
-
-    def delete_group(self, current_user: User, group_id: int) -> None:
-        if not current_user.is_admin:
-            raise PermissionDeniedError("Only an admin can manage the product catalog.")
-        self.get_group(group_id, current_user.company_id)
-        self._delete_group_images_recursive(current_user.company_id, group_id)
-        self.group_repo.delete(group_id)  # cascades to subgroups/products in the DB
-
-    def _delete_group_images_recursive(self, company_id: int, group_id: int) -> None:
-        """Product image files live on disk, not in the DB, so cascading
-        deletes don't clean them up on their own - walk the subtree first."""
-        for product in self.product_repo.list_in_group(company_id, group_id):
-            self._delete_image_file(product.photo_path)
-            self._delete_image_file(product.dimension_photo_path)
-        for subgroup in self.group_repo.list_children(company_id, group_id):
-            self._delete_group_images_recursive(company_id, subgroup.id)
-
-    # ---- products --------------------------------------------------
-    def create_product(self, current_user: User, group_id: Optional[int], product_name: str,
-                        description: str, hsn_code: str, packing: str, quantity: str,
-                        alternate_quantity: str, weight_class: str, price_usd: str, alt_text: str,
-                        photo_file, dimension_photo_file) -> Product:
+    def create_product(self, current_user: User, product_name: str, description: str,
+                        hsn_code: str, gst_percent: str, igst_percent: str,
+                        sgst_percent: str, cgst_percent: str) -> Product:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
         if not product_name or not product_name.strip():
             raise ValidationError("Product name is compulsory.")
-        if group_id is not None:
-            self.get_group(group_id, current_user.company_id)
-
-        photo_path = self._save_image(photo_file)
-        dimension_photo_path = self._save_image(dimension_photo_file)
         product = Product(
-            id=None, company_id=current_user.company_id, group_id=group_id, product_name=product_name.strip(),
-            description=description or None, hsn_code=hsn_code or None, packing=packing or None,
-            quantity=quantity or None, alternate_quantity=alternate_quantity or None,
-            weight_class=weight_class or None, price_usd=self._parse_price(price_usd),
-            photo_path=photo_path, dimension_photo_path=dimension_photo_path, alt_text=alt_text or None,
+            id=None, company_id=current_user.company_id, product_name=product_name.strip(),
+            description=description or None, hsn_code=hsn_code or None,
+            gst_percent=self._parse_percent("GST", gst_percent),
+            igst_percent=self._parse_percent("IGST", igst_percent),
+            sgst_percent=self._parse_percent("SGST", sgst_percent),
+            cgst_percent=self._parse_percent("CGST", cgst_percent),
         )
         return self.product_repo.create(product)
 
     def update_product(self, current_user: User, product_id: int, product_name: str,
-                        description: str, hsn_code: str, packing: str, quantity: str,
-                        alternate_quantity: str, weight_class: str, price_usd: str, alt_text: str,
-                        photo_file, dimension_photo_file) -> None:
+                        description: str, hsn_code: str, gst_percent: str, igst_percent: str,
+                        sgst_percent: str, cgst_percent: str) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
         if not product_name or not product_name.strip():
             raise ValidationError("Product name is compulsory.")
-        existing = self.get_product(product_id, current_user.company_id)
+        self.get_product(product_id, current_user.company_id)
+        self.product_repo.update(product_id, {
+            "product_name": product_name.strip(), "description": description or None,
+            "hsn_code": hsn_code or None,
+            "gst_percent": self._parse_percent("GST", gst_percent),
+            "igst_percent": self._parse_percent("IGST", igst_percent),
+            "sgst_percent": self._parse_percent("SGST", sgst_percent),
+            "cgst_percent": self._parse_percent("CGST", cgst_percent),
+        })
+
+    def delete_product(self, current_user: User, product_id: int) -> None:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can manage the product catalog.")
+        self.get_product(product_id, current_user.company_id)
+        # Design image files live on disk, not in the DB, so the CASCADE
+        # delete doesn't clean them up on its own.
+        for design in self.design_repo.list_for_product(product_id):
+            self._delete_image_file(design.photo_path)
+            self._delete_image_file(design.dimension_photo_path)
+        self.product_repo.delete(product_id)  # cascades to folders/designs in the DB
+
+    # ---- browsing inside a product --------------------------------------------------
+    def get_folder(self, folder_id: int, company_id: int) -> ProductFolder:
+        folder = self.folder_repo.get_by_id(folder_id)
+        if not folder or folder.company_id != company_id:
+            raise NotFoundError(f"Folder #{folder_id} not found.")
+        return folder
+
+    def breadcrumb(self, company_id: int, folder_id: Optional[int]) -> List[ProductFolder]:
+        if not folder_id:
+            return []
+        self.get_folder(folder_id, company_id)  # 404s if missing/another company's before walking up
+        return self.folder_repo.list_ancestors(folder_id)
+
+    def list_contents(self, company_id: int, product_id: int, folder_id: Optional[int]):
+        """Returns (subfolders, designs) for one level inside a product -
+        folder_id=None is the product's top level."""
+        self.get_product(product_id, company_id)  # 404s if missing/another company's
+        if folder_id is not None:
+            folder = self.get_folder(folder_id, company_id)
+            if folder.product_id != product_id:
+                raise NotFoundError(f"Folder #{folder_id} not found.")
+        return (self.folder_repo.list_children(product_id, folder_id),
+                self.design_repo.list_in(product_id, folder_id))
+
+    # ---- folders --------------------------------------------------
+    def create_folder(self, current_user: User, product_id: int, name: str,
+                       parent_id: Optional[int]) -> ProductFolder:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can manage the product catalog.")
+        if not name or not name.strip():
+            raise ValidationError("Folder name is compulsory.")
+        self.get_product(product_id, current_user.company_id)
+        if parent_id is not None:
+            parent = self.get_folder(parent_id, current_user.company_id)
+            if parent.product_id != product_id:
+                raise ValidationError("The parent folder belongs to a different product.")
+        return self.folder_repo.create(current_user.company_id, product_id, name.strip(), parent_id)
+
+    def rename_folder(self, current_user: User, folder_id: int, name: str) -> None:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can manage the product catalog.")
+        if not name or not name.strip():
+            raise ValidationError("Folder name is compulsory.")
+        self.get_folder(folder_id, current_user.company_id)
+        self.folder_repo.update(folder_id, name.strip())
+
+    def delete_folder(self, current_user: User, folder_id: int) -> None:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can manage the product catalog.")
+        folder = self.get_folder(folder_id, current_user.company_id)
+        self._delete_folder_images_recursive(folder.product_id, folder_id)
+        self.folder_repo.delete(folder_id)  # cascades to subfolders/designs in the DB
+
+    def _delete_folder_images_recursive(self, product_id: int, folder_id: int) -> None:
+        """Design image files live on disk, not in the DB, so cascading
+        deletes don't clean them up on their own - walk the subtree first."""
+        for design in self.design_repo.list_in(product_id, folder_id):
+            self._delete_image_file(design.photo_path)
+            self._delete_image_file(design.dimension_photo_path)
+        for subfolder in self.folder_repo.list_children(product_id, folder_id):
+            self._delete_folder_images_recursive(product_id, subfolder.id)
+
+    # ---- designs --------------------------------------------------
+    def get_design(self, design_id: int, company_id: int) -> Design:
+        design = self.design_repo.get_by_id(design_id)
+        if not design or design.company_id != company_id:
+            raise NotFoundError(f"Design #{design_id} not found.")
+        return design
+
+    def list_designs_for_product(self, product_id: int, company_id: int) -> List[Design]:
+        self.get_product(product_id, company_id)
+        return self.design_repo.list_for_product(product_id)
+
+    def create_design(self, current_user: User, product_id: int, folder_id: Optional[int],
+                       design_name: str, description: str, packing: str, quantity: str,
+                       alternate_quantity: str, weight_class: str, price_usd: str, alt_text: str,
+                       photo_file, dimension_photo_file) -> Design:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can manage the product catalog.")
+        if not design_name or not design_name.strip():
+            raise ValidationError("Design name is compulsory.")
+        self.get_product(product_id, current_user.company_id)
+        if folder_id is not None:
+            folder = self.get_folder(folder_id, current_user.company_id)
+            if folder.product_id != product_id:
+                raise ValidationError("That folder belongs to a different product.")
+
+        photo_path = self._save_image(photo_file)
+        dimension_photo_path = self._save_image(dimension_photo_file)
+        design = Design(
+            id=None, company_id=current_user.company_id, product_id=product_id, folder_id=folder_id,
+            design_name=design_name.strip(), description=description or None, packing=packing or None,
+            quantity=quantity or None, alternate_quantity=alternate_quantity or None,
+            weight_class=weight_class or None, price_usd=self._parse_price(price_usd),
+            photo_path=photo_path, dimension_photo_path=dimension_photo_path, alt_text=alt_text or None,
+        )
+        return self.design_repo.create(design)
+
+    def update_design(self, current_user: User, design_id: int, design_name: str,
+                       description: str, packing: str, quantity: str, alternate_quantity: str,
+                       weight_class: str, price_usd: str, alt_text: str,
+                       photo_file, dimension_photo_file) -> None:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can manage the product catalog.")
+        if not design_name or not design_name.strip():
+            raise ValidationError("Design name is compulsory.")
+        existing = self.get_design(design_id, current_user.company_id)
 
         fields = {
-            "product_name": product_name.strip(), "description": description or None,
-            "hsn_code": hsn_code or None, "packing": packing or None, "quantity": quantity or None,
+            "design_name": design_name.strip(), "description": description or None,
+            "packing": packing or None, "quantity": quantity or None,
             "alternate_quantity": alternate_quantity or None, "weight_class": weight_class or None,
             "price_usd": self._parse_price(price_usd), "alt_text": alt_text or None,
         }
@@ -690,15 +772,15 @@ class ProductService:
             fields["dimension_photo_path"] = self._save_image(dimension_photo_file)
             self._delete_image_file(existing.dimension_photo_path)
 
-        self.product_repo.update(product_id, fields)
+        self.design_repo.update(design_id, fields)
 
-    def delete_product(self, current_user: User, product_id: int) -> None:
+    def delete_design(self, current_user: User, design_id: int) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
-        product = self.get_product(product_id, current_user.company_id)
-        self._delete_image_file(product.photo_path)
-        self._delete_image_file(product.dimension_photo_path)
-        self.product_repo.delete(product_id)
+        design = self.get_design(design_id, current_user.company_id)
+        self._delete_image_file(design.photo_path)
+        self._delete_image_file(design.dimension_photo_path)
+        self.design_repo.delete(design_id)
 
     @staticmethod
     def _parse_price(price_usd: str) -> Optional[float]:
@@ -708,6 +790,18 @@ class ProductService:
             return round(float(price_usd), 2)
         except ValueError:
             raise ValidationError("Price (USD) must be a number.")
+
+    @staticmethod
+    def _parse_percent(label: str, value: str) -> Optional[float]:
+        if not value or not str(value).strip():
+            return None
+        try:
+            percent = float(value)
+        except ValueError:
+            raise ValidationError(f"{label} must be a number (percentage).")
+        if percent < 0 or percent > 100:
+            raise ValidationError(f"{label} must be between 0 and 100 (it's a percentage).")
+        return round(percent, 2)
 
     # ---- image storage --------------------------------------------------
     def _save_image(self, file_storage) -> Optional[str]:
@@ -795,18 +889,14 @@ class QuotationService:
                 raise ValidationError(f"Row {i}: quantity and price must be numbers.")
             product_id = int(raw["product_id"]) if raw.get("product_id") else None
 
-            # Qty is authoritatively boxes x the catalog product's Alternate
-            # Quantity whenever both are known - the client-side value is only
-            # a convenience preview, not trusted for the stored total. Only
-            # trust a product from this same company - otherwise a crafted
-            # product_id could pull another company's catalog data in.
-            if product_id and quantity_boxes:
+            # Only keep a product reference from this same company -
+            # otherwise a crafted product_id could tie this line to another
+            # company's catalog. (Price and quantity are typed in per line;
+            # the product only contributes its name/HSN as a prefill.)
+            if product_id:
                 product = self.product_repo.get_by_id(product_id)
-                if product and product.company_id == company_id and product.alternate_quantity:
-                    try:
-                        quantity_value = round(quantity_boxes * float(product.alternate_quantity), 2)
-                    except ValueError:
-                        pass
+                if not product or product.company_id != company_id:
+                    product_id = None
 
             if quantity_value <= 0:
                 raise ValidationError(f"Row {i} ('{product_name}'): quantity is compulsory and must be greater than zero.")
@@ -1008,15 +1098,11 @@ class ProformaInvoiceService:
             product_id = int(raw["product_id"]) if raw.get("product_id") else None
 
             # Same trust boundary as QuotationService._build_items - only
-            # trust a product from this same company for the Boxes x
-            # Alternate Quantity auto-calc.
-            if product_id and quantity_boxes:
+            # keep a product reference from this same company.
+            if product_id:
                 product = self.product_repo.get_by_id(product_id)
-                if product and product.company_id == company_id and product.alternate_quantity:
-                    try:
-                        quantity_value = round(quantity_boxes * float(product.alternate_quantity), 2)
-                    except ValueError:
-                        pass
+                if not product or product.company_id != company_id:
+                    product_id = None
 
             if quantity_value <= 0:
                 raise ValidationError(f"Row {i} ('{product_name}'): quantity is compulsory and must be greater than zero.")
@@ -1119,3 +1205,217 @@ class ProformaInvoiceService:
         existing = self.get(invoice_id, current_user.company_id)
         self._assert_can_modify(existing, current_user)
         self.invoice_repo.delete(invoice_id)
+
+
+# ============================================================
+# PACKING LIST SERVICE
+# ============================================================
+class PackingListService:
+    """Mirrors ProformaInvoiceService layer-for-layer. A packing list is
+    normally started from an existing Proforma Invoice
+    (build_prefill_from_proforma) - each product line from the proforma is
+    then broken down into one or more DESIGN rows in smaller quantities."""
+
+    def __init__(self, packing_list_repo: PackingListRepository, product_repo: ProductRepository,
+                 design_repo: DesignRepository, lead_repo: LeadRepositoryBase,
+                 proforma_invoice_repo: ProformaInvoiceRepository):
+        self.packing_list_repo = packing_list_repo
+        self.product_repo = product_repo
+        self.design_repo = design_repo
+        self.lead_repo = lead_repo
+        self.proforma_invoice_repo = proforma_invoice_repo
+
+    # ---- reads --------------------------------------------------
+    def get(self, packing_list_id: int, company_id: int) -> PackingList:
+        packing_list = self.packing_list_repo.get_by_id(packing_list_id)
+        if not packing_list or packing_list.company_id != company_id:
+            # 404, not 403 - don't reveal that another company's packing list exists.
+            raise NotFoundError(f"Packing list #{packing_list_id} not found.")
+        return packing_list
+
+    def list_all(self, company_id: int) -> List[PackingList]:
+        return self.packing_list_repo.list_all(company_id)
+
+    def list_for_lead(self, lead_id: Optional[int]) -> List[PackingList]:
+        """Same shape as QuotationService.list_for_lead - unscoped by
+        company_id because the caller already owns the lead/client."""
+        if not lead_id:
+            return []
+        return self.packing_list_repo.list_for_lead(lead_id)
+
+    # ---- permission --------------------------------------------------
+    def _assert_can_modify(self, packing_list: PackingList, current_user: User):
+        if current_user.is_admin:
+            return
+        if packing_list.created_by != current_user.id:
+            raise PermissionDeniedError("You can only manage packing lists you created yourself.")
+
+    # ---- number generation --------------------------------------------------
+    def _generate_number(self, company_id: int, packing_list_date: str) -> str:
+        """PL{YYYYMMDD}{seq} where seq is that day's packing list count + 1
+        for this company, zero-padded to 3 digits (e.g. PL20260714001)."""
+        date_part = packing_list_date.replace("-", "")
+        prefix = f"PL{date_part}"
+        seq = self.packing_list_repo.count_for_date_prefix(company_id, prefix) + 1
+        return f"{prefix}{seq:03d}"
+
+    # ---- prefill from an existing proforma invoice --------------------------------------------------
+    def build_prefill_from_proforma(self, invoice: ProformaInvoice) -> dict:
+        """Caller must have already loaded `invoice` via
+        ProformaInvoiceService.get(invoice_id, current_user.company_id) so
+        cross-company ownership is already verified. Each proforma product
+        line becomes one starting row; quantities are left blank on purpose -
+        they get filled in per design, in smaller amounts, and rows can be
+        duplicated for more designs of the same product."""
+        fields = {
+            "proforma_invoice_id": invoice.id,
+            "lead_id": invoice.lead_id,
+            "export_ref_no": invoice.export_ref_no,
+            "buyer_order_no": invoice.buyer_order_no,
+            "other_reference": invoice.other_reference,
+            "consignee_name": invoice.consignee_name,
+            "consignee_address": invoice.consignee_address,
+            "notify_name": invoice.notify_name,
+            "notify_address": invoice.notify_address,
+            "country_of_origin": invoice.country_of_origin,
+            "country_of_destination": invoice.country_of_destination,
+            "vessel_flight": invoice.vessel_flight,
+            "port_of_loading": invoice.port_of_loading,
+            "port_of_discharge": invoice.port_of_discharge,
+            "final_destination": invoice.final_destination,
+            "container_details": invoice.container_details,
+            "terms_of_delivery": invoice.terms_of_delivery,
+        }
+        items = [
+            {
+                "product_id": item.product_id, "product_name": item.product_name,
+                "design_id": None, "design_name": "",
+                "hsn_code": item.hsn_code, "pallets": "", "quantity_boxes": "",
+                "quantity_value": "", "unit": item.unit,
+                "net_weight_kg": "", "gross_weight_kg": "",
+            }
+            for item in invoice.items
+        ]
+        return {"fields": fields, "items": items}
+
+    # ---- validation --------------------------------------------------
+    def _build_items(self, company_id: int, raw_items: list) -> List[PackingListItem]:
+        items = []
+        for i, raw in enumerate(raw_items, start=1):
+            product_name = (raw.get("product_name") or "").strip()
+            if not product_name:
+                continue
+            try:
+                quantity_value = float(raw.get("quantity_value") or 0)
+                quantity_boxes = float(raw["quantity_boxes"]) if raw.get("quantity_boxes") else None
+                pallets = float(raw["pallets"]) if raw.get("pallets") else None
+                net_weight_kg = float(raw["net_weight_kg"]) if raw.get("net_weight_kg") else None
+                gross_weight_kg = float(raw["gross_weight_kg"]) if raw.get("gross_weight_kg") else None
+            except ValueError:
+                raise ValidationError(f"Row {i}: quantity, pallets and weights must be numbers.")
+            product_id = int(raw["product_id"]) if raw.get("product_id") else None
+            design_id = int(raw["design_id"]) if raw.get("design_id") else None
+            design_name = (raw.get("design_name") or "").strip() or None
+
+            # Same trust boundary as QuotationService._build_items - only
+            # keep product/design references from this same company (and a
+            # design must actually belong to the row's product).
+            if product_id:
+                product = self.product_repo.get_by_id(product_id)
+                if not product or product.company_id != company_id:
+                    product_id = None
+            design = None
+            if design_id:
+                design = self.design_repo.get_by_id(design_id)
+                if not design or design.company_id != company_id or \
+                        (product_id and design.product_id != product_id):
+                    design_id = None
+                    design = None
+
+            # Qty is authoritatively boxes x the design's Alternate Quantity
+            # whenever both are known - the client-side value is only a
+            # convenience preview, not trusted for the stored total.
+            if design and quantity_boxes and design.alternate_quantity:
+                try:
+                    quantity_value = round(quantity_boxes * float(design.alternate_quantity), 2)
+                except ValueError:
+                    pass
+
+            if quantity_value <= 0:
+                raise ValidationError(f"Row {i} ('{product_name}'): quantity is compulsory and must be greater than zero.")
+            items.append(PackingListItem(
+                id=None, packing_list_id=None, sr_no=i, product_id=product_id, product_name=product_name,
+                design_id=design_id, design_name=design_name,
+                hsn_code=(raw.get("hsn_code") or "").strip() or None,
+                pallets=pallets, quantity_boxes=quantity_boxes, quantity_value=quantity_value,
+                unit=(raw.get("unit") or "SQM").strip() or "SQM",
+                net_weight_kg=net_weight_kg, gross_weight_kg=gross_weight_kg,
+            ))
+        if not items:
+            raise ValidationError("At least one design line is compulsory.")
+        return items
+
+    def _build_header(self, current_user: User, fields: dict, items: List[PackingListItem]) -> PackingList:
+        consignee_name = (fields.get("consignee_name") or "").strip()
+        if not consignee_name:
+            raise ValidationError("Consignee name is compulsory.")
+        packing_list_date = (fields.get("packing_list_date") or "").strip() or date.today().isoformat()
+
+        lead_id = int(fields["lead_id"]) if fields.get("lead_id") else None
+        if lead_id is not None:
+            # Only trust a lead from this same company - otherwise a crafted
+            # lead_id could attach this packing list to another company's lead.
+            lead = self.lead_repo.get_by_id(lead_id)
+            if not lead or lead.company_id != current_user.company_id:
+                lead_id = None
+
+        proforma_invoice_id = int(fields["proforma_invoice_id"]) if fields.get("proforma_invoice_id") else None
+        if proforma_invoice_id is not None:
+            # Only trust a proforma invoice from this same company - same reasoning as lead_id above.
+            invoice = self.proforma_invoice_repo.get_by_id(proforma_invoice_id)
+            if not invoice or invoice.company_id != current_user.company_id:
+                proforma_invoice_id = None
+
+        return PackingList(
+            id=None, company_id=current_user.company_id, packing_list_number="",
+            packing_list_date=packing_list_date, consignee_name=consignee_name,
+            created_by=current_user.id, lead_id=lead_id, proforma_invoice_id=proforma_invoice_id,
+            export_ref_no=(fields.get("export_ref_no") or "").strip() or None,
+            buyer_order_no=(fields.get("buyer_order_no") or "").strip() or None,
+            other_reference=(fields.get("other_reference") or "").strip() or None,
+            consignee_address=(fields.get("consignee_address") or "").strip() or None,
+            notify_name=(fields.get("notify_name") or "").strip() or None,
+            notify_address=(fields.get("notify_address") or "").strip() or None,
+            country_of_origin=(fields.get("country_of_origin") or "").strip() or "INDIA",
+            country_of_destination=(fields.get("country_of_destination") or "").strip() or None,
+            vessel_flight=(fields.get("vessel_flight") or "").strip() or None,
+            port_of_loading=(fields.get("port_of_loading") or "").strip() or None,
+            port_of_discharge=(fields.get("port_of_discharge") or "").strip() or None,
+            final_destination=(fields.get("final_destination") or "").strip() or None,
+            container_details=(fields.get("container_details") or "").strip() or None,
+            terms_of_delivery=(fields.get("terms_of_delivery") or "").strip() or None,
+            remarks=(fields.get("remarks") or "").strip() or None,
+            items=items,
+        )
+
+    # ---- writes --------------------------------------------------
+    def create(self, current_user: User, fields: dict, raw_items: list) -> PackingList:
+        items = self._build_items(current_user.company_id, raw_items)
+        packing_list = self._build_header(current_user, fields, items)
+        packing_list.packing_list_number = self._generate_number(
+            current_user.company_id, packing_list.packing_list_date
+        )
+        return self.packing_list_repo.create(packing_list)
+
+    def update(self, current_user: User, packing_list_id: int, fields: dict, raw_items: list) -> PackingList:
+        existing = self.get(packing_list_id, current_user.company_id)
+        self._assert_can_modify(existing, current_user)
+        items = self._build_items(current_user.company_id, raw_items)
+        packing_list = self._build_header(current_user, fields, items)
+        self.packing_list_repo.update(packing_list_id, packing_list)
+        return self.get(packing_list_id, current_user.company_id)
+
+    def delete(self, current_user: User, packing_list_id: int) -> None:
+        existing = self.get(packing_list_id, current_user.company_id)
+        self._assert_can_modify(existing, current_user)
+        self.packing_list_repo.delete(packing_list_id)

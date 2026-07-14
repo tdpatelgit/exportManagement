@@ -218,27 +218,44 @@ CREATE TABLE IF NOT EXISTS our_company_bank_details (
 );
 
 -- ============================================================
--- PRODUCTS  (folder-style catalog: groups can nest under groups to any
--- depth, and each group can hold any number of subgroups and products)
+-- PRODUCT CATALOG  (three levels: a PRODUCT is the tax/HSN identity that
+-- quotations and proforma invoices bill against; FOLDERS organise designs
+-- under a product and can nest to any depth (but only inside a product);
+-- a DESIGN is the sellable leaf holding price, packing, weights and photos)
 -- ============================================================
-CREATE TABLE IF NOT EXISTS product_groups (
+CREATE TABLE IF NOT EXISTS products (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id      INTEGER NOT NULL REFERENCES tenants(id),
+    product_name    TEXT NOT NULL,
+    description     TEXT,
+    hsn_code        TEXT,
+    gst_percent     REAL,           -- all four tax fields are percentages
+    igst_percent    REAL,
+    sgst_percent    REAL,
+    cgst_percent    REAL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS product_folders (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     company_id  INTEGER NOT NULL REFERENCES tenants(id),
+    product_id  INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    parent_id   INTEGER REFERENCES product_folders(id) ON DELETE CASCADE,  -- NULL = top level inside the product
     name        TEXT NOT NULL,
-    parent_id   INTEGER REFERENCES product_groups(id) ON DELETE CASCADE,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS products (
+CREATE TABLE IF NOT EXISTS designs (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
     company_id              INTEGER NOT NULL REFERENCES tenants(id),
-    group_id                INTEGER REFERENCES product_groups(id) ON DELETE CASCADE,
-    product_name            TEXT NOT NULL,
+    product_id              INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    folder_id               INTEGER REFERENCES product_folders(id) ON DELETE CASCADE,  -- NULL = directly under the product
+    design_name             TEXT NOT NULL,
     description             TEXT,
-    hsn_code                TEXT,
     packing                 TEXT,
     quantity                TEXT,
-    alternate_quantity      TEXT,
+    alternate_quantity      TEXT,          -- per-box quantity, drives the Boxes x AltQty auto-calc
     weight_class            TEXT,
     price_usd               REAL,
     photo_path              TEXT,
@@ -291,7 +308,7 @@ CREATE TABLE IF NOT EXISTS quotation_items (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     quotation_id        INTEGER NOT NULL REFERENCES quotations(id) ON DELETE CASCADE,
     sr_no               INTEGER NOT NULL,
-    product_id          INTEGER REFERENCES products(id),   -- optional, just for prefill/reference
+    product_id          INTEGER REFERENCES products(id) ON DELETE SET NULL,   -- optional, just for prefill/reference
     product_name        TEXT NOT NULL,
     dimension_mm        TEXT,
     hsn_code            TEXT,
@@ -358,7 +375,7 @@ CREATE TABLE IF NOT EXISTS proforma_invoice_items (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
     proforma_invoice_id   INTEGER NOT NULL REFERENCES proforma_invoices(id) ON DELETE CASCADE,
     sr_no                 INTEGER NOT NULL,
-    product_id            INTEGER REFERENCES products(id),   -- optional, just for prefill/reference
+    product_id            INTEGER REFERENCES products(id) ON DELETE SET NULL,   -- optional, just for prefill/reference
     product_name          TEXT NOT NULL,
     dimension_mm          TEXT,
     hsn_code              TEXT,
@@ -370,6 +387,59 @@ CREATE TABLE IF NOT EXISTS proforma_invoice_items (
     total_usd             REAL NOT NULL DEFAULT 0
 );
 
+-- ============================================================
+-- PACKING LISTS  (header + line items, number generated as
+-- PL{YYYYMMDD}{seq-of-that-day} per company. Started from an existing
+-- proforma invoice - proforma_invoice_id is a "generated from" reference
+-- only, same pattern as proforma_invoices.quotation_id. Each line breaks a
+-- product's quantity down into a specific DESIGN in smaller quantities.)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS packing_lists (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id              INTEGER NOT NULL REFERENCES tenants(id),
+    packing_list_number     TEXT NOT NULL,
+    packing_list_date       TEXT NOT NULL,
+    lead_id                 INTEGER REFERENCES leads(id),               -- optional, prefill/reference only
+    proforma_invoice_id     INTEGER REFERENCES proforma_invoices(id),   -- optional, "generated from" reference only
+    export_ref_no           TEXT,
+    buyer_order_no          TEXT,
+    other_reference         TEXT,
+    consignee_name          TEXT NOT NULL,
+    consignee_address       TEXT,
+    notify_name             TEXT,          -- "Buyer if other than consignee"
+    notify_address          TEXT,
+    country_of_origin       TEXT DEFAULT 'INDIA',
+    country_of_destination  TEXT,
+    vessel_flight           TEXT,
+    port_of_loading         TEXT,
+    port_of_discharge       TEXT,
+    final_destination       TEXT,
+    container_details       TEXT,
+    terms_of_delivery       TEXT,
+    remarks                 TEXT,
+    created_by              INTEGER NOT NULL REFERENCES users(id),
+    created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (company_id, packing_list_number)
+);
+
+CREATE TABLE IF NOT EXISTS packing_list_items (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    packing_list_id     INTEGER NOT NULL REFERENCES packing_lists(id) ON DELETE CASCADE,
+    sr_no               INTEGER NOT NULL,
+    product_id          INTEGER REFERENCES products(id) ON DELETE SET NULL,   -- optional, just for prefill/reference
+    product_name        TEXT NOT NULL,
+    design_id           INTEGER REFERENCES designs(id) ON DELETE SET NULL,    -- optional, just for prefill/reference
+    design_name         TEXT,                              -- snapshot of the chosen design
+    hsn_code            TEXT,
+    pallets             REAL,
+    quantity_boxes      REAL,
+    quantity_value      REAL NOT NULL DEFAULT 0,
+    unit                TEXT NOT NULL DEFAULT 'SQM',
+    net_weight_kg       REAL,
+    gross_weight_kg     REAL
+);
+
 -- Helpful indexes for the dashboards/reports (grouping by employee, date
 -- range filters, and lookups by parent are the hottest queries).
 CREATE INDEX IF NOT EXISTS idx_leads_created_by ON leads(created_by);
@@ -378,8 +448,10 @@ CREATE INDEX IF NOT EXISTS idx_comms_parent ON communications(parent_type, paren
 CREATE INDEX IF NOT EXISTS idx_comms_employee ON communications(employee_id);
 CREATE INDEX IF NOT EXISTS idx_payments_client ON payment_history(client_id);
 CREATE INDEX IF NOT EXISTS idx_documents_client ON documents(client_id);
-CREATE INDEX IF NOT EXISTS idx_product_groups_parent ON product_groups(parent_id);
-CREATE INDEX IF NOT EXISTS idx_products_group ON products(group_id);
+CREATE INDEX IF NOT EXISTS idx_product_folders_product ON product_folders(product_id);
+CREATE INDEX IF NOT EXISTS idx_product_folders_parent ON product_folders(parent_id);
+CREATE INDEX IF NOT EXISTS idx_designs_product ON designs(product_id);
+CREATE INDEX IF NOT EXISTS idx_designs_folder ON designs(folder_id);
 CREATE INDEX IF NOT EXISTS idx_quotations_created_by ON quotations(created_by);
 CREATE INDEX IF NOT EXISTS idx_quotations_date ON quotations(quotation_date);
 CREATE INDEX IF NOT EXISTS idx_quotation_items_quotation ON quotation_items(quotation_id);
@@ -388,3 +460,7 @@ CREATE INDEX IF NOT EXISTS idx_proforma_invoices_created_by ON proforma_invoices
 CREATE INDEX IF NOT EXISTS idx_proforma_invoices_date ON proforma_invoices(invoice_date);
 CREATE INDEX IF NOT EXISTS idx_proforma_invoice_items_invoice ON proforma_invoice_items(proforma_invoice_id);
 CREATE INDEX IF NOT EXISTS idx_proforma_invoices_company ON proforma_invoices(company_id);
+CREATE INDEX IF NOT EXISTS idx_packing_lists_company ON packing_lists(company_id);
+CREATE INDEX IF NOT EXISTS idx_packing_lists_created_by ON packing_lists(created_by);
+CREATE INDEX IF NOT EXISTS idx_packing_lists_date ON packing_lists(packing_list_date);
+CREATE INDEX IF NOT EXISTS idx_packing_list_items_list ON packing_list_items(packing_list_id);
