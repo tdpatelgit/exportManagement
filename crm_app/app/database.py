@@ -125,6 +125,11 @@ class Database:
             if existing and "address" not in existing:
                 conn.execute("ALTER TABLE clients ADD COLUMN address TEXT")
 
+            existing = {r["name"] for r in conn.execute("PRAGMA table_info(packing_list_items)")}
+            for column in ("box_per_pallet", "pcs"):
+                if existing and column not in existing:
+                    conn.execute(f"ALTER TABLE packing_list_items ADD COLUMN {column} REAL")
+
             # The original `leads.status` CHECK constraint didn't allow
             # 'in_client', so converting a lead to a client crashed on the
             # final UPDATE (after the client row was already created) - a

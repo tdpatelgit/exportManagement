@@ -191,18 +191,6 @@
     </div>
   </div>
 
-  {% if not invoice %}
-  <div class="card">
-    <div class="card-header"><h3>After saving</h3></div>
-    <div class="radio-wrap">
-      {# default checked on a fresh/prefilled form; on a POST error re-render, honor what the user chose #}
-      <input type="checkbox" id="auto_packing" name="auto_packing" value="1" {{ 'checked' if not form_data or form_data.get('auto_packing', '1' if request.method == 'GET' else '') }}>
-      <label for="auto_packing">Automatically generate the Packing Details document for this invoice</label>
-    </div>
-    <p class="hint">One packing row is created per product line — box per pallet, model and pcs stay blank for you to fill in on the packing list afterwards.</p>
-  </div>
-  {% endif %}
-
   <button type="submit" class="btn btn-primary">{{ 'Save changes' if invoice else 'Create proforma invoice' }}</button>
   <a href="{{ url_for('proforma_invoices.view_proforma_invoice', proforma_invoice_id=invoice.id) if invoice else url_for('proforma_invoices.list_proforma_invoices') }}" class="btn btn-ghost">Cancel</a>
 </form>

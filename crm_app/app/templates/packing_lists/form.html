@@ -1,15 +1,10 @@
 {% extends "base.html" %}
-<<<<<<< HEAD
 {% block title %}{{ 'Edit packing list' if packing_list else 'New packing list' }}{% endblock %}
-=======
-{% block title %}{{ 'Edit packing details' if packing_list else 'New packing details' }}{% endblock %}
->>>>>>> origin/main
 {% block content %}
 
 <div class="topbar">
   <div>
     <div class="eyebrow">Sales documents</div>
-<<<<<<< HEAD
     <h1>{{ 'Edit ' + packing_list.packing_list_number if packing_list else 'New packing list' }}</h1>
     {% if not packing_list %}<div class="text-sm text-soft">Packing list number is generated automatically on save.</div>{% endif %}
   </div>
@@ -24,27 +19,11 @@
         <label for="proforma_select">Prefill from an existing proforma invoice <span class="text-soft text-sm">(optional)</span></label>
         <select id="proforma_select">
           <option value="">— Select a proforma invoice —</option>
-=======
-    <h1>{{ 'Edit packing details' if packing_list else 'New packing details' }}</h1>
-  </div>
-</div>
-
-<form method="POST" id="packing-form">
-  {% set data = form_data if form_data else packing_list %}
-  <div class="card">
-    <div class="card-header"><h3>Document details</h3></div>
-    <div class="form-row">
-      <div class="field">
-        <label for="proforma_invoice_id">Proforma invoice</label>
-        <select id="proforma_invoice_id" name="proforma_invoice_id">
-          <option value="">— Not linked to a proforma invoice —</option>
->>>>>>> origin/main
           {% for pi in invoices %}
             <option value="{{ pi.id }}" {{ 'selected' if data and data.proforma_invoice_id | string == pi.id | string }}>{{ pi.invoice_number }} — {{ pi.consignee_name }}</option>
           {% endfor %}
         </select>
       </div>
-<<<<<<< HEAD
       <div class="field">
         <label for="lead_select">Prefill from an existing lead <span class="text-soft text-sm">(optional)</span></label>
         <select id="lead_select">
@@ -55,7 +34,7 @@
         </select>
       </div>
     </div>
-    <p class="hint">Choosing a proforma invoice reloads this page and copies its consignee/shipment data in, with one starting row per product — you then pick the design for each row and split the quantities into smaller, per-design amounts.</p>
+    <p class="hint">Choosing a proforma invoice reloads this page with one starting row per product — you then pick the design for each row and split the quantities into smaller, per-design amounts.</p>
     <input type="hidden" name="lead_id" id="lead_id" value="{{ data.lead_id | default('', true) }}">
     <input type="hidden" name="proforma_invoice_id" id="proforma_invoice_id" value="{{ data.proforma_invoice_id | default('', true) }}">
   </div>
@@ -73,78 +52,23 @@
   </div>
 
   <div class="card">
-    <div class="card-header"><h3>Consignee</h3></div>
-    <div class="field"><label for="consignee_name">Consignee name<span class="required-mark">*</span></label><input type="text" id="consignee_name" name="consignee_name" required value="{{ data.consignee_name | default('', true) }}"></div>
-    <div class="field"><label for="consignee_address">Consignee address</label><textarea id="consignee_address" name="consignee_address" rows="3">{{ data.consignee_address | default('', true) }}</textarea></div>
-  </div>
-
-  <div class="card">
-    <div class="card-header"><h3>Buyer if other than consignee (Notify)</h3></div>
-    <div class="radio-wrap" style="margin-bottom: 12px;">
-      <input type="checkbox" id="same_as_consignee">
-      <label for="same_as_consignee">Buyer is same as consignee</label>
-    </div>
-    <div class="field"><label for="notify_name">Notify party name</label><input type="text" id="notify_name" name="notify_name" value="{{ data.notify_name | default('', true) }}"></div>
-    <div class="field"><label for="notify_address">Notify party address</label><textarea id="notify_address" name="notify_address" rows="3">{{ data.notify_address | default('', true) }}</textarea></div>
-  </div>
-
-  <div class="card">
-    <div class="card-header"><h3>Shipment details</h3></div>
-    <div class="form-row">
-      <div class="field"><label for="country_of_origin">Country of origin</label><input type="text" id="country_of_origin" name="country_of_origin" value="{{ data.country_of_origin | default('INDIA', true) }}"></div>
-      <div class="field"><label for="country_of_destination">Country of final destination</label><input type="text" id="country_of_destination" name="country_of_destination" value="{{ data.country_of_destination | default('', true) }}"></div>
-    </div>
-    <div class="form-row">
-      <div class="field"><label for="vessel_flight">Vessel / flight name &amp; no.</label><input type="text" id="vessel_flight" name="vessel_flight" value="{{ data.vessel_flight | default('', true) }}"></div>
-      <div class="field"><label for="container_details">Container details</label><input type="text" id="container_details" name="container_details" placeholder="e.g. 3 X 20 FT FCL" value="{{ data.container_details | default('', true) }}"></div>
-    </div>
-    <div class="form-row">
-      <div class="field"><label for="port_of_loading">Port of loading</label><input type="text" id="port_of_loading" name="port_of_loading" value="{{ data.port_of_loading | default('', true) }}"></div>
-      <div class="field"><label for="port_of_discharge">Port of discharge</label><input type="text" id="port_of_discharge" name="port_of_discharge" value="{{ data.port_of_discharge | default('', true) }}"></div>
-      <div class="field"><label for="final_destination">Final destination</label><input type="text" id="final_destination" name="final_destination" value="{{ data.final_destination | default('', true) }}"></div>
-    </div>
-    <div class="field"><label for="terms_of_delivery">Terms of delivery</label><input type="text" id="terms_of_delivery" name="terms_of_delivery" placeholder="e.g. CIF - BEIRA" value="{{ data.terms_of_delivery | default('', true) }}"></div>
-  </div>
-
-  <div class="card">
     <div class="card-header"><h3>Designs packed</h3></div>
-=======
-      <div class="field"><label for="packing_date">Date<span class="required-mark">*</span></label><input type="date" id="packing_date" name="packing_date" required value="{{ data.packing_date | default(today, true) }}"></div>
-    </div>
-    <div class="field"><label for="remarks">Remarks</label><input type="text" id="remarks" name="remarks" value="{{ data.remarks | default('MADE IN INDIA', true) }}"></div>
-    {% if not packing_list %}
-    <p class="hint">Choosing a proforma invoice on a fresh form prefills one packing row per invoice line — picking it here reloads the page. The packing list is then its own independent record.</p>
-    {% endif %}
-    <input type="hidden" name="lead_id" value="{{ data.lead_id | default('', true) }}">
-  </div>
-
-  <div class="card">
-    <div class="card-header"><h3>Packing lines</h3></div>
->>>>>>> origin/main
     <div class="table-wrap">
       <table class="ledger" id="items-table">
         <thead>
           <tr>
             <th>Sr</th>
-<<<<<<< HEAD
             <th style="min-width:180px;">Product</th>
             <th style="min-width:160px;">Design</th>
             <th>HSN code</th>
+            <th>Box / plt</th>
             <th>Plts</th>
-            <th>Boxes</th>
+            <th>Boxes<span class="required-mark">*</span></th>
+            <th>Pcs</th>
             <th>Qty (SQM/LM)</th>
             <th>Unit</th>
             <th>Net wt (KG)</th>
             <th>Gross wt (KG)</th>
-=======
-            <th style="min-width:240px;">Description of goods</th>
-            <th>Box per pallet</th>
-            <th style="min-width:130px;">Model no or name</th>
-            <th>No of pallet</th>
-            <th>Boxes</th>
-            <th>Pcs</th>
-            <th>SQM / LM</th>
->>>>>>> origin/main
             <th></th>
           </tr>
         </thead>
@@ -153,7 +77,6 @@
           {% for row in rows %}
           <tr class="item-row">
             <td class="js-sr">{{ loop.index }}</td>
-<<<<<<< HEAD
             <td>
               <input type="hidden" name="item_product_id[]" class="js-product-id" value="{{ row.product_id or '' }}">
               <textarea name="item_product_name[]" class="js-product-name" rows="2" required>{{ row.product_name }}</textarea>
@@ -165,9 +88,11 @@
               <button type="button" class="btn btn-ghost btn-sm js-choose-design">🎨 Design</button>
             </td>
             <td><input type="text" name="item_hsn_code[]" class="js-hsn" value="{{ row.hsn_code or '' }}"></td>
+            <td><input type="number" step="0.01" name="item_box_per_pallet[]" class="js-box-per-pallet" value="{{ row.box_per_pallet or '' }}"></td>
             <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets" value="{{ row.pallets or '' }}"></td>
-            <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" value="{{ row.quantity_boxes or '' }}"></td>
-            <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required value="{{ row.quantity_value or '' }}"></td>
+            <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" required value="{{ row.quantity_boxes or '' }}"></td>
+            <td><input type="number" step="0.01" name="item_pcs[]" class="js-pcs" value="{{ row.pcs or '' }}"></td>
+            <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" value="{{ row.quantity_value or '' }}"></td>
             <td>
               <select name="item_unit[]" class="js-unit">
                 {% for u in ['SQM', 'LM', 'PCS', 'KG', 'SET'] %}
@@ -177,47 +102,26 @@
             </td>
             <td><input type="number" step="0.01" name="item_net_weight_kg[]" class="js-net" value="{{ row.net_weight_kg or '' }}"></td>
             <td><input type="number" step="0.01" name="item_gross_weight_kg[]" class="js-gross" value="{{ row.gross_weight_kg or '' }}"></td>
-=======
-            <td><textarea name="item_description[]" rows="2" required>{{ row.description }}</textarea></td>
-            <td><input type="number" step="0.01" name="item_box_per_pallet[]" value="{{ row.box_per_pallet or '' }}"></td>
-            <td><input type="text" name="item_model_name[]" value="{{ row.model_name or '' }}"></td>
-            <td><input type="number" step="0.01" name="item_no_of_pallet[]" class="js-pallet" value="{{ row.no_of_pallet or '' }}"></td>
-            <td><input type="number" step="0.01" name="item_boxes[]" class="js-boxes" value="{{ row.boxes or '' }}"></td>
-            <td><input type="number" step="0.01" name="item_pcs[]" class="js-pcs" value="{{ row.pcs or '' }}"></td>
-            <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" value="{{ row.quantity_value or '' }}"></td>
->>>>>>> origin/main
             <td><button type="button" class="btn-link-danger js-remove-row">Remove</button></td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
-<<<<<<< HEAD
     <button type="button" class="btn btn-ghost btn-sm" id="add-row-btn">+ Add design line</button>
-    <p class="hint">Each row is one design of a product in a given quantity — add several rows for the same product to split its total into different designs. When a chosen design has an Alternate Quantity, Qty is auto-calculated from Boxes (still editable).</p>
+    <p class="hint">Boxes is compulsory; Qty fills in automatically and doesn't need to be typed. Picking a design fills in Box/plt from its Packing figure (its boxes-per-pallet count). Fill in either Boxes or Pallets — the other one, plus Pcs and Qty, is worked out from Box/plt and the design's per-box figures (or a "2 PCS = 0.72 SQM" note in the description). Pallets locks to the calculated value whenever Boxes divides evenly by Box/plt; it only opens up for you to type in by hand when there's a partial last pallet. Every auto-filled value stays editable.</p>
     <div class="flex-between" style="margin-top:14px;">
       <div></div>
       <div class="text-sm">
         <strong>Total boxes:</strong> <span id="total-boxes-display">0</span>
+        &nbsp;·&nbsp; <strong>Total pcs:</strong> <span id="total-pcs-display">0</span>
         &nbsp;·&nbsp; <strong>Total qty:</strong> <span id="total-qty-display">0.00</span>
         &nbsp;·&nbsp; <strong>Net wt:</strong> <span id="total-net-display">0.00</span> KG
         &nbsp;·&nbsp; <strong>Gross wt:</strong> <span id="total-gross-display">0.00</span> KG
-=======
-    <button type="button" class="btn btn-ghost btn-sm" id="add-row-btn">+ Add packing line</button>
-    <p class="hint">A row with a description but no numbers prints as a section heading (e.g. "CERAMIC GLAZED VITRIFIED TILES - HSNC 69072100").</p>
-    <div class="flex-between" style="margin-top:14px;">
-      <div></div>
-      <div class="text-sm">
-        <strong>Pallets:</strong> <span id="total-pallets">0</span>
-        &nbsp;·&nbsp; <strong>Boxes:</strong> <span id="total-boxes">0</span>
-        &nbsp;·&nbsp; <strong>Pcs:</strong> <span id="total-pcs">0</span>
-        &nbsp;·&nbsp; <strong>SQM / LM:</strong> <span id="total-qty">0</span>
->>>>>>> origin/main
       </div>
     </div>
   </div>
 
-<<<<<<< HEAD
   <div class="card">
     <div class="card-header"><h3>Remarks</h3></div>
     <div class="field">
@@ -277,9 +181,11 @@
         <button type="button" class="btn btn-ghost btn-sm js-choose-design">🎨 Design</button>
       </td>
       <td><input type="text" name="item_hsn_code[]" class="js-hsn"></td>
+      <td><input type="number" step="0.01" name="item_box_per_pallet[]" class="js-box-per-pallet"></td>
       <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets"></td>
-      <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes"></td>
-      <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required></td>
+      <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" required></td>
+      <td><input type="number" step="0.01" name="item_pcs[]" class="js-pcs"></td>
+      <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty"></td>
       <td>
         <select name="item_unit[]" class="js-unit">
           <option value="SQM">SQM</option><option value="LM">LM</option><option value="PCS">PCS</option><option value="KG">KG</option><option value="SET">SET</option>
@@ -298,26 +204,81 @@
   }
 
   function recalcTotals() {
-    let boxes = 0, qty = 0, net = 0, gross = 0;
+    let boxes = 0, pcs = 0, qty = 0, net = 0, gross = 0;
     itemsBody.querySelectorAll('.item-row').forEach((tr) => {
       boxes += parseFloat(tr.querySelector('.js-boxes').value) || 0;
+      pcs += parseFloat(tr.querySelector('.js-pcs').value) || 0;
       qty += parseFloat(tr.querySelector('.js-qty').value) || 0;
       net += parseFloat(tr.querySelector('.js-net').value) || 0;
       gross += parseFloat(tr.querySelector('.js-gross').value) || 0;
     });
     document.getElementById('total-boxes-display').textContent = boxes.toLocaleString();
+    document.getElementById('total-pcs-display').textContent = pcs.toLocaleString();
     document.getElementById('total-qty-display').textContent = qty.toFixed(2);
     document.getElementById('total-net-display').textContent = net.toFixed(2);
     document.getElementById('total-gross-display').textContent = gross.toFixed(2);
   }
 
-  // When the row's design has a known Alternate Quantity (per-box SQM/LM),
-  // Qty auto-fills from Boxes x that value; it stays editable either way.
-  function recalcRowQty(tr) {
-    const altQty = parseFloat(tr.dataset.altQty);
-    if (!altQty) return;
+  // Per-box factors for a row: from the picked design (dataset) when known,
+  // otherwise parsed from a "2 PCS = 0.72 SQM" pattern in the description -
+  // that fallback is what keeps the auto-calc alive on rows prefilled from a
+  // proforma invoice, reopened for editing, or typed in by hand.
+  function packInfo(tr) {
+    const desc = tr.querySelector('.js-product-name').value || '';
+    const m = desc.match(/([\d.]+)\s*PCS?\s*=\s*([\d.]+)\s*(SQM|LM)/i);
+    return {
+      pcsPerBox: parseFloat(tr.dataset.pcsPerBox) || (m ? parseFloat(m[1]) : 0),
+      qtyPerBox: parseFloat(tr.dataset.altQty) || (m ? parseFloat(m[2]) : 0),
+    };
+  }
+
+  function isPerfectMultiple(boxes, perPallet) {
+    if (!perPallet) return false;
+    const q = boxes / perPallet;
+    return Math.abs(q - Math.round(q)) < 1e-6;
+  }
+
+  // Boxes is compulsory and the field everything else derives from. Pallets
+  // is only ever a derived field when Boxes divides evenly by Box-per-pallet
+  // (a whole number of full pallets) - it locks read-only in that case so it
+  // can't drift out of sync. When Boxes ISN'T a perfect multiple (a partial
+  // last pallet), there's no clean quotient to show, so Pallets unlocks for
+  // the user to type in by hand.
+  function updatePallets(tr) {
     const boxes = parseFloat(tr.querySelector('.js-boxes').value) || 0;
-    tr.querySelector('.js-qty').value = (boxes * altQty).toFixed(2);
+    const perPallet = parseFloat(tr.querySelector('.js-box-per-pallet').value) || 0;
+    const palletsEl = tr.querySelector('.js-pallets');
+    if (boxes && isPerfectMultiple(boxes, perPallet)) {
+      palletsEl.value = +(boxes / perPallet).toFixed(2);
+      palletsEl.readOnly = true;
+    } else {
+      palletsEl.readOnly = false;
+    }
+  }
+
+  function recalcQtyPcs(tr) {
+    const boxes = parseFloat(tr.querySelector('.js-boxes').value) || 0;
+    const { pcsPerBox, qtyPerBox } = packInfo(tr);
+    if (boxes && pcsPerBox) tr.querySelector('.js-pcs').value = +(boxes * pcsPerBox).toFixed(2);
+    if (boxes && qtyPerBox) tr.querySelector('.js-qty').value = (boxes * qtyPerBox).toFixed(2);
+  }
+
+  // The row calculates from whichever of Boxes / Pallets was just filled
+  // in: editing Pallets back-fills Boxes (Pallets x Box-per-pallet) since
+  // Boxes can't be left blank; editing Boxes (or Box-per-pallet, once Boxes
+  // is already known) instead re-derives Pallets. Either way Pcs/Qty follow
+  // from the resulting Boxes. Every auto-filled value stays editable -
+  // typing into it directly isn't overwritten until an upstream field
+  // changes again.
+  function recalcRow(tr, source) {
+    const boxesEl = tr.querySelector('.js-boxes');
+    const perPallet = parseFloat(tr.querySelector('.js-box-per-pallet').value) || 0;
+    const pallets = parseFloat(tr.querySelector('.js-pallets').value) || 0;
+    if (source === 'pallets' || (!boxesEl.value && perPallet && pallets)) {
+      if (perPallet && pallets) boxesEl.value = +(perPallet * pallets).toFixed(2);
+    }
+    updatePallets(tr);
+    recalcQtyPcs(tr);
   }
 
   addRowBtn.addEventListener('click', () => {
@@ -339,9 +300,15 @@
 
   itemsBody.addEventListener('input', (e) => {
     if (e.target.classList.contains('js-boxes')) {
-      recalcRowQty(e.target.closest('tr'));
+      recalcRow(e.target.closest('tr'), 'boxes');
       recalcTotals();
-    } else if (['js-qty', 'js-net', 'js-gross'].some(c => e.target.classList.contains(c))) {
+    } else if (e.target.classList.contains('js-pallets')) {
+      recalcRow(e.target.closest('tr'), 'pallets');
+      recalcTotals();
+    } else if (['js-box-per-pallet', 'js-product-name'].some(c => e.target.classList.contains(c))) {
+      recalcRow(e.target.closest('tr'));
+      recalcTotals();
+    } else if (['js-pcs', 'js-qty', 'js-net', 'js-gross'].some(c => e.target.classList.contains(c))) {
       recalcTotals();
     }
   });
@@ -356,38 +323,8 @@
   // ---- lead dropdown prefill --------------------------------------------------
   document.getElementById('lead_select').addEventListener('change', (e) => {
     const opt = e.target.selectedOptions[0];
-    if (!opt.value) { document.getElementById('lead_id').value = ''; return; }
-    document.getElementById('lead_id').value = opt.value;
-    document.getElementById('consignee_name').value = opt.dataset.name || '';
-    syncNotifyWithConsignee();
+    document.getElementById('lead_id').value = opt.value || '';
   });
-
-  // ---- "buyer is same as consignee" toggle --------------------------------------------------
-  const sameAsConsignee = document.getElementById('same_as_consignee');
-  const consigneeNameEl = document.getElementById('consignee_name');
-  const consigneeAddrEl = document.getElementById('consignee_address');
-  const notifyNameEl = document.getElementById('notify_name');
-  const notifyAddrEl = document.getElementById('notify_address');
-
-  function syncNotifyWithConsignee() {
-    if (!sameAsConsignee.checked) return;
-    notifyNameEl.value = consigneeNameEl.value;
-    notifyAddrEl.value = consigneeAddrEl.value;
-  }
-
-  sameAsConsignee.addEventListener('change', () => {
-    notifyNameEl.readOnly = sameAsConsignee.checked;
-    notifyAddrEl.readOnly = sameAsConsignee.checked;
-    syncNotifyWithConsignee();
-  });
-  consigneeNameEl.addEventListener('input', syncNotifyWithConsignee);
-  consigneeAddrEl.addEventListener('input', syncNotifyWithConsignee);
-
-  if (notifyNameEl.value && notifyNameEl.value === consigneeNameEl.value && notifyAddrEl.value === consigneeAddrEl.value) {
-    sameAsConsignee.checked = true;
-    notifyNameEl.readOnly = true;
-    notifyAddrEl.readOnly = true;
-  }
 
   // ---- product picker modal (flat searchable product list) --------------------------------------------------
   const productOverlay = document.getElementById('product-picker-overlay');
@@ -505,7 +442,7 @@
       } else {
         const table = document.createElement('table');
         table.className = 'ledger';
-        table.innerHTML = '<thead><tr><th></th><th>Design</th><th>Packing</th><th>Alt qty / box</th><th></th></tr></thead>';
+        table.innerHTML = '<thead><tr><th></th><th>Design</th><th>Box/plt</th><th>Pcs/box</th><th>Alt qty / box</th><th></th></tr></thead>';
         const tbody = document.createElement('tbody');
         data.designs.forEach(d => {
           const tr = document.createElement('tr');
@@ -513,6 +450,7 @@
             <td>${d.photo_url ? `<img class="thumb" src="${d.photo_url}">` : ''}</td>
             <td><strong></strong></td>
             <td class="text-sm">${d.packing || '—'}</td>
+            <td class="text-sm">${d.quantity || '—'}</td>
             <td class="text-sm">${d.alternate_quantity || '—'}</td>
             <td><button type="button" class="btn btn-primary btn-sm">Select</button></td>`;
           tr.querySelector('strong').textContent = d.name;
@@ -530,85 +468,22 @@
     if (!activeRow) return;
     activeRow.querySelector('.js-design-id').value = d.id;
     activeRow.querySelector('.js-design-name').value = d.name;
-    activeRow.dataset.altQty = d.alternate_quantity || '';
-    recalcRowQty(activeRow);
+    activeRow.dataset.altQty = parseFloat(d.alternate_quantity) || '';
+    activeRow.dataset.pcsPerBox = parseFloat(d.quantity) || '';
+    // Design.packing is the boxes-per-pallet count for this design (e.g.
+    // "5" boxes make up one pallet) - it feeds the Box/plt field directly,
+    // same as picking a product fills in the HSN code.
+    const boxPerPallet = parseFloat(d.packing) || null;
+    if (boxPerPallet) activeRow.querySelector('.js-box-per-pallet').value = boxPerPallet;
+    recalcRow(activeRow);
     recalcTotals();
     designOverlay.hidden = true;
   }
 
+  itemsBody.querySelectorAll('.item-row').forEach((tr) => updatePallets(tr));
   renumber();
   recalcTotals();
 })();
-=======
-  <button type="submit" class="btn btn-primary">{{ 'Save changes' if packing_list else 'Create packing details' }}</button>
-  <a href="{{ url_for('packing_lists.view_packing_list', packing_list_id=packing_list.id) if packing_list else url_for('packing_lists.list_packing_lists') }}" class="btn btn-ghost">Cancel</a>
-</form>
-
-<template id="row-template">
-  <tr class="item-row">
-    <td class="js-sr"></td>
-    <td><textarea name="item_description[]" rows="2" required></textarea></td>
-    <td><input type="number" step="0.01" name="item_box_per_pallet[]"></td>
-    <td><input type="text" name="item_model_name[]"></td>
-    <td><input type="number" step="0.01" name="item_no_of_pallet[]" class="js-pallet"></td>
-    <td><input type="number" step="0.01" name="item_boxes[]" class="js-boxes"></td>
-    <td><input type="number" step="0.01" name="item_pcs[]" class="js-pcs"></td>
-    <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty"></td>
-    <td><button type="button" class="btn-link-danger js-remove-row">Remove</button></td>
-  </tr>
-</template>
-
-<script>
-  const itemsBody = document.getElementById('items-body');
-  const rowTemplate = document.getElementById('row-template');
-
-  function renumberRows() {
-    itemsBody.querySelectorAll('tr').forEach((row, i) => {
-      row.querySelector('.js-sr').textContent = i + 1;
-    });
-  }
-
-  function sumColumn(selector) {
-    let total = 0;
-    itemsBody.querySelectorAll(selector).forEach((input) => {
-      total += parseFloat(input.value) || 0;
-    });
-    return total;
-  }
-
-  function recalcTotals() {
-    document.getElementById('total-pallets').textContent = sumColumn('.js-pallet').toLocaleString();
-    document.getElementById('total-boxes').textContent = sumColumn('.js-boxes').toLocaleString();
-    document.getElementById('total-pcs').textContent = sumColumn('.js-pcs').toLocaleString();
-    document.getElementById('total-qty').textContent = sumColumn('.js-qty').toLocaleString();
-  }
-
-  function addRow() {
-    itemsBody.appendChild(rowTemplate.content.cloneNode(true));
-    renumberRows();
-  }
-
-  document.getElementById('add-row-btn').addEventListener('click', addRow);
-  itemsBody.addEventListener('click', (e) => {
-    if (e.target.classList.contains('js-remove-row')) {
-      e.target.closest('tr').remove();
-      renumberRows();
-      recalcTotals();
-    }
-  });
-  itemsBody.addEventListener('input', recalcTotals);
-
-  // Picking a proforma invoice on a fresh form reloads with its lines prefilled
-  {% if not packing_list %}
-  document.getElementById('proforma_invoice_id').addEventListener('change', (e) => {
-    if (!e.target.value) return;
-    window.location = '{{ url_for("packing_lists.new_packing_list") }}?proforma_invoice_id=' + encodeURIComponent(e.target.value);
-  });
-  {% endif %}
-
-  if (!itemsBody.querySelector('tr')) addRow();
-  recalcTotals();
->>>>>>> origin/main
 </script>
 
 {% endblock %}

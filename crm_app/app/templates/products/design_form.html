@@ -22,8 +22,12 @@
       <textarea id="description" name="description" rows="3">{{ data.description | default('', true) }}</textarea>
     </div>
     <div class="form-row">
-      <div class="field"><label for="packing">Packing</label><input type="text" id="packing" name="packing" value="{{ data.packing | default('', true) }}"></div>
-      <div class="field"><label for="quantity">Quantity</label><input type="text" id="quantity" name="quantity" value="{{ data.quantity | default('', true) }}"></div>
+      <div class="field">
+        <label for="packing">Packing (boxes per pallet)</label>
+        <input type="text" id="packing" name="packing" value="{{ data.packing | default('', true) }}">
+        <div class="hint">Fills in Box/plt on packing lists when this design is picked.</div>
+      </div>
+      <div class="field"><label for="quantity">Quantity (pcs per box)</label><input type="text" id="quantity" name="quantity" value="{{ data.quantity | default('', true) }}"></div>
     </div>
     <div class="form-row">
       <div class="field">
