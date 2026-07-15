@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Database Backup{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Administration</div>
+    <h1>Database backup</h1>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h3>Download a backup</h3></div>
+  <p class="text-sm text-soft">
+    Downloads a single <strong>.zip</strong> containing your entire database and every
+    product photo. Keep it somewhere safe (an external drive or cloud storage) - you can
+    restore it later, or on another computer, from this same page.
+  </p>
+  <a class="btn btn-primary" href="{{ url_for('backup.download') }}">💾 Download backup (.zip)</a>
+</div>
+
+<div class="card">
+  <div class="card-header"><h3>Restore from a backup</h3></div>
+  <p class="text-sm text-soft">
+    Upload a <strong>.zip</strong> you previously downloaded here. This <strong>replaces all
+    current data</strong> (database and product photos) with the contents of that backup.
+    A snapshot of your current data is saved automatically first, so a restore can be undone.
+  </p>
+  <p class="text-sm text-soft">
+    Only genuine backups made by this app are accepted - if you pick the wrong file by
+    mistake, it's rejected and nothing changes. Older backups are automatically upgraded to
+    the current version on restore.
+  </p>
+  <form method="POST" action="{{ url_for('backup.restore') }}" enctype="multipart/form-data">
+    <div class="field">
+      <label>Backup file (.zip)</label>
+      <input type="file" name="backup_file" accept=".zip" required>
+    </div>
+    <label class="field" style="flex-direction:row; align-items:center; gap:8px;">
+      <input type="checkbox" name="confirm" value="yes" style="width:auto;">
+      <span>I understand this overwrites all current data with the uploaded backup.</span>
+    </label>
+    <button type="submit" class="btn btn-danger"
+            onclick="return confirm('Restore this backup? All current data will be replaced.');">
+      ♻️ Restore from this backup
+    </button>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-header"><h3>Automatic snapshots</h3></div>
+  <p class="text-sm text-soft">
+    The app automatically saves a copy of the database before risky operations (schema
+    upgrades and restores). You can download any of these too.
+  </p>
+  {% if auto_backups %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead><tr><th>File</th><th>Saved</th><th class="num">Size (MB)</th><th></th></tr></thead>
+      <tbody>
+        {% for b in auto_backups %}
+        <tr>
+          <td>{{ b.name }}</td>
+          <td>{{ b.modified }}</td>
+          <td class="num">{{ b.size_mb }}</td>
+          <td><a class="btn btn-sm btn-ghost" href="{{ url_for('backup.download_auto', name=b.name) }}">Download</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No automatic snapshots yet.</div>
+  {% endif %}
+</div>
+
+{% endblock %}

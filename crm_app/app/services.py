@@ -13,7 +13,12 @@ unit-tested with fake in-memory repositories.
 
 import os
 import re
+import json
 import uuid
+import shutil
+import zipfile
+import tempfile
+import sqlite3
 from datetime import datetime, date
 from typing import Optional, List
 
@@ -33,6 +38,7 @@ from app.repositories import (
     ProductRepository, ProductFolderRepository, DesignRepository,
     QuotationRepository, ProformaInvoiceRepository, PackingListRepository,
 )
+from app.database import Database, SCHEMA_VERSION
 
 
 # ============================================================
@@ -1462,3 +1468,268 @@ class PackingListService:
         existing = self.get(packing_list_id, current_user.company_id)
         self._assert_can_modify(existing, current_user)
         self.packing_list_repo.delete(packing_list_id)
+
+
+# ============================================================
+# BACKUP SERVICE
+# ============================================================
+
+# Fingerprint written into every backup so a restore can tell one of OUR
+# backups apart from any other .zip the admin might upload by mistake.
+BACKUP_SIGNATURE = "crm-app-backup"
+BACKUP_FORMAT_VERSION = 1          # bump if the ZIP layout itself changes
+_MANIFEST_NAME = "manifest.json"
+_DB_ARCNAME = "database/crm.db"    # where the DB lives inside the ZIP
+_UPLOADS_ARCPREFIX = "uploads/products"
+_SQLITE_MAGIC = b"SQLite format 3\x00"   # first 16 bytes of any SQLite file
+_CORE_TABLES = ("tenants", "users")      # tables a real app DB must have
+
+
+class BackupService:
+    """Download and restore the ENTIRE dataset - the SQLite database plus the
+    product images that live on disk (not in the DB) - as a single ZIP.
+
+    Admin-only (enforced by the route layer). The ZIP carries a manifest with
+    a signature + schema version so a restore can (a) confirm the upload is
+    genuinely one of our backups, not the wrong file, and (b) forward-migrate
+    an older backup to the current schema instead of rejecting or corrupting
+    it (see SCHEMA_VERSION in app/database.py).
+    """
+
+    def __init__(self, db: Database, db_path: str, uploads_folder: str, schema_path: str):
+        self.db = db
+        self.db_path = db_path
+        self.uploads_folder = uploads_folder
+        self.schema_path = schema_path
+
+    # ---- download --------------------------------------------------
+    def create_backup_zip(self):
+        """Build a full-snapshot ZIP and return (zip_path, download_name).
+        The caller streams `zip_path` with send_file and must delete it
+        afterwards (it's a temp file)."""
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        tmp_db_fd, tmp_db_path = tempfile.mkstemp(suffix=".db")
+        os.close(tmp_db_fd)
+        try:
+            # Consistent snapshot even if another request is writing.
+            self.db.create_backup_copy(tmp_db_path)
+
+            manifest = {
+                "signature": BACKUP_SIGNATURE,
+                "format_version": BACKUP_FORMAT_VERSION,
+                "app": "crm",
+                "schema_version": self.db.get_schema_version(),
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "db_filename": _DB_ARCNAME,
+                "contents": ["database", "uploads"],
+            }
+
+            zip_fd, zip_path = tempfile.mkstemp(suffix=".zip")
+            os.close(zip_fd)
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(_MANIFEST_NAME, json.dumps(manifest, indent=2))
+                zf.write(tmp_db_path, _DB_ARCNAME)
+                if os.path.isdir(self.uploads_folder):
+                    for root, _dirs, files in os.walk(self.uploads_folder):
+                        for name in files:
+                            abs_path = os.path.join(root, name)
+                            rel = os.path.relpath(abs_path, self.uploads_folder)
+                            arcname = f"{_UPLOADS_ARCPREFIX}/{rel.replace(os.sep, '/')}"
+                            zf.write(abs_path, arcname)
+            return zip_path, f"crm-backup-{stamp}.zip"
+        finally:
+            if os.path.exists(tmp_db_path):
+                os.remove(tmp_db_path)
+
+    # ---- restore --------------------------------------------------
+    def restore_from_zip(self, file_storage) -> dict:
+        """Validate an uploaded backup and, only if it is genuinely one of our
+        backups, replace the live DB + product images with its contents and
+        forward-migrate. On ANY problem raises ValidationError with a clear
+        message and leaves the current data untouched. Returns a small summary
+        dict on success."""
+        if file_storage is None or not getattr(file_storage, "filename", ""):
+            raise ValidationError("Please choose a backup .zip file to restore.")
+
+        up_fd, up_path = tempfile.mkstemp(suffix=".zip")
+        os.close(up_fd)
+        work_dir = tempfile.mkdtemp(prefix="crm_restore_")
+        try:
+            file_storage.save(up_path)
+
+            if not zipfile.is_zipfile(up_path):
+                raise ValidationError(
+                    "That file isn't a valid .zip backup. Upload a backup you "
+                    "downloaded from this page."
+                )
+
+            with zipfile.ZipFile(up_path) as zf:
+                names = zf.namelist()
+                self._assert_no_zip_slip(names, work_dir)
+                # --- identity: is this really OUR backup? ---
+                if _MANIFEST_NAME not in names:
+                    raise ValidationError(self._not_our_backup_msg())
+                try:
+                    manifest = json.loads(zf.read(_MANIFEST_NAME).decode("utf-8"))
+                except (ValueError, UnicodeDecodeError):
+                    raise ValidationError(self._not_our_backup_msg())
+                zf.extractall(work_dir)
+
+            if not isinstance(manifest, dict) or manifest.get("signature") != BACKUP_SIGNATURE:
+                raise ValidationError(self._not_our_backup_msg())
+            fmt = manifest.get("format_version")
+            if not isinstance(fmt, int) or fmt > BACKUP_FORMAT_VERSION:
+                raise ValidationError(
+                    "This backup was made by a newer version of the app and can't "
+                    "be restored here. Update the app first."
+                )
+
+            db_arcname = manifest.get("db_filename") or _DB_ARCNAME
+            extracted_db = os.path.join(work_dir, *db_arcname.split("/"))
+            if not os.path.isfile(extracted_db):
+                raise ValidationError(self._not_our_backup_msg())
+
+            # The bundled file must actually BE a SQLite DB with our tables.
+            self._assert_valid_app_db(extracted_db)
+
+            # --- version rule: can we carry this backup forward? ---
+            backup_version = Database.read_user_version(extracted_db)
+            if backup_version == 0:
+                backup_version = int(manifest.get("schema_version") or 0)
+            if backup_version > SCHEMA_VERSION:
+                raise ValidationError(
+                    f"This backup is from a newer app version (schema v{backup_version} "
+                    f"> v{SCHEMA_VERSION}) and can't be safely restored. Update the app first."
+                )
+
+            # --- everything checks out: snapshot current data, then swap ---
+            self._snapshot_current("pre_restore")
+            extracted_uploads = os.path.join(work_dir, "uploads", "products")
+            self._swap_in(extracted_db, extracted_uploads)
+
+            # Bring the restored (possibly older) DB up to the current shape.
+            self.db.init_schema(self.schema_path)
+
+            return {
+                "restored_from_schema_version": backup_version,
+                "current_schema_version": self.db.get_schema_version(),
+                "created_at": manifest.get("created_at"),
+            }
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
+            if os.path.exists(up_path):
+                os.remove(up_path)
+
+    # ---- automatic snapshots (instance/backups/*.db) --------------------------------------------------
+    def list_auto_backups(self) -> list:
+        """The .db snapshots the app writes before risky migrations / restores,
+        newest first, for the download list on the page."""
+        backup_dir = self._backups_dir()
+        if not os.path.isdir(backup_dir):
+            return []
+        items = []
+        for name in os.listdir(backup_dir):
+            path = os.path.join(backup_dir, name)
+            if not name.endswith(".db") or not os.path.isfile(path):
+                continue
+            st = os.stat(path)
+            items.append({
+                "name": name,
+                "size_mb": round(st.st_size / (1024 * 1024), 2),
+                "modified": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M"),
+                "modified_ts": st.st_mtime,
+            })
+        items.sort(key=lambda x: x["modified_ts"], reverse=True)
+        return items
+
+    def get_auto_backup_path(self, name: str) -> str:
+        """Resolve a requested snapshot name to a safe path (basename only, no
+        traversal, must exist)."""
+        safe = os.path.basename(name or "")
+        if safe != name or not safe.endswith(".db"):
+            raise ValidationError("Invalid backup file name.")
+        path = os.path.join(self._backups_dir(), safe)
+        if not os.path.isfile(path):
+            raise NotFoundError("That backup no longer exists.")
+        return path
+
+    # ---- internals --------------------------------------------------
+    def _backups_dir(self) -> str:
+        return os.path.join(os.path.dirname(self.db_path), "backups")
+
+    def _snapshot_current(self, tag: str) -> None:
+        """Copy the CURRENT db + uploads into instance/backups/ so a restore is
+        reversible. Uses the same crm_<tag>_<stamp>.db naming the migration
+        backups use, so it shows up in list_auto_backups()."""
+        backup_dir = self._backups_dir()
+        os.makedirs(backup_dir, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        stem = os.path.splitext(os.path.basename(self.db_path))[0]
+        if os.path.exists(self.db_path):
+            self.db.create_backup_copy(os.path.join(backup_dir, f"{stem}_{tag}_{stamp}.db"))
+        if os.path.isdir(self.uploads_folder):
+            shutil.copytree(self.uploads_folder, os.path.join(backup_dir, f"uploads_{tag}_{stamp}"))
+
+    def _swap_in(self, new_db_path: str, new_uploads_dir: str) -> None:
+        """Replace the live DB file and product-images folder with the
+        restored ones. DB swap is atomic (os.replace on the same filesystem);
+        the uploads folder is moved aside first and rolled back on failure."""
+        # DB: stage next to the target (same filesystem) then atomic replace.
+        staging = self.db_path + ".restore_tmp"
+        shutil.copy2(new_db_path, staging)
+        os.replace(staging, self.db_path)
+        # Drop any stale WAL/SHM sidecars so they can't shadow the new file.
+        for sidecar in (self.db_path + "-wal", self.db_path + "-shm"):
+            if os.path.exists(sidecar):
+                os.remove(sidecar)
+
+        # Uploads: move current aside, then put the restored folder in place.
+        os.makedirs(os.path.dirname(self.uploads_folder), exist_ok=True)
+        aside = None
+        if os.path.isdir(self.uploads_folder):
+            aside = f"{self.uploads_folder}_old_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            os.rename(self.uploads_folder, aside)
+        try:
+            if new_uploads_dir and os.path.isdir(new_uploads_dir):
+                shutil.copytree(new_uploads_dir, self.uploads_folder)
+            else:
+                os.makedirs(self.uploads_folder, exist_ok=True)
+        except Exception:
+            shutil.rmtree(self.uploads_folder, ignore_errors=True)
+            if aside:
+                os.rename(aside, self.uploads_folder)
+            raise
+        if aside:
+            shutil.rmtree(aside, ignore_errors=True)
+
+    @staticmethod
+    def _assert_no_zip_slip(names: list, dest_dir: str) -> None:
+        dest_root = os.path.abspath(dest_dir)
+        for member in names:
+            target = os.path.abspath(os.path.join(dest_root, member))
+            if target != dest_root and not target.startswith(dest_root + os.sep):
+                raise ValidationError("Backup archive contains unsafe file paths and was rejected.")
+
+    @staticmethod
+    def _assert_valid_app_db(db_path: str) -> None:
+        with open(db_path, "rb") as f:
+            if f.read(16) != _SQLITE_MAGIC:
+                raise ValidationError(BackupService._not_our_backup_msg())
+        conn = sqlite3.connect(db_path)
+        try:
+            row = conn.execute("PRAGMA integrity_check").fetchone()
+            if not row or str(row[0]).lower() != "ok":
+                raise ValidationError(
+                    "The database inside this backup is corrupted and can't be restored."
+                )
+            tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if any(t not in tables for t in _CORE_TABLES):
+                raise ValidationError(BackupService._not_our_backup_msg())
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _not_our_backup_msg() -> str:
+        return ("This file doesn't look like a backup created by this app. Please upload a "
+                ".zip you downloaded from the Database Backup page.")

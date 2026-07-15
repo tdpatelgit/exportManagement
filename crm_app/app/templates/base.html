@@ -28,6 +28,7 @@
         <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('admin.') }}" href="{{ url_for('admin.list_employees') }}">👥 Employees</a>
         <a class="nav-link {{ 'active' if request.endpoint == 'company.settings' }}" href="{{ url_for('company.settings') }}">🏢 Our Company</a>
         <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('reports.') }}" href="{{ url_for('reports.index') }}">🗓️ Reports</a>
+        <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('backup.') }}" href="{{ url_for('backup.index') }}">💾 Database Backup</a>
       {% endif %}
 
       {% if current_user %}

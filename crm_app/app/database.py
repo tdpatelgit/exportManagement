@@ -18,6 +18,31 @@ from contextlib import contextmanager
 from datetime import datetime
 
 
+# The current shape of the database, bumped by one every time the schema is
+# restructured. Stamped onto every DB via `PRAGMA user_version` at the end of
+# `init_schema`, so we can tell how old any given database file is - most
+# importantly, a backup an admin uploads on the Database Backup page (see
+# BackupService). The rule the restore flow relies on:
+#   * a DB whose version is <= SCHEMA_VERSION can be forward-migrated to the
+#     current shape simply by running `init_schema` on it (the guarded,
+#     idempotent migrations in `_migrate` bring it up to date);
+#   * a DB whose version is > SCHEMA_VERSION was written by a NEWER build of
+#     the app - we can't safely downgrade it, so restore refuses it.
+#
+# HOW TO EVOLVE THE SCHEMA (keeps old backups integrable):
+#   1. Change schema.sql to the new shape (for fresh installs).
+#   2. Add a guarded, DATA-PRESERVING step to `_migrate` that transforms an
+#      already-populated older DB into the new shape - ALTER TABLE to add a
+#      column, or the rename-create-copy-drop dance for constraint changes,
+#      following the `PRAGMA table_info`-guarded blocks already there. Never
+#      DROP rows to "start fresh": that is what makes an old backup lossy.
+#   3. Increment SCHEMA_VERSION below.
+# Because `_migrate` is idempotent and runs on every startup AND on every
+# restore, any backup - however old - is carried forward through the whole
+# chain of steps, never discarded.
+SCHEMA_VERSION = 1
+
+
 class Database:
     """Thin wrapper around sqlite3 connections.
 
@@ -65,6 +90,11 @@ class Database:
         with self.get_connection() as conn:
             conn.executescript(schema_sql)
         self._migrate(conn=None)
+        # Record the shape this DB is now in. Runs on fresh installs, on
+        # startup upgrades, and again when a restored backup is migrated
+        # forward - so `user_version` always reflects the live schema.
+        with self.get_connection() as conn:
+            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _pre_schema_migrate(self) -> None:
         """Drops old-format tables BEFORE schema.sql runs, so its
@@ -109,7 +139,13 @@ class Database:
         """Add columns to already-created tables that predate a schema change.
         `CREATE TABLE IF NOT EXISTS` can't retrofit columns onto an existing
         table, so new nullable columns are added here, guarded by a check
-        against the live column list (ALTER TABLE has no IF NOT EXISTS)."""
+        against the live column list (ALTER TABLE has no IF NOT EXISTS).
+
+        Every future restructure adds a step here and bumps `SCHEMA_VERSION`
+        (see the module-level comment). Steps must be DATA-PRESERVING and
+        idempotent: this method runs on every startup and every backup
+        restore, so it is what forward-migrates an old uploaded backup instead
+        of discarding its data."""
         with self.get_connection() as conn:
             existing = {r["name"] for r in conn.execute("PRAGMA table_info(our_company_bank_details)")}
             for column in ("swift_code", "bank_address"):
@@ -403,6 +439,37 @@ class Database:
         stem = os.path.splitext(os.path.basename(self.db_path))[0]
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         shutil.copy2(self.db_path, os.path.join(backup_dir, f"{stem}_{tag}_{stamp}.db"))
+
+    def create_backup_copy(self, dest_path: str) -> None:
+        """Write a CONSISTENT snapshot of the live DB to `dest_path` using
+        SQLite's online backup API. Unlike a raw file copy, this is safe even
+        if another request is mid-write, so it's what the Database Backup
+        download uses to bundle the DB."""
+        src = self._connect()
+        try:
+            dst = sqlite3.connect(dest_path)
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+        finally:
+            src.close()
+
+    def get_schema_version(self) -> int:
+        """The live DB's `PRAGMA user_version` (0 for a DB that predates
+        version stamping)."""
+        return self.read_user_version(self.db_path)
+
+    @staticmethod
+    def read_user_version(db_path: str) -> int:
+        """Read `PRAGMA user_version` from an arbitrary SQLite file - used to
+        check how old an uploaded backup is before restoring it."""
+        conn = sqlite3.connect(db_path)
+        try:
+            row = conn.execute("PRAGMA user_version").fetchone()
+            return int(row[0]) if row and row[0] is not None else 0
+        finally:
+            conn.close()
 
     def query(self, sql: str, params: tuple = ()) -> list:
         """Run a SELECT and return a list of sqlite3.Row objects."""

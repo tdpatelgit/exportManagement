@@ -266,3 +266,12 @@ Straight from the brief, in the order they make sense to build:
   multi-tenancy backfill). It's idempotent and safe to run on every
   startup — new migrations should follow the same guarded,
   `PRAGMA table_info`-checked pattern already there.
+- **Schema version + backups.** `app/database.py` defines `SCHEMA_VERSION` and
+  stamps it onto every DB via `PRAGMA user_version`. Any admin can download a
+  full snapshot (SQLite DB + product images, one ZIP) and restore one from the
+  **Database Backup** page (`app/routes/backup.py` + `BackupService` in
+  `app/services.py`). Because `_migrate()` runs on every restore, an older
+  backup is carried forward automatically — so **every future restructure must
+  bump `SCHEMA_VERSION` and add a data-preserving step to `_migrate()` (never
+  drop rows)** to keep old backups integrable. See the comment above
+  `SCHEMA_VERSION` for the exact recipe.

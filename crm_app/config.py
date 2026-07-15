@@ -72,4 +72,9 @@ class Config:
     # static/ so Flask can serve the files directly via url_for('static', ...).
     PRODUCT_UPLOAD_FOLDER = os.path.join(BASE_DIR, "app", "static", "uploads", "products")
     ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
-    MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB upload cap
+
+    # Global cap on any single upload. Product photos are validated separately
+    # by extension/type, so the only thing needing a large cap is a Database
+    # Backup restore, whose ZIP holds the whole DB + every product image -
+    # 10 MB is far too small for that. Override with MAX_UPLOAD_MB if needed.
+    MAX_CONTENT_LENGTH = int(os.environ.get("MAX_UPLOAD_MB", "500")) * 1024 * 1024

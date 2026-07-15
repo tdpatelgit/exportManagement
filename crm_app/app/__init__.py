@@ -24,7 +24,7 @@ from app.repositories import (
 from app.services import (
     AuthService, LeadService, ClientService, CurrencyService,
     CommunicationService, StatsService, CompanyService, ReportService, ProductService,
-    QuotationService, ProformaInvoiceService, PackingListService,
+    QuotationService, ProformaInvoiceService, PackingListService, BackupService,
 )
 from app.utils import register_template_helpers
 
@@ -79,6 +79,9 @@ class ServiceContainer:
             self.packing_list_repo, self.product_repo, self.design_repo,
             self.lead_repo, self.proforma_invoice_repo,
         )
+        self.backup_service = BackupService(
+            db, Config.DATABASE_PATH, Config.PRODUCT_UPLOAD_FOLDER, Config.SCHEMA_PATH,
+        )
 
 
 def create_app(config_class=Config) -> Flask:
@@ -130,6 +133,7 @@ def create_app(config_class=Config) -> Flask:
     from app.routes.proforma_invoices import proforma_invoices_bp
     from app.routes.packing_lists import packing_lists_bp
     from app.routes.profile import profile_bp
+    from app.routes.backup import backup_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
@@ -143,6 +147,7 @@ def create_app(config_class=Config) -> Flask:
     app.register_blueprint(proforma_invoices_bp)
     app.register_blueprint(packing_lists_bp)
     app.register_blueprint(profile_bp)
+    app.register_blueprint(backup_bp)
 
     # --- friendly error pages --------------------------------------------------
     @app.errorhandler(403)
