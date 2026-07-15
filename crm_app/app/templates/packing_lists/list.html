@@ -8,7 +8,11 @@
     <h1>Packing Lists</h1>
   </div>
   <div class="topbar-actions">
+<<<<<<< HEAD
     <a href="{{ url_for('packing_lists.new_packing_list') }}" class="btn btn-primary">+ New packing list</a>
+=======
+    <a href="{{ url_for('packing_lists.new_packing_list') }}" class="btn btn-primary">+ New packing details</a>
+>>>>>>> origin/main
   </div>
 </div>
 
@@ -18,17 +22,27 @@
     <table class="ledger">
       <thead>
         <tr>
+<<<<<<< HEAD
           <th>Packing list no.</th>
           <th>Date</th>
           <th>Consignee</th>
           <th>From proforma</th>
           <th>Created by</th>
+=======
+          <th>Proforma invoice no.</th>
+          <th>Date</th>
+          <th>Created by</th>
+          <th class="num">Boxes</th>
+          <th class="num">Pcs</th>
+          <th class="num">SQM / LM</th>
+>>>>>>> origin/main
           <th></th>
         </tr>
       </thead>
       <tbody>
         {% for pl in packing_lists %}
         <tr>
+<<<<<<< HEAD
           <td class="mono">{{ pl.packing_list_number }}</td>
           <td class="text-sm">{{ pl.packing_list_date }}</td>
           <td><strong>{{ pl.consignee_name }}</strong></td>
@@ -38,6 +52,14 @@
             {% else %}—{% endif %}
           </td>
           <td class="text-sm">{{ pl.created_by_name }}</td>
+=======
+          <td class="mono">{{ pl.proforma_invoice_no or '—' }}</td>
+          <td class="text-sm">{{ pl.packing_date }}</td>
+          <td class="text-sm">{{ pl.created_by_name }}</td>
+          <td class="num">{{ '{:,.0f}'.format(pl.total_boxes) }}</td>
+          <td class="num">{{ '{:,.0f}'.format(pl.total_pcs) }}</td>
+          <td class="num">{{ '{:,.2f}'.format(pl.total_quantity) }}</td>
+>>>>>>> origin/main
           <td><a href="{{ url_for('packing_lists.view_packing_list', packing_list_id=pl.id) }}" class="text-sm">Open →</a></td>
         </tr>
         {% endfor %}
@@ -45,7 +67,11 @@
     </table>
   </div>
   {% else %}
+<<<<<<< HEAD
   <div class="empty-state">No packing lists yet. <a href="{{ url_for('packing_lists.new_packing_list') }}">Create one →</a> (usually started from a proforma invoice)</div>
+=======
+  <div class="empty-state">No packing lists yet. <a href="{{ url_for('packing_lists.new_packing_list') }}">Create one →</a></div>
+>>>>>>> origin/main
   {% endif %}
 </div>
 

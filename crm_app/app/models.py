@@ -805,3 +805,92 @@ class ProformaInvoice:
     def invoice_value_usd(self) -> float:
         return (self.subtotal_usd + self.sea_freight + self.insurance
                 + self.certification + self.other_charges - self.discount_amount)
+
+# ============================================================
+# PACKING LIST  ("Packing Details" document generated from a Proforma
+# Invoice - header + line items. proforma_invoice_id/lead_id follow the
+# same "generated from, reference only" pattern as ProformaInvoice's
+# quotation_id/lead_id.)
+# ============================================================
+@dataclass
+class PackingListItem:
+    id: Optional[int]
+    packing_list_id: Optional[int]
+    sr_no: int
+    description: str
+    box_per_pallet: Optional[float] = None
+    model_name: Optional[str] = None
+    no_of_pallet: Optional[float] = None
+    boxes: Optional[float] = None
+    pcs: Optional[float] = None
+    quantity_value: Optional[float] = None
+
+    @property
+    def is_heading(self) -> bool:
+        """A row with no numbers at all prints as a section heading (e.g.
+        'CERAMIC GLAZED VITRIFIED TILES - HSNC 69072100') instead of a
+        numbered product line."""
+        return not any((self.box_per_pallet, self.no_of_pallet, self.boxes, self.pcs, self.quantity_value))
+
+    @staticmethod
+    def from_row(row) -> "PackingListItem":
+        return PackingListItem(
+            id=row["id"],
+            packing_list_id=row["packing_list_id"],
+            sr_no=row["sr_no"],
+            description=row["description"],
+            box_per_pallet=row["box_per_pallet"],
+            model_name=row["model_name"],
+            no_of_pallet=row["no_of_pallet"],
+            boxes=row["boxes"],
+            pcs=row["pcs"],
+            quantity_value=row["quantity_value"],
+        )
+
+
+@dataclass
+class PackingList:
+    id: Optional[int]
+    company_id: int
+    packing_date: str
+    created_by: int
+    proforma_invoice_id: Optional[int] = None
+    proforma_invoice_no: Optional[str] = None
+    lead_id: Optional[int] = None
+    remarks: Optional[str] = "MADE IN INDIA"
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    created_by_name: Optional[str] = None  # populated by joined queries only
+    items: List[PackingListItem] = field(default_factory=list)
+
+    @staticmethod
+    def from_row(row) -> "PackingList":
+        return PackingList(
+            id=row["id"],
+            company_id=row["company_id"],
+            proforma_invoice_id=row["proforma_invoice_id"],
+            proforma_invoice_no=row["proforma_invoice_no"],
+            lead_id=row["lead_id"],
+            packing_date=row["packing_date"],
+            remarks=row["remarks"],
+            created_by=row["created_by"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            created_by_name=row["created_by_name"] if "created_by_name" in row.keys() else None,
+        )
+
+    @property
+    def total_pallets(self) -> float:
+        return sum(item.no_of_pallet or 0 for item in self.items)
+
+    @property
+    def total_boxes(self) -> float:
+        return sum(item.boxes or 0 for item in self.items)
+
+    @property
+    def total_pcs(self) -> float:
+        return sum(item.pcs or 0 for item in self.items)
+
+    @property
+    def total_quantity(self) -> float:
+        return sum(item.quantity_value or 0 for item in self.items)

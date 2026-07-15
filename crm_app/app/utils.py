@@ -97,6 +97,19 @@ def register_template_helpers(app):
     def amount_in_words_filter(value):
         return amount_in_words(value)
 
+    @app.template_filter("long_date")
+    def long_date(value):
+        """'2026-02-27' -> 'Friday, February 27, 2026' (the date style the
+        Packing Details sheet prints in its header)."""
+        if not value:
+            return "—"
+        from datetime import datetime
+        try:
+            parsed = datetime.strptime(str(value)[:10], "%Y-%m-%d")
+        except ValueError:
+            return str(value)
+        return f"{parsed.strftime('%A, %B')} {parsed.day}, {parsed.year}"
+
     @app.template_filter("friendly_date")
     def friendly_date(value):
         if not value:

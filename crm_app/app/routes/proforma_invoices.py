@@ -84,6 +84,9 @@ def new_proforma_invoice():
                 current_user=g.user, fields=_extract_header(request.form), raw_items=_extract_items(request.form),
             )
             flash(f"Proforma invoice {invoice.invoice_number} created.", "success")
+            if request.form.get("auto_packing"):
+                container.packing_list_service.create_from_invoice(g.user, invoice)
+                flash("Packing details generated automatically.", "success")
             return redirect(url_for("proforma_invoices.view_proforma_invoice", proforma_invoice_id=invoice.id))
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
@@ -133,7 +136,9 @@ def view_proforma_invoice(proforma_invoice_id):
     except NotFoundError:
         abort(404)
     company = container.company_service.get(g.user.company_id)
-    return render_template("proforma_invoices/print.html", invoice=invoice, company=company)
+    packing_lists = container.packing_list_service.list_for_proforma(proforma_invoice_id, g.user.company_id)
+    return render_template("proforma_invoices/print.html", invoice=invoice, company=company,
+                           packing_lists=packing_lists)
 
 
 @proforma_invoices_bp.route("/<int:proforma_invoice_id>/edit", methods=["GET", "POST"])

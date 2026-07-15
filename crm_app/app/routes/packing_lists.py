@@ -1,12 +1,20 @@
 """
 app/routes/packing_lists.py
 ----------------------------
+<<<<<<< HEAD
 Packing list generation: mirrors app/routes/proforma_invoices.py layer for
 layer. A packing list is normally started from an existing Proforma Invoice
 via `?proforma_invoice_id=` (the same way a proforma starts from a
 quotation) - each product line from the proforma is then broken down into
 one or more DESIGN rows in smaller quantities. The packing list number is
 auto-generated as PL{YYYYMMDD}{seq-of-that-day} and is never user-editable.
+=======
+Packing Details document: mirrors app/routes/proforma_invoices.py layer for
+layer. A packing list is normally started from an existing Proforma Invoice
+via `?proforma_invoice_id=` (or generated automatically right after the PI
+is created - see the auto_packing hook in routes/proforma_invoices.py), but
+is then its own independent, editable record.
+>>>>>>> origin/main
 """
 
 from datetime import date
@@ -18,6 +26,7 @@ from app.utils import login_required
 
 packing_lists_bp = Blueprint("packing_lists", __name__, url_prefix="/packing-lists")
 
+<<<<<<< HEAD
 _HEADER_FIELDS = [
     "packing_list_date", "lead_id", "proforma_invoice_id", "export_ref_no", "buyer_order_no",
     "other_reference", "consignee_name", "consignee_address", "notify_name", "notify_address",
@@ -25,6 +34,9 @@ _HEADER_FIELDS = [
     "port_of_loading", "port_of_discharge", "final_destination",
     "container_details", "terms_of_delivery", "remarks",
 ]
+=======
+_HEADER_FIELDS = ["packing_date", "proforma_invoice_id", "lead_id", "remarks"]
+>>>>>>> origin/main
 
 
 def _extract_header(form) -> dict:
@@ -32,6 +44,7 @@ def _extract_header(form) -> dict:
 
 
 def _extract_items(form) -> list:
+<<<<<<< HEAD
     product_ids = form.getlist("item_product_id[]")
     product_names = form.getlist("item_product_name[]")
     design_ids = form.getlist("item_design_id[]")
@@ -57,15 +70,39 @@ def _extract_items(form) -> list:
             "unit": units[i] if i < len(units) else "SQM",
             "net_weight_kg": net_weights[i] if i < len(net_weights) else "",
             "gross_weight_kg": gross_weights[i] if i < len(gross_weights) else "",
+=======
+    descriptions = form.getlist("item_description[]")
+    box_per_pallets = form.getlist("item_box_per_pallet[]")
+    model_names = form.getlist("item_model_name[]")
+    no_of_pallets = form.getlist("item_no_of_pallet[]")
+    boxes = form.getlist("item_boxes[]")
+    pcs = form.getlist("item_pcs[]")
+    quantities = form.getlist("item_quantity_value[]")
+    items = []
+    for i in range(len(descriptions)):
+        items.append({
+            "description": descriptions[i],
+            "box_per_pallet": box_per_pallets[i] if i < len(box_per_pallets) else "",
+            "model_name": model_names[i] if i < len(model_names) else "",
+            "no_of_pallet": no_of_pallets[i] if i < len(no_of_pallets) else "",
+            "boxes": boxes[i] if i < len(boxes) else "",
+            "pcs": pcs[i] if i < len(pcs) else "",
+            "quantity_value": quantities[i] if i < len(quantities) else "",
+>>>>>>> origin/main
         })
     return items
 
 
+<<<<<<< HEAD
 def _form_context():
     container = current_app.container
     leads = container.lead_service.list_for_dashboard(g.user)
     invoices = container.proforma_invoice_service.list_all(g.user.company_id)
     return leads, invoices
+=======
+def _invoice_options():
+    return current_app.container.proforma_invoice_service.list_all(g.user.company_id)
+>>>>>>> origin/main
 
 
 @packing_lists_bp.route("/")
@@ -84,6 +121,7 @@ def new_packing_list():
             packing_list = container.packing_list_service.create(
                 current_user=g.user, fields=_extract_header(request.form), raw_items=_extract_items(request.form),
             )
+<<<<<<< HEAD
             flash(f"Packing list {packing_list.packing_list_number} created.", "success")
             return redirect(url_for("packing_lists.view_packing_list", packing_list_id=packing_list.id))
         except (ValidationError, PermissionDeniedError) as e:
@@ -91,10 +129,19 @@ def new_packing_list():
             leads, invoices = _form_context()
             return render_template(
                 "packing_lists/form.html", packing_list=None, leads=leads, invoices=invoices,
+=======
+            flash("Packing details created.", "success")
+            return redirect(url_for("packing_lists.view_packing_list", packing_list_id=packing_list.id))
+        except (ValidationError, PermissionDeniedError) as e:
+            flash(str(e), "error")
+            return render_template(
+                "packing_lists/form.html", packing_list=None, invoices=_invoice_options(),
+>>>>>>> origin/main
                 form_data=request.form, form_items=_extract_items(request.form),
                 today=date.today().isoformat(),
             ), 400
 
+<<<<<<< HEAD
     leads, invoices = _form_context()
     prefill = None
     form_items = None
@@ -120,6 +167,21 @@ def new_packing_list():
             pass
     return render_template(
         "packing_lists/form.html", packing_list=None, leads=leads, invoices=invoices,
+=======
+    prefill = None
+    form_items = None
+    proforma_invoice_id = request.args.get("proforma_invoice_id")
+    if proforma_invoice_id:
+        try:
+            invoice = container.proforma_invoice_service.get(int(proforma_invoice_id), g.user.company_id)
+            built = container.packing_list_service.build_prefill_from_invoice(invoice)
+            prefill = built["fields"]
+            form_items = built["items"]
+        except (NotFoundError, ValueError):
+            pass
+    return render_template(
+        "packing_lists/form.html", packing_list=None, invoices=_invoice_options(),
+>>>>>>> origin/main
         form_data=prefill, form_items=form_items, today=date.today().isoformat(),
     )
 
@@ -151,6 +213,7 @@ def edit_packing_list(packing_list_id):
                 current_user=g.user, packing_list_id=packing_list_id,
                 fields=_extract_header(request.form), raw_items=_extract_items(request.form),
             )
+<<<<<<< HEAD
             flash(f"Packing list {packing_list.packing_list_number} updated.", "success")
             return redirect(url_for("packing_lists.view_packing_list", packing_list_id=packing_list_id))
         except (ValidationError, PermissionDeniedError) as e:
@@ -158,13 +221,26 @@ def edit_packing_list(packing_list_id):
             leads, invoices = _form_context()
             return render_template(
                 "packing_lists/form.html", packing_list=packing_list, leads=leads, invoices=invoices,
+=======
+            flash("Packing details updated.", "success")
+            return redirect(url_for("packing_lists.view_packing_list", packing_list_id=packing_list_id))
+        except (ValidationError, PermissionDeniedError) as e:
+            flash(str(e), "error")
+            return render_template(
+                "packing_lists/form.html", packing_list=packing_list, invoices=_invoice_options(),
+>>>>>>> origin/main
                 form_data=request.form, form_items=_extract_items(request.form),
                 today=date.today().isoformat(),
             ), 400
 
+<<<<<<< HEAD
     leads, invoices = _form_context()
     return render_template(
         "packing_lists/form.html", packing_list=packing_list, leads=leads, invoices=invoices,
+=======
+    return render_template(
+        "packing_lists/form.html", packing_list=packing_list, invoices=_invoice_options(),
+>>>>>>> origin/main
         form_data=None, form_items=None, today=date.today().isoformat(),
     )
 
@@ -173,9 +249,14 @@ def edit_packing_list(packing_list_id):
 @login_required
 def delete_packing_list(packing_list_id):
     try:
+<<<<<<< HEAD
         packing_list = current_app.container.packing_list_service.get(packing_list_id, g.user.company_id)
         current_app.container.packing_list_service.delete(g.user, packing_list_id)
         flash(f"Packing list {packing_list.packing_list_number} deleted.", "success")
+=======
+        current_app.container.packing_list_service.delete(g.user, packing_list_id)
+        flash("Packing details deleted.", "success")
+>>>>>>> origin/main
     except (ValidationError, PermissionDeniedError) as e:
         flash(str(e), "error")
     except NotFoundError:

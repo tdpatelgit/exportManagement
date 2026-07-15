@@ -18,8 +18,13 @@ from app.database import Database
 from app.repositories import (
     TenantRepository, SqliteUserRepository, SqliteLeadRepository, SqliteClientRepository,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
+<<<<<<< HEAD
     ProductRepository, ProductFolderRepository, DesignRepository,
     QuotationRepository, ProformaInvoiceRepository, PackingListRepository,
+=======
+    ProductGroupRepository, ProductRepository, QuotationRepository, ProformaInvoiceRepository,
+    PackingListRepository,
+>>>>>>> origin/main
 )
 from app.services import (
     AuthService, LeadService, ClientService, CurrencyService,
@@ -76,8 +81,12 @@ class ServiceContainer:
             self.proforma_invoice_repo, self.product_repo, self.lead_repo, self.quotation_repo,
         )
         self.packing_list_service = PackingListService(
+<<<<<<< HEAD
             self.packing_list_repo, self.product_repo, self.design_repo,
             self.lead_repo, self.proforma_invoice_repo,
+=======
+            self.packing_list_repo, self.proforma_invoice_repo, self.lead_repo,
+>>>>>>> origin/main
         )
 
 

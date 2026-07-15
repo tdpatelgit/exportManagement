@@ -23,14 +23,23 @@ from werkzeug.utils import secure_filename
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
 from app.models import (
     User, Lead, Client, ContactPerson, Communication, PaymentEntry, DocumentEntry,
+<<<<<<< HEAD
     LEAD_STATUSES, CLIENT_STATUSES, Product, ProductFolder, Design, Quotation, QuotationItem,
+=======
+    LEAD_STATUSES, CLIENT_STATUSES, ProductGroup, Product, Quotation, QuotationItem,
+>>>>>>> origin/main
     ProformaInvoice, ProformaInvoiceItem, PackingList, PackingListItem,
 )
 from app.repositories import (
     TenantRepository, UserRepositoryBase, LeadRepositoryBase, ClientRepositoryBase,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
+<<<<<<< HEAD
     ProductRepository, ProductFolderRepository, DesignRepository,
     QuotationRepository, ProformaInvoiceRepository, PackingListRepository,
+=======
+    ProductGroupRepository, ProductRepository, QuotationRepository, ProformaInvoiceRepository,
+    PackingListRepository,
+>>>>>>> origin/main
 )
 
 
@@ -287,7 +296,11 @@ class ClientService:
                  document_repo: DocumentRepository, currency_service: CurrencyService,
                  quotation_repo: QuotationRepository,
                  proforma_invoice_repo: Optional[ProformaInvoiceRepository] = None,
+<<<<<<< HEAD
                  packing_list_repo: Optional[PackingListRepository] = None):
+=======
+                 packing_list_repo: Optional["PackingListRepository"] = None):
+>>>>>>> origin/main
         self.client_repo = client_repo
         self.lead_repo = lead_repo
         self.comm_service = comm_service
@@ -425,8 +438,14 @@ class ClientService:
         if self.packing_list_repo:
             for pl in self.packing_list_repo.list_for_lead(client.lead_id) if client.lead_id else []:
                 rows.append({
+<<<<<<< HEAD
                     "name": pl.packing_list_number, "type": "Packing List", "date": pl.packing_list_date,
                     "notes": pl.consignee_name,
+=======
+                    "name": f"Packing Details · {pl.proforma_invoice_no or ('#%d' % pl.id)}",
+                    "type": "Packing Details", "date": pl.packing_date,
+                    "notes": f"{pl.total_boxes:,.0f} boxes · {pl.total_quantity:,.2f} SQM/LM",
+>>>>>>> origin/main
                     "link": ("packing_lists.view_packing_list", {"packing_list_id": pl.id}),
                 })
         rows.sort(key=lambda r: r["date"], reverse=True)
@@ -1208,6 +1227,7 @@ class ProformaInvoiceService:
 
 
 # ============================================================
+<<<<<<< HEAD
 # PACKING LIST SERVICE
 # ============================================================
 class PackingListService:
@@ -1224,12 +1244,32 @@ class PackingListService:
         self.design_repo = design_repo
         self.lead_repo = lead_repo
         self.proforma_invoice_repo = proforma_invoice_repo
+=======
+# PACKING LIST SERVICE ("Packing Details" document)
+# ============================================================
+class PackingListService:
+    """Mirrors ProformaInvoiceService layer-for-layer. A Packing List is
+    normally generated from a Proforma Invoice - either automatically right
+    after the PI is created (the 'auto_packing' checkbox on the PI form) or
+    manually via `?proforma_invoice_id=` prefill - but is then its own
+    independent, editable record."""
+
+    def __init__(self, packing_list_repo: PackingListRepository,
+                 invoice_repo: ProformaInvoiceRepository, lead_repo: LeadRepositoryBase):
+        self.packing_list_repo = packing_list_repo
+        self.invoice_repo = invoice_repo
+        self.lead_repo = lead_repo
+>>>>>>> origin/main
 
     # ---- reads --------------------------------------------------
     def get(self, packing_list_id: int, company_id: int) -> PackingList:
         packing_list = self.packing_list_repo.get_by_id(packing_list_id)
         if not packing_list or packing_list.company_id != company_id:
+<<<<<<< HEAD
             # 404, not 403 - don't reveal that another company's packing list exists.
+=======
+            # 404, not 403 - don't reveal that another company's document exists.
+>>>>>>> origin/main
             raise NotFoundError(f"Packing list #{packing_list_id} not found.")
         return packing_list
 
@@ -1237,12 +1277,22 @@ class PackingListService:
         return self.packing_list_repo.list_all(company_id)
 
     def list_for_lead(self, lead_id: Optional[int]) -> List[PackingList]:
+<<<<<<< HEAD
         """Same shape as QuotationService.list_for_lead - unscoped by
         company_id because the caller already owns the lead/client."""
+=======
+>>>>>>> origin/main
         if not lead_id:
             return []
         return self.packing_list_repo.list_for_lead(lead_id)
 
+<<<<<<< HEAD
+=======
+    def list_for_proforma(self, proforma_invoice_id: int, company_id: int) -> List[PackingList]:
+        return [pl for pl in self.packing_list_repo.list_for_proforma(proforma_invoice_id)
+                if pl.company_id == company_id]
+
+>>>>>>> origin/main
     # ---- permission --------------------------------------------------
     def _assert_can_modify(self, packing_list: PackingList, current_user: User):
         if current_user.is_admin:
@@ -1250,6 +1300,7 @@ class PackingListService:
         if packing_list.created_by != current_user.id:
             raise PermissionDeniedError("You can only manage packing lists you created yourself.")
 
+<<<<<<< HEAD
     # ---- number generation --------------------------------------------------
     def _generate_number(self, company_id: int, packing_list_date: str) -> str:
         """PL{YYYYMMDD}{seq} where seq is that day's packing list count + 1
@@ -1293,11 +1344,35 @@ class PackingListService:
                 "hsn_code": item.hsn_code, "pallets": "", "quantity_boxes": "",
                 "quantity_value": "", "unit": item.unit,
                 "net_weight_kg": "", "gross_weight_kg": "",
+=======
+    # ---- prefill / auto-generation from a proforma invoice --------------------------------------------------
+    def build_prefill_from_invoice(self, invoice: ProformaInvoice) -> dict:
+        """Caller must have already loaded `invoice` via
+        ProformaInvoiceService.get(...) so ownership is verified. One packing
+        row per invoice line; PCS and BOX PER PALLET aren't known to the PI,
+        so they start blank for the user to fill in."""
+        fields = {
+            "proforma_invoice_id": invoice.id,
+            "lead_id": invoice.lead_id,
+            "packing_date": invoice.invoice_date,
+            "remarks": "MADE IN INDIA",
+        }
+        items = [
+            {
+                "description": item.product_name,
+                "box_per_pallet": "",
+                "model_name": "",
+                "no_of_pallet": item.pallets or "",
+                "boxes": item.quantity_boxes or "",
+                "pcs": "",
+                "quantity_value": item.quantity_value or "",
+>>>>>>> origin/main
             }
             for item in invoice.items
         ]
         return {"fields": fields, "items": items}
 
+<<<<<<< HEAD
     # ---- validation --------------------------------------------------
     def _build_items(self, company_id: int, raw_items: list) -> List[PackingListItem]:
         items = []
@@ -1365,10 +1440,66 @@ class PackingListService:
         if lead_id is not None:
             # Only trust a lead from this same company - otherwise a crafted
             # lead_id could attach this packing list to another company's lead.
+=======
+    def create_from_invoice(self, current_user: User, invoice: ProformaInvoice) -> PackingList:
+        """The 'generate automatically after the proforma invoice' path -
+        same data as build_prefill_from_invoice, saved without a form trip."""
+        built = self.build_prefill_from_invoice(invoice)
+        return self.create(current_user, built["fields"], built["items"])
+
+    # ---- validation --------------------------------------------------
+    def _build_items(self, raw_items: list) -> List[PackingListItem]:
+        items = []
+        for i, raw in enumerate(raw_items, start=1):
+            description = (raw.get("description") or "").strip()
+            if not description:
+                continue
+
+            def _optional_float(key):
+                value = raw.get(key)
+                if value in (None, ""):
+                    return None
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    raise ValidationError(f"Row {i} ('{description}'): '{key}' must be a number.")
+
+            items.append(PackingListItem(
+                id=None, packing_list_id=None, sr_no=i, description=description,
+                box_per_pallet=_optional_float("box_per_pallet"),
+                model_name=(raw.get("model_name") or "").strip() or None,
+                no_of_pallet=_optional_float("no_of_pallet"),
+                boxes=_optional_float("boxes"),
+                pcs=_optional_float("pcs"),
+                quantity_value=_optional_float("quantity_value"),
+            ))
+        if not items:
+            raise ValidationError("At least one packing line is compulsory.")
+        return items
+
+    def _build_header(self, current_user: User, fields: dict, items: List[PackingListItem]) -> PackingList:
+        packing_date = (str(fields.get("packing_date") or "")).strip() or date.today().isoformat()
+
+        proforma_invoice_id = int(fields["proforma_invoice_id"]) if fields.get("proforma_invoice_id") else None
+        proforma_invoice_no = None
+        lead_id = int(fields["lead_id"]) if fields.get("lead_id") else None
+        if proforma_invoice_id is not None:
+            # Only trust an invoice from this same company - otherwise a
+            # crafted id could attach this document to another company's PI.
+            invoice = self.invoice_repo.get_by_id(proforma_invoice_id)
+            if not invoice or invoice.company_id != current_user.company_id:
+                proforma_invoice_id = None
+            else:
+                proforma_invoice_no = invoice.invoice_number
+                lead_id = lead_id or invoice.lead_id
+
+        if lead_id is not None:
+>>>>>>> origin/main
             lead = self.lead_repo.get_by_id(lead_id)
             if not lead or lead.company_id != current_user.company_id:
                 lead_id = None
 
+<<<<<<< HEAD
         proforma_invoice_id = int(fields["proforma_invoice_id"]) if fields.get("proforma_invoice_id") else None
         if proforma_invoice_id is not None:
             # Only trust a proforma invoice from this same company - same reasoning as lead_id above.
@@ -1394,23 +1525,38 @@ class PackingListService:
             final_destination=(fields.get("final_destination") or "").strip() or None,
             container_details=(fields.get("container_details") or "").strip() or None,
             terms_of_delivery=(fields.get("terms_of_delivery") or "").strip() or None,
+=======
+        return PackingList(
+            id=None, company_id=current_user.company_id, packing_date=packing_date,
+            created_by=current_user.id, proforma_invoice_id=proforma_invoice_id,
+            proforma_invoice_no=proforma_invoice_no, lead_id=lead_id,
+>>>>>>> origin/main
             remarks=(fields.get("remarks") or "").strip() or None,
             items=items,
         )
 
     # ---- writes --------------------------------------------------
     def create(self, current_user: User, fields: dict, raw_items: list) -> PackingList:
+<<<<<<< HEAD
         items = self._build_items(current_user.company_id, raw_items)
         packing_list = self._build_header(current_user, fields, items)
         packing_list.packing_list_number = self._generate_number(
             current_user.company_id, packing_list.packing_list_date
         )
+=======
+        items = self._build_items(raw_items)
+        packing_list = self._build_header(current_user, fields, items)
+>>>>>>> origin/main
         return self.packing_list_repo.create(packing_list)
 
     def update(self, current_user: User, packing_list_id: int, fields: dict, raw_items: list) -> PackingList:
         existing = self.get(packing_list_id, current_user.company_id)
         self._assert_can_modify(existing, current_user)
+<<<<<<< HEAD
         items = self._build_items(current_user.company_id, raw_items)
+=======
+        items = self._build_items(raw_items)
+>>>>>>> origin/main
         packing_list = self._build_header(current_user, fields, items)
         self.packing_list_repo.update(packing_list_id, packing_list)
         return self.get(packing_list_id, current_user.company_id)
