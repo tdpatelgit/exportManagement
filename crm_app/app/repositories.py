@@ -17,7 +17,7 @@ from typing import Optional, List
 from app.database import Database
 from app.models import (
     Tenant, User, Lead, Client, ContactPerson, Communication,
-    PaymentEntry, DocumentEntry, OurCompany, Product, ProductFolder, Design,
+    PaymentEntry, DocumentEntry, OurCompany, Category, Product, ProductFolder, Design,
     Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
     PackingList, PackingListItem,
 )
@@ -579,6 +579,85 @@ class CompanyRepository:
 # ============================================================
 # PRODUCT CATALOG (products -> folders -> designs)
 # ============================================================
+class CategoryRepository:
+    """Categories are folders at the catalog root that group products, and
+    (like sub categories inside a product) nest to any depth via a
+    self-referencing parent_id."""
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    def get_by_id(self, category_id: int) -> Optional[Category]:
+        row = self.db.query_one("SELECT * FROM categories WHERE id = ?", (category_id,))
+        return Category.from_row(row) if row else None
+
+    def list_all(self, company_id: int) -> List[Category]:
+        """Every category, flat - powers the product form's category picker."""
+        rows = self.db.query(
+            "SELECT * FROM categories WHERE company_id = ? ORDER BY name", (company_id,)
+        )
+        return [Category.from_row(r) for r in rows]
+
+    def list_children(self, company_id: int, parent_id: Optional[int]) -> List[Category]:
+        if parent_id is None:
+            rows = self.db.query(
+                "SELECT * FROM categories WHERE company_id = ? AND parent_id IS NULL ORDER BY name",
+                (company_id,),
+            )
+        else:
+            rows = self.db.query(
+                "SELECT * FROM categories WHERE company_id = ? AND parent_id = ? ORDER BY name",
+                (company_id, parent_id),
+            )
+        return [Category.from_row(r) for r in rows]
+
+    def list_ancestors(self, category_id: int) -> List[Category]:
+        """Walks parent_id up to the catalog root - powers the breadcrumb trail."""
+        trail = []
+        current = self.get_by_id(category_id)
+        while current:
+            trail.append(current)
+            current = self.get_by_id(current.parent_id) if current.parent_id else None
+        trail.reverse()
+        return trail
+
+    def list_descendant_ids(self, category_id: int) -> List[int]:
+        """category_id plus every category nested under it, at any depth -
+        used to block moving a category inside its own subtree."""
+        rows = self.db.query(
+            """WITH RECURSIVE subtree(id) AS (
+                   SELECT ?
+                   UNION ALL
+                   SELECT c.id FROM categories c JOIN subtree s ON c.parent_id = s.id
+               )
+               SELECT id FROM subtree""",
+            (category_id,),
+        )
+        return [r["id"] for r in rows]
+
+    def create(self, company_id: int, name: str, parent_id: Optional[int] = None) -> Category:
+        new_id = self.db.execute(
+            "INSERT INTO categories (company_id, name, parent_id) VALUES (?, ?, ?)",
+            (company_id, name, parent_id),
+        )
+        return self.get_by_id(new_id)
+
+    def update(self, category_id: int, fields: dict) -> None:
+        """fields may include name and/or parent_id."""
+        columns = ", ".join(f"{k} = ?" for k in fields)
+        self.db.execute(
+            f"UPDATE categories SET {columns} WHERE id = ?",
+            (*fields.values(), category_id),
+        )
+
+    def delete(self, category_id: int) -> None:
+        """Cascades to subcategories and their products via ON DELETE CASCADE
+        at the DB level, but the service walks the subtree first to clean up
+        each product's design image files and document line references, the
+        same way ProductFolderRepository.delete does for sub categories."""
+        self.db.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+
+
 class ProductRepository:
     def __init__(self, db: Database):
         self.db = db
@@ -593,15 +672,29 @@ class ProductRepository:
         )
         return [Product.from_row(r) for r in rows]
 
+    def list_in_category(self, company_id: int, category_id: Optional[int]) -> List[Product]:
+        """Products sitting in one category - category_id=None is the catalog root."""
+        if category_id is None:
+            rows = self.db.query(
+                "SELECT * FROM products WHERE company_id = ? AND category_id IS NULL ORDER BY product_name",
+                (company_id,),
+            )
+        else:
+            rows = self.db.query(
+                "SELECT * FROM products WHERE company_id = ? AND category_id = ? ORDER BY product_name",
+                (company_id, category_id),
+            )
+        return [Product.from_row(r) for r in rows]
+
     def create(self, product: Product) -> Product:
         new_id = self.db.execute(
             """INSERT INTO products
-               (company_id, product_name, description, hsn_code,
-                gst_percent, igst_percent, sgst_percent, cgst_percent,
+               (company_id, category_id, product_name, description, hsn_code,
+                igst_percent, sgst_percent, cgst_percent,
                 packing, quantity, alternate_quantity, unit, weight_class)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (product.company_id, product.product_name, product.description, product.hsn_code,
-             product.gst_percent, product.igst_percent, product.sgst_percent, product.cgst_percent,
+            (product.company_id, product.category_id, product.product_name, product.description,
+             product.hsn_code, product.igst_percent, product.sgst_percent, product.cgst_percent,
              product.packing, product.quantity, product.alternate_quantity, product.unit, product.weight_class),
         )
         return self.get_by_id(new_id)

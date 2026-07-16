@@ -11,11 +11,11 @@
   <div class="topbar-actions">
     {% if not current_folder %}
     <a href="{{ url_for('products.edit_product', product_id=product.id) }}" class="btn btn-ghost">Edit product</a>
-    <form method="POST" action="{{ url_for('products.delete_product', product_id=product.id) }}" onsubmit="return confirm('Delete this product and every folder and design inside it?');" style="display:inline;">
+    <form method="POST" action="{{ url_for('products.delete_product', product_id=product.id) }}" onsubmit="return confirm('Delete this product and every sub category and design inside it?');" style="display:inline;">
       <button type="submit" class="btn btn-danger">Delete product</button>
     </form>
     {% endif %}
-    <a href="{{ url_for('products.new_folder', product_id=product.id, parent_id=current_folder.id if current_folder else None) }}" class="btn btn-ghost">+ New folder</a>
+    <a href="{{ url_for('products.new_folder', product_id=product.id, parent_id=current_folder.id if current_folder else None) }}" class="btn btn-ghost">+ New sub category</a>
     <a href="{{ url_for('products.new_design', product_id=product.id, folder_id=current_folder.id if current_folder else None) }}" class="btn btn-primary">+ New design</a>
   </div>
   {% endif %}
@@ -23,6 +23,10 @@
 
 <div class="breadcrumb-trail">
   <a href="{{ url_for('products.list_products') }}">Products</a>
+  {% if category %}
+    <span class="crumb-sep">/</span>
+    <a href="{{ url_for('products.list_products', category_id=category.id) }}">{{ category.name }}</a>
+  {% endif %}
   <span class="crumb-sep">/</span>
   <a href="{{ url_for('products.view_product', product_id=product.id) }}">{{ product.product_name }}</a>
   {% for f in breadcrumb %}
@@ -37,10 +41,9 @@
   <div class="grid grid-2">
     <div><div class="text-sm text-soft">Description</div><div>{{ product.description or '—' }}</div></div>
     <div><div class="text-sm text-soft">HSN code</div><div>{{ product.hsn_code or '—' }}</div></div>
-    <div><div class="text-sm text-soft">GST</div><div>{{ (product.gst_percent ~ ' %') if product.gst_percent is not none else '—' }}</div></div>
+    <div><div class="text-sm text-soft">Category</div><div>{{ category.name if category else '— (catalog root)' }}</div></div>
     <div><div class="text-sm text-soft">IGST</div><div>{{ (product.igst_percent ~ ' %') if product.igst_percent is not none else '—' }}</div></div>
-    <div><div class="text-sm text-soft">SGST</div><div>{{ (product.sgst_percent ~ ' %') if product.sgst_percent is not none else '—' }}</div></div>
-    <div><div class="text-sm text-soft">CGST</div><div>{{ (product.cgst_percent ~ ' %') if product.cgst_percent is not none else '—' }}</div></div>
+    <div><div class="text-sm text-soft">SGST / CGST (half of IGST)</div><div>{{ (product.sgst_percent ~ ' %') if product.sgst_percent is not none else '—' }} / {{ (product.cgst_percent ~ ' %') if product.cgst_percent is not none else '—' }}</div></div>
     <div><div class="text-sm text-soft">Packing</div><div>{{ product.packing or '—' }}</div></div>
     <div><div class="text-sm text-soft">Quantity</div><div>{{ product.quantity or '—' }}</div></div>
     <div><div class="text-sm text-soft">Alternate quantity</div><div>{{ product.alternate_quantity or '—' }}{% if product.alternate_quantity %} {{ product.unit }}{% endif %}</div></div>
@@ -51,14 +54,14 @@
 
 {% if not subfolders and not designs %}
   <div class="empty-state">
-    {{ 'This folder is empty.' if current_folder else 'No folders or designs in this product yet.' }}
-    {% if current_user.is_admin %}Create a folder or add a design to get started.{% endif %}
+    {{ 'This sub category is empty.' if current_folder else 'No sub categories or designs in this product yet.' }}
+    {% if current_user.is_admin %}Create a sub category or add a design to get started.{% endif %}
   </div>
 {% endif %}
 
 {% if subfolders %}
 <div class="card">
-  <div class="card-header"><h3>Folders</h3></div>
+  <div class="card-header"><h3>Sub categories</h3></div>
   <div class="folder-grid">
     {% for folder in subfolders %}
     <div class="folder-tile">

@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}{{ 'Edit folder' if folder else 'New folder' }}{% endblock %}
+{% block title %}{{ 'Edit sub category' if folder else 'New sub category' }}{% endblock %}
 {% block content %}
 
 <div class="topbar">
   <div>
     <div class="eyebrow">Catalog · {{ product.product_name }}</div>
-    <h1>{{ 'Edit folder' if folder else 'New folder' }}</h1>
+    <h1>{{ 'Edit sub category' if folder else 'New sub category' }}</h1>
     <div class="text-sm text-soft">Inside: {{ parent.name if parent else product.product_name + ' (product root)' }}</div>
   </div>
 </div>
@@ -14,10 +14,10 @@
   <form method="POST">
     {% if not folder and parent %}<input type="hidden" name="parent_id" value="{{ parent.id }}">{% endif %}
     <div class="field">
-      <label for="name">Folder name<span class="required-mark">*</span></label>
+      <label for="name">Sub category name<span class="required-mark">*</span></label>
       <input type="text" id="name" name="name" required value="{{ folder.name if folder else '' }}">
     </div>
-    <button type="submit" class="btn btn-primary">{{ 'Save' if folder else 'Create folder' }}</button>
+    <button type="submit" class="btn btn-primary">{{ 'Save' if folder else 'Create sub category' }}</button>
     <a href="{{ url_for('products.view_product', product_id=product.id, folder_id=(folder.parent_id if folder else (parent.id if parent else None))) }}" class="btn btn-ghost">Cancel</a>
   </form>
 </div>

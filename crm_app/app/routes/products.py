@@ -1,14 +1,16 @@
 """
 app/routes/products.py
 ------------------------
-Product catalog, three levels deep:
-  - PRODUCT: the tax/HSN identity (name, description, HSN code, GST/IGST/
-    SGST/CGST percentages) AND the physical packing spec (packing, quantity,
-    alternate quantity, unit, weight class) that quotations, proforma
-    invoices and packing lists all read from - every design under a product
-    shares the same packing spec.
-  - FOLDER: organises designs inside a product; folders nest to any depth
-    but can only be created under a product.
+Product catalog: category / product / sub category / design.
+  - CATEGORY: a folder at the catalog root grouping products (products can
+    also sit directly at the root, uncategorised).
+  - PRODUCT: the tax/HSN identity (name, description, HSN code, IGST - with
+    SGST/CGST auto-calculated as half of IGST) AND the physical packing spec
+    (packing, quantity, alternate quantity, unit, weight class) that
+    quotations, proforma invoices and packing lists all read from - every
+    design under a product shares the same packing spec.
+  - SUB CATEGORY: organises designs inside a product like a folder; sub
+    categories nest to any depth but can only be created under a product.
   - DESIGN: the sellable leaf holding price and photos - what packing lists
     pick alongside the row's product.
 Everyone signed in can browse; only admins can create/edit/delete.
@@ -29,12 +31,10 @@ def _int_or_none(value):
 def _product_form_fields(form) -> dict:
     return {
         "product_name": form.get("product_name", ""),
+        "category_id": form.get("category_id", ""),
         "description": form.get("description", ""),
         "hsn_code": form.get("hsn_code", ""),
-        "gst_percent": form.get("gst_percent", ""),
         "igst_percent": form.get("igst_percent", ""),
-        "sgst_percent": form.get("sgst_percent", ""),
-        "cgst_percent": form.get("cgst_percent", ""),
         "packing": form.get("packing", ""),
         "quantity": form.get("quantity", ""),
         "alternate_quantity": form.get("alternate_quantity", ""),
@@ -53,19 +53,99 @@ def _design_form_fields(form) -> dict:
 
 
 # ============================================================
-# PRODUCTS (catalog root)
+# CATALOG ROOT (categories as folders + uncategorised products)
 # ============================================================
 @products_bp.route("/")
+@products_bp.route("/category/<int:category_id>")
 @login_required
-def list_products():
-    products = current_app.container.product_service.list_products(g.user.company_id)
-    return render_template("products/list.html", products=products)
+def list_products(category_id=None):
+    """The catalog root doubles as the category browser: the root shows
+    every top-level category (as a folder) plus the uncategorised products;
+    opening a category shows its subcategories and the products filed
+    directly inside it."""
+    container = current_app.container
+    try:
+        subcategories, products = container.product_service.list_catalog(g.user.company_id, category_id)
+        current_category = container.product_service.get_category(category_id, g.user.company_id) if category_id else None
+    except NotFoundError:
+        abort(404)
+    breadcrumb = container.product_service.category_breadcrumb(g.user.company_id, category_id)
+    return render_template("products/list.html", categories=subcategories, products=products,
+                            current_category=current_category, breadcrumb=breadcrumb)
 
 
+# ============================================================
+# CATEGORIES (nestable folders at the catalog root)
+# ============================================================
+@products_bp.route("/category/new", methods=["GET", "POST"])
+@admin_required
+def new_category():
+    container = current_app.container
+    parent_id = _int_or_none(request.args.get("parent_id") or request.form.get("parent_id"))
+    try:
+        parent = container.product_service.get_category(parent_id, g.user.company_id) if parent_id else None
+    except NotFoundError:
+        abort(404)
+
+    if request.method == "POST":
+        try:
+            category = container.product_service.create_category(
+                g.user, request.form.get("name", ""), parent_id=parent_id
+            )
+            flash(f"Category '{category.name}' created.", "success")
+            return redirect(url_for("products.list_products", category_id=category.id))
+        except (ValidationError, PermissionDeniedError) as e:
+            flash(str(e), "error")
+
+    return render_template("products/category_form.html", category=None, parent=parent)
+
+
+@products_bp.route("/category/<int:category_id>/edit", methods=["GET", "POST"])
+@admin_required
+def edit_category(category_id):
+    container = current_app.container
+    try:
+        category = container.product_service.get_category(category_id, g.user.company_id)
+    except NotFoundError:
+        abort(404)
+
+    if request.method == "POST":
+        try:
+            container.product_service.rename_category(g.user, category_id, request.form.get("name", ""))
+            flash("Category renamed.", "success")
+            return redirect(url_for("products.list_products", category_id=category.parent_id))
+        except (ValidationError, PermissionDeniedError) as e:
+            flash(str(e), "error")
+
+    parent = container.product_service.get_category(category.parent_id, g.user.company_id) if category.parent_id else None
+    return render_template("products/category_form.html", category=category, parent=parent)
+
+
+@products_bp.route("/category/<int:category_id>/delete", methods=["POST"])
+@admin_required
+def delete_category(category_id):
+    container = current_app.container
+    try:
+        category = container.product_service.get_category(category_id, g.user.company_id)
+        container.product_service.delete_category(g.user, category_id)
+        flash(f"Category '{category.name}' and everything inside it was deleted.", "success")
+        return redirect(url_for("products.list_products", category_id=category.parent_id))
+    except (ValidationError, PermissionDeniedError) as e:
+        flash(str(e), "error")
+    except NotFoundError:
+        abort(404)
+    return redirect(url_for("products.list_products"))
+
+
+# ============================================================
+# PRODUCTS (inside a category, or uncategorised at the root)
+# ============================================================
 @products_bp.route("/new", methods=["GET", "POST"])
 @admin_required
 def new_product():
     container = current_app.container
+    categories_tree = container.product_service.list_categories_tree(g.user.company_id)
+    preselected_category_id = _int_or_none(request.args.get("category_id"))
     if request.method == "POST":
         try:
             product = container.product_service.create_product(current_user=g.user, **_product_form_fields(request.form))
@@ -73,8 +153,10 @@ def new_product():
             return redirect(url_for("products.view_product", product_id=product.id))
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
-            return render_template("products/product_form.html", product=None, form_data=request.form), 400
-    return render_template("products/product_form.html", product=None, form_data=None)
+            return render_template("products/product_form.html", product=None, form_data=request.form,
+                                    categories_tree=categories_tree, preselected_category_id=preselected_category_id), 400
+    return render_template("products/product_form.html", product=None, form_data=None,
+                            categories_tree=categories_tree, preselected_category_id=preselected_category_id)
 
 
 @products_bp.route("/<int:product_id>")
@@ -88,11 +170,13 @@ def view_product(product_id, folder_id=None):
         product = container.product_service.get_product(product_id, g.user.company_id)
         subfolders, designs = container.product_service.list_contents(g.user.company_id, product_id, folder_id)
         current_folder = container.product_service.get_folder(folder_id, g.user.company_id) if folder_id else None
+        category = container.product_service.get_category(product.category_id, g.user.company_id) \
+            if product.category_id else None
     except NotFoundError:
         abort(404)
     breadcrumb = container.product_service.breadcrumb(g.user.company_id, folder_id)
     return render_template(
-        "products/detail.html", product=product, current_folder=current_folder,
+        "products/detail.html", product=product, category=category, current_folder=current_folder,
         breadcrumb=breadcrumb, subfolders=subfolders, designs=designs,
     )
 
@@ -105,6 +189,7 @@ def edit_product(product_id):
         product = container.product_service.get_product(product_id, g.user.company_id)
     except NotFoundError:
         abort(404)
+    categories_tree = container.product_service.list_categories_tree(g.user.company_id)
 
     if request.method == "POST":
         try:
@@ -116,7 +201,8 @@ def edit_product(product_id):
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
 
-    return render_template("products/product_form.html", product=product, form_data=None)
+    return render_template("products/product_form.html", product=product, form_data=None,
+                            categories_tree=categories_tree, preselected_category_id=product.category_id)
 
 
 @products_bp.route("/<int:product_id>/delete", methods=["POST"])
@@ -127,6 +213,7 @@ def delete_product(product_id):
         product = container.product_service.get_product(product_id, g.user.company_id)
         container.product_service.delete_product(g.user, product_id)
         flash(f"Product '{product.product_name}' and everything inside it was deleted.", "success")
+        return redirect(url_for("products.list_products", category_id=product.category_id))
     except (ValidationError, PermissionDeniedError) as e:
         flash(str(e), "error")
     except NotFoundError:
@@ -135,7 +222,8 @@ def delete_product(product_id):
 
 
 # ============================================================
-# FOLDERS (only ever inside a product)
+# SUB CATEGORIES (folders inside a product - the routes/table keep their
+# historical "folder" naming)
 # ============================================================
 @products_bp.route("/<int:product_id>/folder/new", methods=["GET", "POST"])
 @admin_required
@@ -154,7 +242,7 @@ def new_folder(product_id):
                 current_user=g.user, product_id=product_id,
                 name=request.form.get("name", ""), parent_id=parent_id,
             )
-            flash(f"Folder '{folder.name}' created.", "success")
+            flash(f"Sub category '{folder.name}' created.", "success")
             return redirect(url_for("products.view_product", product_id=product_id, folder_id=folder.id))
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
@@ -175,7 +263,7 @@ def edit_folder(folder_id):
     if request.method == "POST":
         try:
             container.product_service.rename_folder(g.user, folder_id, request.form.get("name", ""))
-            flash("Folder renamed.", "success")
+            flash("Sub category renamed.", "success")
             return redirect(url_for("products.view_product", product_id=folder.product_id,
                                      folder_id=folder.parent_id))
         except (ValidationError, PermissionDeniedError) as e:
@@ -192,7 +280,7 @@ def delete_folder(folder_id):
     try:
         folder = container.product_service.get_folder(folder_id, g.user.company_id)
         container.product_service.delete_folder(g.user, folder_id)
-        flash(f"Folder '{folder.name}' and everything inside it was deleted.", "success")
+        flash(f"Sub category '{folder.name}' and everything inside it was deleted.", "success")
         return redirect(url_for("products.view_product", product_id=folder.product_id,
                                  folder_id=folder.parent_id))
     except (ValidationError, PermissionDeniedError) as e:
@@ -300,7 +388,7 @@ def delete_design(design_id):
 def _product_json(p) -> dict:
     return {
         "id": p.id, "name": p.product_name, "description": p.description,
-        "hsn_code": p.hsn_code, "gst_percent": p.gst_percent,
+        "hsn_code": p.hsn_code, "category_id": p.category_id,
         "igst_percent": p.igst_percent, "sgst_percent": p.sgst_percent,
         "cgst_percent": p.cgst_percent,
         "packing": p.packing, "quantity": p.quantity, "alternate_quantity": p.alternate_quantity,

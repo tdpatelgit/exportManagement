@@ -18,7 +18,7 @@ from app.database import Database
 from app.repositories import (
     TenantRepository, SqliteUserRepository, SqliteLeadRepository, SqliteClientRepository,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
-    ProductRepository, ProductFolderRepository, DesignRepository,
+    CategoryRepository, ProductRepository, ProductFolderRepository, DesignRepository,
     QuotationRepository, ProformaInvoiceRepository, PackingListRepository,
 )
 from app.services import (
@@ -47,6 +47,7 @@ class ServiceContainer:
         self.payment_repo = PaymentRepository(db)
         self.document_repo = DocumentRepository(db)
         self.company_repo = CompanyRepository(db)
+        self.category_repo = CategoryRepository(db)
         self.product_repo = ProductRepository(db)
         self.product_folder_repo = ProductFolderRepository(db)
         self.design_repo = DesignRepository(db)
@@ -68,7 +69,7 @@ class ServiceContainer:
         self.company_service = CompanyService(self.company_repo)
         self.report_service = ReportService(db)
         self.product_service = ProductService(
-            self.product_repo, self.product_folder_repo, self.design_repo,
+            self.category_repo, self.product_repo, self.product_folder_repo, self.design_repo,
             Config.PRODUCT_UPLOAD_FOLDER, Config.ALLOWED_IMAGE_EXTENSIONS,
         )
         self.quotation_service = QuotationService(self.quotation_repo, self.product_repo, self.lead_repo)
