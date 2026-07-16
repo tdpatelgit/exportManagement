@@ -41,6 +41,10 @@
     <div><div class="text-sm text-soft">IGST</div><div>{{ (product.igst_percent ~ ' %') if product.igst_percent is not none else '—' }}</div></div>
     <div><div class="text-sm text-soft">SGST</div><div>{{ (product.sgst_percent ~ ' %') if product.sgst_percent is not none else '—' }}</div></div>
     <div><div class="text-sm text-soft">CGST</div><div>{{ (product.cgst_percent ~ ' %') if product.cgst_percent is not none else '—' }}</div></div>
+    <div><div class="text-sm text-soft">Packing</div><div>{{ product.packing or '—' }}</div></div>
+    <div><div class="text-sm text-soft">Quantity</div><div>{{ product.quantity or '—' }}</div></div>
+    <div><div class="text-sm text-soft">Alternate quantity</div><div>{{ product.alternate_quantity or '—' }}{% if product.alternate_quantity %} {{ product.unit }}{% endif %}</div></div>
+    <div><div class="text-sm text-soft">Weight class</div><div>{{ product.weight_class or '—' }}</div></div>
   </div>
 </div>
 {% endif %}
@@ -85,8 +89,6 @@
         <tr>
           <th>Photo</th>
           <th>Design name</th>
-          <th>Packing</th>
-          <th>Quantity</th>
           <th>Price (USD)</th>
           <th></th>
         </tr>
@@ -102,8 +104,6 @@
             {% endif %}
           </td>
           <td><strong>{{ design.design_name }}</strong></td>
-          <td class="text-sm">{{ design.packing or '—' }}</td>
-          <td class="text-sm">{{ design.quantity or '—' }}</td>
           <td class="text-sm">{{ '$ {:,.2f}'.format(design.price_usd) if design.price_usd is not none else '—' }}</td>
           <td><a href="{{ url_for('products.view_design', design_id=design.id) }}" class="text-sm">Open →</a></td>
         </tr>

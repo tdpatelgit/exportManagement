@@ -597,10 +597,12 @@ class ProductRepository:
         new_id = self.db.execute(
             """INSERT INTO products
                (company_id, product_name, description, hsn_code,
-                gst_percent, igst_percent, sgst_percent, cgst_percent)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                gst_percent, igst_percent, sgst_percent, cgst_percent,
+                packing, quantity, alternate_quantity, unit, weight_class)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (product.company_id, product.product_name, product.description, product.hsn_code,
-             product.gst_percent, product.igst_percent, product.sgst_percent, product.cgst_percent),
+             product.gst_percent, product.igst_percent, product.sgst_percent, product.cgst_percent,
+             product.packing, product.quantity, product.alternate_quantity, product.unit, product.weight_class),
         )
         return self.get_by_id(new_id)
 
@@ -722,12 +724,11 @@ class DesignRepository:
     def create(self, design: Design) -> Design:
         new_id = self.db.execute(
             """INSERT INTO designs
-               (company_id, product_id, folder_id, design_name, description, packing, quantity,
-                alternate_quantity, unit, weight_class, price_usd, photo_path, dimension_photo_path, alt_text)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (company_id, product_id, folder_id, design_name, description,
+                price_usd, photo_path, dimension_photo_path, alt_text)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (design.company_id, design.product_id, design.folder_id, design.design_name,
-             design.description, design.packing, design.quantity, design.alternate_quantity,
-             design.unit, design.weight_class, design.price_usd, design.photo_path,
+             design.description, design.price_usd, design.photo_path,
              design.dimension_photo_path, design.alt_text),
         )
         return self.get_by_id(new_id)

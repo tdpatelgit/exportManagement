@@ -67,6 +67,29 @@ def _form_context():
     return leads, quotations, bank_options
 
 
+def _alt_qty_map(items) -> dict:
+    """Same purpose as quotations._alt_qty_map - reproduces the Boxes x
+    Alternate Quantity auto-calc for rows already tied to a catalog product."""
+    container = current_app.container
+    result = {}
+    for item in items:
+        raw_id = item.get("product_id") if isinstance(item, dict) else item.product_id
+        if not raw_id or raw_id in result:
+            continue
+        try:
+            product_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if product_id in result:
+            continue
+        try:
+            product = container.product_service.get_product(product_id, g.user.company_id)
+            result[product_id] = product.alternate_quantity or ""
+        except NotFoundError:
+            pass
+    return result
+
+
 @proforma_invoices_bp.route("/")
 @login_required
 def list_proforma_invoices():
@@ -91,7 +114,8 @@ def new_proforma_invoice():
             items = _extract_items(request.form)
             return render_template(
                 "proforma_invoices/form.html", invoice=None, leads=leads, quotations=quotations,
-                bank_options=bank_options, form_data=request.form, form_items=items, today=date.today().isoformat(),
+                bank_options=bank_options, form_data=request.form, form_items=items,
+                alt_qty_map=_alt_qty_map(items), today=date.today().isoformat(),
             ), 400
 
     leads, quotations, bank_options = _form_context()
@@ -120,7 +144,7 @@ def new_proforma_invoice():
     return render_template(
         "proforma_invoices/form.html", invoice=None, leads=leads, quotations=quotations,
         bank_options=bank_options, form_data=prefill, form_items=form_items,
-        today=date.today().isoformat(),
+        alt_qty_map=_alt_qty_map(form_items) if form_items else {}, today=date.today().isoformat(),
     )
 
 
@@ -159,14 +183,15 @@ def edit_proforma_invoice(proforma_invoice_id):
             items = _extract_items(request.form)
             return render_template(
                 "proforma_invoices/form.html", invoice=invoice, leads=leads, quotations=quotations,
-                bank_options=bank_options, form_data=request.form, form_items=items, today=date.today().isoformat(),
+                bank_options=bank_options, form_data=request.form, form_items=items,
+                alt_qty_map=_alt_qty_map(items), today=date.today().isoformat(),
             ), 400
 
     leads, quotations, bank_options = _form_context()
     return render_template(
         "proforma_invoices/form.html", invoice=invoice, leads=leads, quotations=quotations,
         bank_options=bank_options, form_data=None, form_items=None,
-        today=date.today().isoformat(),
+        alt_qty_map=_alt_qty_map(invoice.items), today=date.today().isoformat(),
     )
 
 

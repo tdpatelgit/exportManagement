@@ -75,7 +75,8 @@
         <tbody id="items-body">
           {% set rows = form_items if form_items is not none else (packing_list.items if packing_list else []) %}
           {% for row in rows %}
-          <tr class="item-row">
+          {% set pm = product_map.get(row.product_id | int) if row.product_id else None %}
+          <tr class="item-row" data-alt-qty="{{ (pm.alternate_quantity or '') if pm else '' }}" data-pcs-per-box="{{ (pm.quantity or '') if pm else '' }}">
             <td class="js-sr">{{ loop.index }}</td>
             <td>
               <input type="hidden" name="item_product_id[]" class="js-product-id" value="{{ row.product_id or '' }}">
@@ -95,7 +96,7 @@
             <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" value="{{ row.quantity_value or '' }}"></td>
             <td>
               <select name="item_unit[]" class="js-unit">
-                {% for u in DESIGN_UNITS %}
+                {% for u in PRODUCT_UNITS %}
                   <option value="{{ u }}" {{ 'selected' if row.unit == u }}>{{ u }}</option>
                 {% endfor %}
               </select>
@@ -109,7 +110,7 @@
       </table>
     </div>
     <button type="button" class="btn btn-ghost btn-sm" id="add-row-btn">+ Add design line</button>
-    <p class="hint">Boxes is compulsory; Qty fills in automatically and doesn't need to be typed. Picking a design fills in Box/plt from its Packing figure (its boxes-per-pallet count). Fill in either Boxes or Pallets — the other one, plus Pcs and Qty, is worked out from Box/plt and the design's per-box figures (or a "2 PCS = 0.72 SQM" note in the description). Pallets locks to the calculated value whenever Boxes divides evenly by Box/plt; it only opens up for you to type in by hand when there's a partial last pallet. Every auto-filled value stays editable.</p>
+    <p class="hint">Boxes is compulsory; Qty fills in automatically and doesn't need to be typed. Picking a product fills in Box/plt, Unit and the per-box figures from its packing spec (shared by every design under it). Fill in either Boxes or Pallets — the other one, plus Pcs and Qty, is worked out from Box/plt and the product's per-box figures (or a "2 PCS = 0.72 SQM" note in the description). Pallets locks to the calculated value whenever Boxes divides evenly by Box/plt; it only opens up for you to type in by hand when there's a partial last pallet. Every auto-filled value stays editable.</p>
     <div class="flex-between" style="margin-top:14px;">
       <div></div>
       <div class="text-sm">
@@ -188,7 +189,7 @@
       <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty"></td>
       <td>
         <select name="item_unit[]" class="js-unit">
-          {% for u in DESIGN_UNITS %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
+          {% for u in PRODUCT_UNITS %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
         </select>
       </td>
       <td><input type="number" step="0.01" name="item_net_weight_kg[]" class="js-net"></td>
@@ -219,10 +220,11 @@
     document.getElementById('total-gross-display').textContent = gross.toFixed(2);
   }
 
-  // Per-box factors for a row: from the picked design (dataset) when known,
-  // otherwise parsed from a "2 PCS = 0.72 SQM" pattern in the description -
-  // that fallback is what keeps the auto-calc alive on rows prefilled from a
-  // proforma invoice, reopened for editing, or typed in by hand.
+  // Per-box factors for a row: from the picked product (dataset) when
+  // known - every design under a product shares the same packing spec -
+  // otherwise parsed from a "2 PCS = 0.72 SQM" pattern in the description.
+  // That fallback is what keeps the auto-calc alive on rows prefilled from
+  // a proforma invoice, reopened for editing, or typed in by hand.
   function packInfo(tr) {
     const desc = tr.querySelector('.js-product-name').value || '';
     const m = desc.match(/([\d.]+)\s*PCS?\s*=\s*([\d.]+)\s*(SQM|LM)/i);
@@ -358,31 +360,45 @@
     }
     const table = document.createElement('table');
     table.className = 'ledger';
-    table.innerHTML = '<thead><tr><th>Product</th><th>HSN code</th><th></th></tr></thead>';
+    table.innerHTML = '<thead><tr><th>Product</th><th>HSN code</th><th>Box/plt</th><th>Pcs/box</th><th>Alt qty / box</th><th></th></tr></thead>';
     const tbody = document.createElement('tbody');
     filtered.forEach(p => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td><strong></strong></td>
         <td class="text-sm">${p.hsn_code || '—'}</td>
+        <td class="text-sm">${p.packing || '—'}</td>
+        <td class="text-sm">${p.quantity || '—'}</td>
+        <td class="text-sm">${p.alternate_quantity ? `${p.alternate_quantity} ${p.unit || ''}` : '—'}</td>
         <td><button type="button" class="btn btn-primary btn-sm">Select</button></td>`;
       tr.querySelector('strong').textContent = p.name;
-      tr.querySelector('button').addEventListener('click', () => {
-        if (!activeRow) return;
-        activeRow.querySelector('.js-product-id').value = p.id;
-        activeRow.querySelector('.js-product-name').value = p.name;
-        activeRow.querySelector('.js-hsn').value = p.hsn_code || '';
-        // A design belongs to one product - clear any design picked for a different product.
-        activeRow.querySelector('.js-design-id').value = '';
-        activeRow.querySelector('.js-design-name').value = '';
-        delete activeRow.dataset.altQty;
-        productOverlay.hidden = true;
-      });
+      tr.querySelector('button').addEventListener('click', () => selectProduct(p));
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
     productListEl.innerHTML = '';
     productListEl.appendChild(table);
+  }
+
+  function selectProduct(p) {
+    if (!activeRow) return;
+    activeRow.querySelector('.js-product-id').value = p.id;
+    activeRow.querySelector('.js-product-name').value = p.name;
+    activeRow.querySelector('.js-hsn').value = p.hsn_code || '';
+    // A design belongs to one product - clear any design picked for a different product.
+    activeRow.querySelector('.js-design-id').value = '';
+    activeRow.querySelector('.js-design-name').value = '';
+    // The product carries the packing spec shared by every design under it
+    // (Box/plt, per-box Pcs/Qty figures, Unit) - prefill the row from it the
+    // same way picking a product fills in the HSN code.
+    if (p.unit) activeRow.querySelector('.js-unit').value = p.unit;
+    activeRow.dataset.altQty = parseFloat(p.alternate_quantity) || '';
+    activeRow.dataset.pcsPerBox = parseFloat(p.quantity) || '';
+    const boxPerPallet = parseFloat(p.packing) || null;
+    if (boxPerPallet) activeRow.querySelector('.js-box-per-pallet').value = boxPerPallet;
+    recalcRow(activeRow);
+    recalcTotals();
+    productOverlay.hidden = true;
   }
 
   // ---- design picker modal (browses the row's product folder tree) --------------------------------------------------
@@ -442,16 +458,14 @@
       } else {
         const table = document.createElement('table');
         table.className = 'ledger';
-        table.innerHTML = '<thead><tr><th></th><th>Design</th><th>Box/plt</th><th>Pcs/box</th><th>Alt qty / box</th><th></th></tr></thead>';
+        table.innerHTML = '<thead><tr><th></th><th>Design</th><th>Price (USD)</th><th></th></tr></thead>';
         const tbody = document.createElement('tbody');
         data.designs.forEach(d => {
           const tr = document.createElement('tr');
           tr.innerHTML = `
             <td>${d.photo_url ? `<img class="thumb" src="${d.photo_url}">` : ''}</td>
             <td><strong></strong></td>
-            <td class="text-sm">${d.packing || '—'}</td>
-            <td class="text-sm">${d.quantity || '—'}</td>
-            <td class="text-sm">${d.alternate_quantity ? `${d.alternate_quantity} ${d.unit || ''}` : '—'}</td>
+            <td class="text-sm">${d.price_usd != null ? '$ ' + Number(d.price_usd).toFixed(2) : '—'}</td>
             <td><button type="button" class="btn btn-primary btn-sm">Select</button></td>`;
           tr.querySelector('strong').textContent = d.name;
           tr.querySelector('button').addEventListener('click', () => selectDesign(d));
@@ -464,22 +478,13 @@
     });
   }
 
+  // A design is just the specific finish/color variant picked for the row's
+  // description - its packing spec (Box/plt, per-box figures, Unit) comes
+  // from the row's PRODUCT instead, set when the product was chosen above.
   function selectDesign(d) {
     if (!activeRow) return;
     activeRow.querySelector('.js-design-id').value = d.id;
     activeRow.querySelector('.js-design-name').value = d.name;
-    // The design records what its quantity is measured in - prefill the
-    // Unit column so it doesn't have to be picked by hand every time.
-    if (d.unit) activeRow.querySelector('.js-unit').value = d.unit;
-    activeRow.dataset.altQty = parseFloat(d.alternate_quantity) || '';
-    activeRow.dataset.pcsPerBox = parseFloat(d.quantity) || '';
-    // Design.packing is the boxes-per-pallet count for this design (e.g.
-    // "5" boxes make up one pallet) - it feeds the Box/plt field directly,
-    // same as picking a product fills in the HSN code.
-    const boxPerPallet = parseFloat(d.packing) || null;
-    if (boxPerPallet) activeRow.querySelector('.js-box-per-pallet').value = boxPerPallet;
-    recalcRow(activeRow);
-    recalcTotals();
     designOverlay.hidden = true;
   }
 

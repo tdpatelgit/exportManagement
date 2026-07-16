@@ -69,6 +69,28 @@ def _form_context():
     return leads, invoices
 
 
+def _product_map(items) -> dict:
+    """Maps product_id -> that Product, so the form can prefill each row's
+    packing-spec dataset attributes (drives the Boxes-based Qty/Pcs/Box-per-
+    pallet auto-calc, same as _alt_qty_map on the quotation/proforma forms)
+    for rows already tied to a catalog product."""
+    container = current_app.container
+    result = {}
+    for item in items:
+        raw_id = item.get("product_id") if isinstance(item, dict) else item.product_id
+        if not raw_id or raw_id in result:
+            continue
+        try:
+            product_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        try:
+            result[product_id] = container.product_service.get_product(product_id, g.user.company_id)
+        except NotFoundError:
+            pass
+    return result
+
+
 @packing_lists_bp.route("/")
 @login_required
 def list_packing_lists():
@@ -90,9 +112,10 @@ def new_packing_list():
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
             leads, invoices = _form_context()
+            items = _extract_items(request.form)
             return render_template(
                 "packing_lists/form.html", packing_list=None, leads=leads, invoices=invoices,
-                form_data=request.form, form_items=_extract_items(request.form),
+                form_data=request.form, form_items=items, product_map=_product_map(items),
                 today=date.today().isoformat(),
             ), 400
 
@@ -118,7 +141,8 @@ def new_packing_list():
             pass
     return render_template(
         "packing_lists/form.html", packing_list=None, leads=leads, invoices=invoices,
-        form_data=prefill, form_items=form_items, today=date.today().isoformat(),
+        form_data=prefill, form_items=form_items,
+        product_map=_product_map(form_items) if form_items else {}, today=date.today().isoformat(),
     )
 
 
@@ -154,16 +178,18 @@ def edit_packing_list(packing_list_id):
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
             leads, invoices = _form_context()
+            items = _extract_items(request.form)
             return render_template(
                 "packing_lists/form.html", packing_list=packing_list, leads=leads, invoices=invoices,
-                form_data=request.form, form_items=_extract_items(request.form),
+                form_data=request.form, form_items=items, product_map=_product_map(items),
                 today=date.today().isoformat(),
             ), 400
 
     leads, invoices = _form_context()
     return render_template(
         "packing_lists/form.html", packing_list=packing_list, leads=leads, invoices=invoices,
-        form_data=None, form_items=None, today=date.today().isoformat(),
+        form_data=None, form_items=None, product_map=_product_map(packing_list.items),
+        today=date.today().isoformat(),
     )
 
 

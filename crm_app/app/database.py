@@ -40,7 +40,7 @@ from datetime import datetime
 # Because `_migrate` is idempotent and runs on every startup AND on every
 # restore, any backup - however old - is carried forward through the whole
 # chain of steps, never discarded.
-SCHEMA_VERSION = 2  # v2: designs.unit (what a design's quantity is measured in)
+SCHEMA_VERSION = 3  # v3: packing/quantity/alternate_quantity/unit/weight_class move from designs to products
 
 
 class Database:
@@ -165,6 +165,93 @@ class Database:
             for column in ("box_per_pallet", "pcs"):
                 if existing and column not in existing:
                     conn.execute(f"ALTER TABLE packing_list_items ADD COLUMN {column} REAL")
+
+            # ---- PACKING SPEC MOVES FROM DESIGN TO PRODUCT ----
+            # packing / quantity / alternate_quantity / unit / weight_class
+            # describe a PRODUCT's physical packing (its box config, unit of
+            # measure) - they don't vary by design/finish, so they move up
+            # from `designs` to `products` once. Live data is forward-
+            # migrated, not discarded: each product backfills these fields
+            # from whichever of its designs happens to carry them (first by
+            # id), then the columns are dropped from `designs`. Recognised
+            # by `packing` still being a column on `designs` - true whether
+            # or not that design table ever got `unit` added in an earlier
+            # run, so the backfill below tolerates either case.
+            designs_existing = {r["name"] for r in conn.execute("PRAGMA table_info(designs)")}
+            if designs_existing and "packing" in designs_existing:
+                has_unit = "unit" in designs_existing
+
+                products_existing = {r["name"] for r in conn.execute("PRAGMA table_info(products)")}
+                if "packing" not in products_existing:
+                    conn.execute("ALTER TABLE products ADD COLUMN packing TEXT")
+                if "quantity" not in products_existing:
+                    conn.execute("ALTER TABLE products ADD COLUMN quantity TEXT")
+                if "alternate_quantity" not in products_existing:
+                    conn.execute("ALTER TABLE products ADD COLUMN alternate_quantity TEXT")
+                if "unit" not in products_existing:
+                    conn.execute("ALTER TABLE products ADD COLUMN unit TEXT NOT NULL DEFAULT 'SQM'")
+                if "weight_class" not in products_existing:
+                    conn.execute("ALTER TABLE products ADD COLUMN weight_class TEXT")
+
+                # Backfill: one representative design's value per product
+                # (first by id that has a non-null value), only where the
+                # product doesn't already have a value of its own.
+                for field in ("packing", "quantity", "alternate_quantity", "weight_class"):
+                    conn.execute(f"""
+                        UPDATE products SET {field} = (
+                            SELECT d.{field} FROM designs d
+                            WHERE d.product_id = products.id AND d.{field} IS NOT NULL
+                            ORDER BY d.id LIMIT 1
+                        )
+                        WHERE {field} IS NULL
+                    """)
+                if has_unit:
+                    conn.execute("""
+                        UPDATE products SET unit = (
+                            SELECT d.unit FROM designs d
+                            WHERE d.product_id = products.id
+                            ORDER BY d.id LIMIT 1
+                        )
+                        WHERE EXISTS (SELECT 1 FROM designs d WHERE d.product_id = products.id)
+                    """)
+
+                # Rebuild `designs` without the five columns that just moved
+                # up - other tables' FKs to designs(id) (packing_list_items)
+                # must not get silently rewritten to the "_old" table, hence
+                # the same foreign_keys/legacy_alter_table dance used
+                # elsewhere in this file.
+                conn.commit()
+                conn.execute("PRAGMA foreign_keys = OFF")
+                conn.execute("PRAGMA legacy_alter_table = ON")
+                conn.execute("ALTER TABLE designs RENAME TO designs_old")
+                conn.execute("""
+                    CREATE TABLE designs (
+                        id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                        company_id              INTEGER NOT NULL REFERENCES tenants(id),
+                        product_id              INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+                        folder_id               INTEGER REFERENCES product_folders(id) ON DELETE CASCADE,
+                        design_name             TEXT NOT NULL,
+                        description             TEXT,
+                        price_usd               REAL,
+                        photo_path              TEXT,
+                        dimension_photo_path    TEXT,
+                        alt_text                TEXT,
+                        created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+                        updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
+                    )
+                """)
+                conn.execute("""
+                    INSERT INTO designs (id, company_id, product_id, folder_id, design_name, description,
+                                          price_usd, photo_path, dimension_photo_path, alt_text, created_at, updated_at)
+                    SELECT id, company_id, product_id, folder_id, design_name, description,
+                           price_usd, photo_path, dimension_photo_path, alt_text, created_at, updated_at
+                    FROM designs_old
+                """)
+                conn.execute("DROP TABLE designs_old")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_designs_product ON designs(product_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_designs_folder ON designs(folder_id)")
+                conn.execute("PRAGMA legacy_alter_table = OFF")
+                conn.execute("PRAGMA foreign_keys = ON")
 
             # The original `leads.status` CHECK constraint didn't allow
             # 'in_client', so converting a lead to a client crashed on the

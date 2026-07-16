@@ -139,10 +139,10 @@ CLIENT_TYPES = ["Supplier", "Exporter", "Buyer"]
 
 COMMUNICATION_MODES = ["WhatsApp", "WeChat", "Call", "Email", "In Person", "Other"]
 
-# What a design's quantity is measured in. One shared list drives the design
-# form, the Unit dropdowns on quotation/proforma/packing-list lines, and the
-# service-side fallback - so the choices can't drift apart.
-DESIGN_UNITS = ["SQM", "LM", "PCS", "KG", "SET"]
+# What a product's quantity is measured in. One shared list drives the
+# product form, the Unit dropdowns on quotation/proforma/packing-list lines,
+# and the service-side fallback - so the choices can't drift apart.
+PRODUCT_UNITS = ["SQM", "LM", "PCS", "KG", "SET"]
 
 
 @dataclass
@@ -326,9 +326,11 @@ class OurCompany:
 
 @dataclass
 class Product:
-    """Top level of the catalog: the tax/HSN identity that quotations and
-    proforma invoices bill against. Folders and designs live underneath it;
-    price, packing and photos belong to the Design, not the Product."""
+    """Top level of the catalog: the tax/HSN identity AND the physical
+    packing spec (packing, quantity, alternate quantity, unit, weight class)
+    that quotations, proforma invoices and packing lists all read from -
+    every design under a product shares the same packing spec. Folders and
+    designs live underneath it; price and photos belong to the Design."""
     id: Optional[int]
     company_id: int
     product_name: str
@@ -338,6 +340,11 @@ class Product:
     igst_percent: Optional[float] = None
     sgst_percent: Optional[float] = None
     cgst_percent: Optional[float] = None
+    packing: Optional[str] = None
+    quantity: Optional[str] = None
+    alternate_quantity: Optional[str] = None  # per-box quantity, drives the Boxes x AltQty auto-calc
+    unit: str = "SQM"  # what the quantity is measured in; prefills document lines
+    weight_class: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -353,6 +360,11 @@ class Product:
             igst_percent=row["igst_percent"],
             sgst_percent=row["sgst_percent"],
             cgst_percent=row["cgst_percent"],
+            packing=row["packing"] if "packing" in row.keys() else None,
+            quantity=row["quantity"] if "quantity" in row.keys() else None,
+            alternate_quantity=row["alternate_quantity"] if "alternate_quantity" in row.keys() else None,
+            unit=row["unit"] if "unit" in row.keys() else "SQM",
+            weight_class=row["weight_class"] if "weight_class" in row.keys() else None,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -384,20 +396,17 @@ class ProductFolder:
 
 @dataclass
 class Design:
-    """The sellable leaf of the catalog: one concrete design of a product,
-    carrying the price, packing, per-box quantity, weights and photos.
-    `folder_id=None` means it sits directly under the product."""
+    """The sellable leaf of the catalog: one concrete design (finish/color
+    variant) of a product, carrying its own price and photos. Packing,
+    quantity and weight are shared across every design of the same product,
+    so they live on Product instead. `folder_id=None` means it sits directly
+    under the product."""
     id: Optional[int]
     company_id: int
     product_id: int
     design_name: str
     folder_id: Optional[int] = None
     description: Optional[str] = None
-    packing: Optional[str] = None
-    quantity: Optional[str] = None
-    alternate_quantity: Optional[str] = None
-    unit: str = "SQM"  # what the quantity is measured in; prefills document lines
-    weight_class: Optional[str] = None
     price_usd: Optional[float] = None
     photo_path: Optional[str] = None
     dimension_photo_path: Optional[str] = None
@@ -414,11 +423,6 @@ class Design:
             folder_id=row["folder_id"],
             design_name=row["design_name"],
             description=row["description"],
-            packing=row["packing"],
-            quantity=row["quantity"],
-            alternate_quantity=row["alternate_quantity"],
-            unit=row["unit"] if "unit" in row.keys() else "SQM",
-            weight_class=row["weight_class"],
             price_usd=row["price_usd"],
             photo_path=row["photo_path"],
             dimension_photo_path=row["dimension_photo_path"],

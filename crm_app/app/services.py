@@ -29,7 +29,7 @@ from werkzeug.utils import secure_filename
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
 from app.models import (
     User, Lead, Client, ContactPerson, Communication, PaymentEntry, DocumentEntry,
-    LEAD_STATUSES, CLIENT_STATUSES, DESIGN_UNITS, Product, ProductFolder, Design,
+    LEAD_STATUSES, CLIENT_STATUSES, PRODUCT_UNITS, Product, ProductFolder, Design,
     Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem, PackingList, PackingListItem,
 )
 from app.repositories import (
@@ -615,7 +615,8 @@ class ProductService:
 
     def create_product(self, current_user: User, product_name: str, description: str,
                         hsn_code: str, gst_percent: str, igst_percent: str,
-                        sgst_percent: str, cgst_percent: str) -> Product:
+                        sgst_percent: str, cgst_percent: str, packing: str, quantity: str,
+                        alternate_quantity: str, unit: str, weight_class: str) -> Product:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
         if not product_name or not product_name.strip():
@@ -627,12 +628,16 @@ class ProductService:
             igst_percent=self._parse_percent("IGST", igst_percent),
             sgst_percent=self._parse_percent("SGST", sgst_percent),
             cgst_percent=self._parse_percent("CGST", cgst_percent),
+            packing=packing or None, quantity=quantity or None,
+            alternate_quantity=alternate_quantity or None, unit=self._parse_unit(unit),
+            weight_class=weight_class or None,
         )
         return self.product_repo.create(product)
 
     def update_product(self, current_user: User, product_id: int, product_name: str,
                         description: str, hsn_code: str, gst_percent: str, igst_percent: str,
-                        sgst_percent: str, cgst_percent: str) -> None:
+                        sgst_percent: str, cgst_percent: str, packing: str, quantity: str,
+                        alternate_quantity: str, unit: str, weight_class: str) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
         if not product_name or not product_name.strip():
@@ -645,6 +650,9 @@ class ProductService:
             "igst_percent": self._parse_percent("IGST", igst_percent),
             "sgst_percent": self._parse_percent("SGST", sgst_percent),
             "cgst_percent": self._parse_percent("CGST", cgst_percent),
+            "packing": packing or None, "quantity": quantity or None,
+            "alternate_quantity": alternate_quantity or None, "unit": self._parse_unit(unit),
+            "weight_class": weight_class or None,
         })
 
     def delete_product(self, current_user: User, product_id: int) -> None:
@@ -732,8 +740,7 @@ class ProductService:
         return self.design_repo.list_for_product(product_id)
 
     def create_design(self, current_user: User, product_id: int, folder_id: Optional[int],
-                       design_name: str, description: str, packing: str, quantity: str,
-                       alternate_quantity: str, unit: str, weight_class: str, price_usd: str,
+                       design_name: str, description: str, price_usd: str,
                        alt_text: str, photo_file, dimension_photo_file) -> Design:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
@@ -749,17 +756,14 @@ class ProductService:
         dimension_photo_path = self._save_image(dimension_photo_file)
         design = Design(
             id=None, company_id=current_user.company_id, product_id=product_id, folder_id=folder_id,
-            design_name=design_name.strip(), description=description or None, packing=packing or None,
-            quantity=quantity or None, alternate_quantity=alternate_quantity or None,
-            unit=self._parse_unit(unit), weight_class=weight_class or None,
+            design_name=design_name.strip(), description=description or None,
             price_usd=self._parse_price(price_usd),
             photo_path=photo_path, dimension_photo_path=dimension_photo_path, alt_text=alt_text or None,
         )
         return self.design_repo.create(design)
 
     def update_design(self, current_user: User, design_id: int, design_name: str,
-                       description: str, packing: str, quantity: str, alternate_quantity: str,
-                       unit: str, weight_class: str, price_usd: str, alt_text: str,
+                       description: str, price_usd: str, alt_text: str,
                        photo_file, dimension_photo_file) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
@@ -769,9 +773,6 @@ class ProductService:
 
         fields = {
             "design_name": design_name.strip(), "description": description or None,
-            "packing": packing or None, "quantity": quantity or None,
-            "alternate_quantity": alternate_quantity or None, "unit": self._parse_unit(unit),
-            "weight_class": weight_class or None,
             "price_usd": self._parse_price(price_usd), "alt_text": alt_text or None,
         }
         if photo_file and photo_file.filename:
@@ -802,13 +803,14 @@ class ProductService:
 
     @staticmethod
     def _parse_unit(unit: str) -> str:
-        """The unit a design's quantity is measured in (SQM/LM/PCS/KG/SET).
-        Stored on the design so document forms can prefill their Unit column
-        instead of asking every time. Free-ish text on purpose - the form
-        offers the standard choices, but an unknown value just falls back to
-        SQM rather than blocking the save."""
+        """The unit a product's quantity is measured in (SQM/LM/PCS/KG/SET).
+        Stored on the product so document forms (quotations, proforma
+        invoices, packing lists) can prefill their Unit column instead of
+        asking every time. Free-ish text on purpose - the form offers the
+        standard choices, but an unknown value just falls back to SQM
+        rather than blocking the save."""
         unit = (unit or "").strip().upper()
-        return unit if unit in DESIGN_UNITS else "SQM"
+        return unit if unit in PRODUCT_UNITS else "SQM"
 
     @staticmethod
     def _parse_percent(label: str, value: str) -> Optional[float]:
@@ -908,14 +910,20 @@ class QuotationService:
                 raise ValidationError(f"Row {i}: quantity and price must be numbers.")
             product_id = int(raw["product_id"]) if raw.get("product_id") else None
 
-            # Only keep a product reference from this same company -
-            # otherwise a crafted product_id could tie this line to another
-            # company's catalog. (Price and quantity are typed in per line;
-            # the product only contributes its name/HSN as a prefill.)
+            # Only trust a product from this same company - otherwise a
+            # crafted product_id could pull another company's catalog data
+            # in. Qty is then authoritatively boxes x that product's
+            # Alternate Quantity whenever both are known - the client-side
+            # value is only a convenience preview, not trusted for storage.
             if product_id:
                 product = self.product_repo.get_by_id(product_id)
                 if not product or product.company_id != company_id:
                     product_id = None
+                elif quantity_boxes and product.alternate_quantity:
+                    try:
+                        quantity_value = round(quantity_boxes * float(product.alternate_quantity), 2)
+                    except ValueError:
+                        pass
 
             if quantity_value <= 0:
                 raise ValidationError(f"Row {i} ('{product_name}'): quantity is compulsory and must be greater than zero.")
@@ -1117,11 +1125,17 @@ class ProformaInvoiceService:
             product_id = int(raw["product_id"]) if raw.get("product_id") else None
 
             # Same trust boundary as QuotationService._build_items - only
-            # keep a product reference from this same company.
+            # keep a product reference from this same company, and the same
+            # Boxes x Alternate Quantity auto-calc when both are known.
             if product_id:
                 product = self.product_repo.get_by_id(product_id)
                 if not product or product.company_id != company_id:
                     product_id = None
+                elif quantity_boxes and product.alternate_quantity:
+                    try:
+                        quantity_value = round(quantity_boxes * float(product.alternate_quantity), 2)
+                    except ValueError:
+                        pass
 
             if quantity_value <= 0:
                 raise ValidationError(f"Row {i} ('{product_name}'): quantity is compulsory and must be greater than zero.")
@@ -1235,10 +1249,11 @@ class ProformaInvoiceService:
 _PACK_NOTE_PATTERN = re.compile(r"([\d.]+)\s*PCS?\s*=\s*([\d.]+)\s*(?:SQM|LM)", re.IGNORECASE)
 
 
-def _per_box_factors(design, description: str) -> tuple:
+def _per_box_factors(product, description: str) -> tuple:
     """(pcs_per_box, qty_per_box, box_per_pallet) for one packing row: the
-    chosen design's Quantity / Alternate Quantity / Packing (its boxes-per-
-    pallet count) when set, else pcs_per_box/qty_per_box fall back to the
+    row's catalog product's Quantity / Alternate Quantity / Packing (its
+    boxes-per-pallet count) when set - every design under a product shares
+    the same packing spec - else pcs_per_box/qty_per_box fall back to the
     packing note parsed from the description. 0.0 means unknown - callers
     skip that auto-calc."""
     def _leading_number(text) -> float:
@@ -1248,9 +1263,9 @@ def _per_box_factors(design, description: str) -> tuple:
         except ValueError:
             return 0.0
 
-    pcs_per_box = _leading_number(design.quantity) if design else 0.0
-    qty_per_box = _leading_number(design.alternate_quantity) if design else 0.0
-    box_per_pallet = _leading_number(design.packing) if design else 0.0
+    pcs_per_box = _leading_number(product.quantity) if product else 0.0
+    qty_per_box = _leading_number(product.alternate_quantity) if product else 0.0
+    box_per_pallet = _leading_number(product.packing) if product else 0.0
     note = _PACK_NOTE_PATTERN.search(description or "")
     if note:
         try:
@@ -1363,17 +1378,17 @@ class PackingListService:
             # Same trust boundary as QuotationService._build_items - only
             # keep product/design references from this same company (and a
             # design must actually belong to the row's product).
+            product = None
             if product_id:
                 product = self.product_repo.get_by_id(product_id)
                 if not product or product.company_id != company_id:
                     product_id = None
-            design = None
+                    product = None
             if design_id:
                 design = self.design_repo.get_by_id(design_id)
                 if not design or design.company_id != company_id or \
                         (product_id and design.product_id != product_id):
                     design_id = None
-                    design = None
 
             # Boxes is the compulsory field the rest of the row is driven
             # from - Pallets is only an alternative way to arrive at it. If
@@ -1381,10 +1396,12 @@ class PackingListService:
             # `required` attribute) but Pallets and Box-per-pallet are both
             # known, fall back to deriving Boxes from those; otherwise
             # Boxes truly is missing and that's an error. Box-per-pallet
-            # itself falls back to the chosen design's Packing figure
-            # (its boxes-per-pallet count) when the row didn't type one in.
-            pcs_per_box, qty_per_box, design_box_per_pallet = _per_box_factors(design, product_name)
-            box_per_pallet = box_per_pallet or design_box_per_pallet or None
+            # itself falls back to the row's catalog product's Packing
+            # figure (its boxes-per-pallet count) when the row didn't type
+            # one in - every design under that product shares the same
+            # packing spec.
+            pcs_per_box, qty_per_box, product_box_per_pallet = _per_box_factors(product, product_name)
+            box_per_pallet = box_per_pallet or product_box_per_pallet or None
             if quantity_boxes is None:
                 if pallets and box_per_pallet:
                     quantity_boxes = round(pallets * box_per_pallet, 2)

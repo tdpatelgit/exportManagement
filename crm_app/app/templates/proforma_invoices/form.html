@@ -115,7 +115,7 @@
         <tbody id="items-body">
           {% set rows = form_items if form_items is not none else (invoice.items if invoice else []) %}
           {% for row in rows %}
-          <tr class="item-row">
+          <tr class="item-row" data-alt-qty="{{ alt_qty_map.get(row.product_id | int, '') if row.product_id else '' }}">
             <td class="js-sr">{{ loop.index }}</td>
             <td>
               <input type="hidden" name="item_product_id[]" class="js-product-id" value="{{ row.product_id or '' }}">
@@ -128,7 +128,7 @@
             <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required value="{{ row.quantity_value or '' }}"></td>
             <td>
               <select name="item_unit[]" class="js-unit">
-                {% for u in DESIGN_UNITS %}
+                {% for u in PRODUCT_UNITS %}
                   <option value="{{ u }}" {{ 'selected' if row.unit == u }}>{{ u }}</option>
                 {% endfor %}
               </select>
@@ -142,7 +142,7 @@
       </table>
     </div>
     <button type="button" class="btn btn-ghost btn-sm" id="add-row-btn">+ Add product line</button>
-    <p class="hint">Choosing a catalog product prefills its name and HSN code. Quantity and price are typed in per line (designs and their prices are picked later, on the packing list).</p>
+    <p class="hint">Choosing a catalog product prefills its name, HSN code and unit. Qty auto-fills from Boxes × the product's Alternate Quantity when known, but stays editable. Price is typed in per line (a specific design and its price are picked later, on the packing list).</p>
     <div class="form-row" style="margin-top:14px;">
       <div class="field" style="max-width:160px;"><label for="sea_freight">Sea freight (USD)</label><input type="number" step="0.01" id="sea_freight" name="sea_freight" value="{{ data.sea_freight | default(0, true) }}"></div>
       <div class="field" style="max-width:160px;"><label for="insurance">Insurance (USD)</label><input type="number" step="0.01" id="insurance" name="insurance" value="{{ data.insurance | default(0, true) }}"></div>
@@ -223,6 +223,15 @@
           <div class="field"><label>SGST %</label><input type="number" step="0.01" min="0" max="100" name="sgst_percent"></div>
           <div class="field"><label>CGST %</label><input type="number" step="0.01" min="0" max="100" name="cgst_percent"></div>
         </div>
+        <div class="form-row">
+          <div class="field"><label>Packing</label><input type="text" name="packing"></div>
+          <div class="field"><label>Quantity</label><input type="text" name="quantity"></div>
+          <div class="field"><label>Alternate quantity (per box)</label><input type="text" name="alternate_quantity"></div>
+          <div class="field" style="max-width:120px;">
+            <label>Unit</label>
+            <select name="unit">{% for u in PRODUCT_UNITS %}<option value="{{ u }}">{{ u }}</option>{% endfor %}</select>
+          </div>
+        </div>
         <div class="hint">Folders and designs can be added later from the product's page in the catalog.</div>
         <button type="submit" class="btn btn-primary btn-sm">Save &amp; select</button>
         <button type="button" class="btn btn-ghost btn-sm" id="picker-add-new-cancel">Cancel</button>
@@ -258,7 +267,7 @@
       <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required></td>
       <td>
         <select name="item_unit[]" class="js-unit">
-          {% for u in DESIGN_UNITS %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
+          {% for u in PRODUCT_UNITS %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
         </select>
       </td>
       <td><input type="number" step="0.01" name="item_price_usd[]" class="js-price" required></td>
@@ -292,6 +301,18 @@
     document.getElementById('invoice-value-display').textContent = invoiceValue.toFixed(2);
   }
 
+  // Qty auto-fills from Boxes x the row's catalog product's Alternate
+  // Quantity whenever both are known (stashed on the row as data-alt-qty
+  // when a product is chosen) - it stays editable either way, and rows
+  // with no product tie (or no known Alternate Quantity) just leave Qty to
+  // be typed in by hand.
+  function recalcRowQty(tr) {
+    const altQty = parseFloat(tr.dataset.altQty);
+    if (!altQty) return;
+    const boxes = parseFloat(tr.querySelector('.js-boxes').value) || 0;
+    if (boxes) tr.querySelector('.js-qty').value = (boxes * altQty).toFixed(2);
+  }
+
   addRowBtn.addEventListener('click', () => {
     itemsBody.appendChild(rowTemplate());
     renumber();
@@ -308,7 +329,10 @@
   });
 
   itemsBody.addEventListener('input', (e) => {
-    if (e.target.classList.contains('js-qty') || e.target.classList.contains('js-price')) {
+    if (e.target.classList.contains('js-boxes')) {
+      recalcRowQty(e.target.closest('tr'));
+      recalcTotals();
+    } else if (e.target.classList.contains('js-qty') || e.target.classList.contains('js-price')) {
       recalcTotals();
     }
   });
@@ -435,7 +459,7 @@
     }
     const table = document.createElement('table');
     table.className = 'ledger';
-    table.innerHTML = '<thead><tr><th>Product</th><th>HSN code</th><th>GST %</th><th></th></tr></thead>';
+    table.innerHTML = '<thead><tr><th>Product</th><th>HSN code</th><th>GST %</th><th>Alt qty / Unit</th><th></th></tr></thead>';
     const tbody = document.createElement('tbody');
     filtered.forEach(p => {
       const tr = document.createElement('tr');
@@ -443,6 +467,7 @@
         <td><strong></strong></td>
         <td class="text-sm">${p.hsn_code || '—'}</td>
         <td class="text-sm">${p.gst_percent ?? '—'}</td>
+        <td class="text-sm">${p.alternate_quantity ? `${p.alternate_quantity} ${p.unit || ''}` : '—'}</td>
         <td><button type="button" class="btn btn-primary btn-sm">Select</button></td>`;
       tr.querySelector('strong').textContent = p.name;
       tr.querySelector('button').addEventListener('click', () => selectProduct(p));
@@ -458,6 +483,9 @@
     activeRow.querySelector('.js-product-id').value = p.id;
     activeRow.querySelector('.js-product-name').value = p.name;
     activeRow.querySelector('.js-hsn').value = p.hsn_code || '';
+    if (p.unit) activeRow.querySelector('.js-unit').value = p.unit;
+    activeRow.dataset.altQty = parseFloat(p.alternate_quantity) || '';
+    recalcRowQty(activeRow);
     recalcTotals();
     overlay.hidden = true;
   }

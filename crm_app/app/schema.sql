@@ -218,23 +218,30 @@ CREATE TABLE IF NOT EXISTS our_company_bank_details (
 );
 
 -- ============================================================
--- PRODUCT CATALOG  (three levels: a PRODUCT is the tax/HSN identity that
--- quotations and proforma invoices bill against; FOLDERS organise designs
--- under a product and can nest to any depth (but only inside a product);
--- a DESIGN is the sellable leaf holding price, packing, weights and photos)
+-- PRODUCT CATALOG  (three levels: a PRODUCT is the tax/HSN identity AND the
+-- physical packing spec (packing, quantity, alternate quantity, unit,
+-- weight class) that quotations, proforma invoices and packing lists all
+-- read from - every design under a product shares that spec; FOLDERS
+-- organise designs under a product and can nest to any depth (but only
+-- inside a product); a DESIGN is the sellable leaf holding price and photos)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS products (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    company_id      INTEGER NOT NULL REFERENCES tenants(id),
-    product_name    TEXT NOT NULL,
-    description     TEXT,
-    hsn_code        TEXT,
-    gst_percent     REAL,           -- all four tax fields are percentages
-    igst_percent    REAL,
-    sgst_percent    REAL,
-    cgst_percent    REAL,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id          INTEGER NOT NULL REFERENCES tenants(id),
+    product_name        TEXT NOT NULL,
+    description         TEXT,
+    hsn_code            TEXT,
+    gst_percent         REAL,           -- all four tax fields are percentages
+    igst_percent        REAL,
+    sgst_percent        REAL,
+    cgst_percent        REAL,
+    packing             TEXT,
+    quantity            TEXT,
+    alternate_quantity  TEXT,           -- per-box quantity, drives the Boxes x AltQty auto-calc
+    unit                TEXT NOT NULL DEFAULT 'SQM',   -- what the quantity is measured in; prefills document lines
+    weight_class        TEXT,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS product_folders (
@@ -253,10 +260,6 @@ CREATE TABLE IF NOT EXISTS designs (
     folder_id               INTEGER REFERENCES product_folders(id) ON DELETE CASCADE,  -- NULL = directly under the product
     design_name             TEXT NOT NULL,
     description             TEXT,
-    packing                 TEXT,
-    quantity                TEXT,
-    alternate_quantity      TEXT,          -- per-box quantity, drives the Boxes x AltQty auto-calc
-    weight_class            TEXT,
     price_usd               REAL,
     photo_path              TEXT,
     dimension_photo_path    TEXT,

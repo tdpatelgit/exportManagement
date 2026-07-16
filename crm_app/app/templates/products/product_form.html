@@ -6,7 +6,7 @@
   <div>
     <div class="eyebrow">Catalog</div>
     <h1>{{ 'Edit product' if product else 'New product' }}</h1>
-    <div class="text-sm text-soft">A product holds the HSN code and tax percentages. Price, packing and photos belong to its designs.</div>
+    <div class="text-sm text-soft">A product holds the HSN code, tax percentages and packing spec (shared by every design under it). Price and photos belong to its designs.</div>
   </div>
 </div>
 
@@ -34,6 +34,31 @@
       <div class="field"><label for="cgst_percent">CGST %</label><input type="number" step="0.01" min="0" max="100" id="cgst_percent" name="cgst_percent" value="{{ data.cgst_percent | default('', true) }}"></div>
     </div>
     <div class="hint">All four tax fields are percentages (0–100). Leave a field blank if it doesn't apply.</div>
+
+    <div class="form-row">
+      <div class="field"><label for="packing">Packing (boxes per pallet)</label><input type="text" id="packing" name="packing" value="{{ data.packing | default('', true) }}"></div>
+      <div class="field"><label for="quantity">Quantity (pcs per box)</label><input type="text" id="quantity" name="quantity" value="{{ data.quantity | default('', true) }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="field">
+        <label for="alternate_quantity">Alternate quantity (per box)</label>
+        <input type="text" id="alternate_quantity" name="alternate_quantity" value="{{ data.alternate_quantity | default('', true) }}">
+        <div class="hint">Drives the Boxes × Alternate Quantity auto-calc on quotations, proforma invoices and packing lists.</div>
+      </div>
+      <div class="field" style="max-width:160px;">
+        <label for="unit">Quantity unit</label>
+        <select id="unit" name="unit">
+          {% for u in PRODUCT_UNITS %}
+            <option value="{{ u }}" {{ 'selected' if (data.unit | default('SQM', true)) == u }}>{{ u }}</option>
+          {% endfor %}
+        </select>
+        <div class="hint">Prefills the Unit column on every document.</div>
+      </div>
+      <div class="field">
+        <label for="weight_class">Weight class</label>
+        <input type="text" id="weight_class" name="weight_class" value="{{ data.weight_class | default('', true) }}" placeholder="e.g. 18.5 KG / box">
+      </div>
+    </div>
 
     <button type="submit" class="btn btn-primary">{{ 'Save' if product else 'Add product' }}</button>
     <a href="{{ url_for('products.view_product', product_id=product.id) if product else url_for('products.list_products') }}" class="btn btn-ghost">Cancel</a>

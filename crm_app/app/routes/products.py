@@ -3,11 +3,14 @@ app/routes/products.py
 ------------------------
 Product catalog, three levels deep:
   - PRODUCT: the tax/HSN identity (name, description, HSN code, GST/IGST/
-    SGST/CGST percentages) that quotations and proforma invoices bill against.
+    SGST/CGST percentages) AND the physical packing spec (packing, quantity,
+    alternate quantity, unit, weight class) that quotations, proforma
+    invoices and packing lists all read from - every design under a product
+    shares the same packing spec.
   - FOLDER: organises designs inside a product; folders nest to any depth
     but can only be created under a product.
-  - DESIGN: the sellable leaf holding price, packing, per-box quantity,
-    weights and photos - what packing lists pick.
+  - DESIGN: the sellable leaf holding price and photos - what packing lists
+    pick alongside the row's product.
 Everyone signed in can browse; only admins can create/edit/delete.
 """
 
@@ -32,6 +35,11 @@ def _product_form_fields(form) -> dict:
         "igst_percent": form.get("igst_percent", ""),
         "sgst_percent": form.get("sgst_percent", ""),
         "cgst_percent": form.get("cgst_percent", ""),
+        "packing": form.get("packing", ""),
+        "quantity": form.get("quantity", ""),
+        "alternate_quantity": form.get("alternate_quantity", ""),
+        "unit": form.get("unit", ""),
+        "weight_class": form.get("weight_class", ""),
     }
 
 
@@ -39,11 +47,6 @@ def _design_form_fields(form) -> dict:
     return {
         "design_name": form.get("design_name", ""),
         "description": form.get("description", ""),
-        "packing": form.get("packing", ""),
-        "quantity": form.get("quantity", ""),
-        "alternate_quantity": form.get("alternate_quantity", ""),
-        "unit": form.get("unit", ""),
-        "weight_class": form.get("weight_class", ""),
         "price_usd": form.get("price_usd", ""),
         "alt_text": form.get("alt_text", ""),
     }
@@ -294,33 +297,34 @@ def delete_design(design_id):
 # JSON APIs (power the pickers on the quotation / proforma /
 # packing list forms)
 # ============================================================
+def _product_json(p) -> dict:
+    return {
+        "id": p.id, "name": p.product_name, "description": p.description,
+        "hsn_code": p.hsn_code, "gst_percent": p.gst_percent,
+        "igst_percent": p.igst_percent, "sgst_percent": p.sgst_percent,
+        "cgst_percent": p.cgst_percent,
+        "packing": p.packing, "quantity": p.quantity, "alternate_quantity": p.alternate_quantity,
+        "unit": p.unit, "weight_class": p.weight_class,
+    }
+
+
 @products_bp.route("/api/list")
 @login_required
 def api_list_products():
-    """Flat product list for the product picker on the quotation and
-    proforma forms - a product is picked directly (no tree to walk), its
-    name/HSN prefill the line item."""
+    """Flat product list for the product picker on the quotation, proforma
+    and packing list forms - a product is picked directly (no tree to walk),
+    its name/HSN/packing-spec prefill the line item."""
     products = current_app.container.product_service.list_products(g.user.company_id)
-    return jsonify({
-        "products": [
-            {
-                "id": p.id, "name": p.product_name, "description": p.description,
-                "hsn_code": p.hsn_code, "gst_percent": p.gst_percent,
-                "igst_percent": p.igst_percent, "sgst_percent": p.sgst_percent,
-                "cgst_percent": p.cgst_percent,
-            }
-            for p in products
-        ],
-    })
+    return jsonify({"products": [_product_json(p) for p in products]})
 
 
 @products_bp.route("/api/quick-create", methods=["POST"])
 @admin_required
 def api_quick_create():
     """Lets an admin add a brand new catalog product without leaving the
-    product picker modal (used from the quotation/proforma forms), so a
-    missing product doesn't force a detour to the full Products page.
-    Folders/designs can be added later from the product's page."""
+    product picker modal (used from the quotation/proforma/packing-list
+    forms), so a missing product doesn't force a detour to the full
+    Products page. Folders/designs can be added later from the product's page."""
     container = current_app.container
     try:
         product = container.product_service.create_product(
@@ -328,12 +332,7 @@ def api_quick_create():
         )
     except ValidationError as e:
         return jsonify({"error": str(e)}), 400
-    return jsonify({
-        "id": product.id, "name": product.product_name, "description": product.description,
-        "hsn_code": product.hsn_code, "gst_percent": product.gst_percent,
-        "igst_percent": product.igst_percent, "sgst_percent": product.sgst_percent,
-        "cgst_percent": product.cgst_percent,
-    })
+    return jsonify(_product_json(product))
 
 
 @products_bp.route("/api/<int:product_id>/designs")
@@ -341,7 +340,9 @@ def api_quick_create():
 def api_browse_designs(product_id):
     """JSON folder browser scoped to one product, used by the design-picker
     modal on the packing list form - it navigates the product's folder tree
-    in place and returns the designs at each level."""
+    in place and returns the designs at each level. Designs no longer carry
+    a packing spec of their own (that lives on the product, picked
+    separately) - just their name/price/photo."""
     container = current_app.container
     folder_id = _int_or_none(request.args.get("folder_id"))
     try:
@@ -351,14 +352,12 @@ def api_browse_designs(product_id):
         return jsonify({"error": "not found"}), 404
     breadcrumb = container.product_service.breadcrumb(g.user.company_id, folder_id)
     return jsonify({
-        "product": {"id": product.id, "name": product.product_name, "hsn_code": product.hsn_code},
+        "product": _product_json(product),
         "breadcrumb": [{"id": f.id, "name": f.name} for f in breadcrumb],
         "subfolders": [{"id": f.id, "name": f.name} for f in subfolders],
         "designs": [
             {
-                "id": d.id, "name": d.design_name, "packing": d.packing,
-                "quantity": d.quantity, "alternate_quantity": d.alternate_quantity,
-                "unit": d.unit, "weight_class": d.weight_class, "price_usd": d.price_usd,
+                "id": d.id, "name": d.design_name, "price_usd": d.price_usd,
                 "photo_url": url_for("static", filename=d.photo_path) if d.photo_path else None,
             }
             for d in designs

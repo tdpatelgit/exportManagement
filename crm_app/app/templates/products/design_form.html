@@ -21,34 +21,7 @@
       <label for="description">Description</label>
       <textarea id="description" name="description" rows="3">{{ data.description | default('', true) }}</textarea>
     </div>
-    <div class="form-row">
-      <div class="field">
-        <label for="packing">Packing (boxes per pallet)</label>
-        <input type="text" id="packing" name="packing" value="{{ data.packing | default('', true) }}">
-        <div class="hint">Fills in Box/plt on packing lists when this design is picked.</div>
-      </div>
-      <div class="field"><label for="quantity">Quantity (pcs per box)</label><input type="text" id="quantity" name="quantity" value="{{ data.quantity | default('', true) }}"></div>
-    </div>
-    <div class="form-row">
-      <div class="field">
-        <label for="alternate_quantity">Alternate quantity (per box)</label>
-        <input type="text" id="alternate_quantity" name="alternate_quantity" value="{{ data.alternate_quantity | default('', true) }}">
-        <div class="hint">Drives the Boxes × Alternate Quantity auto-calc on packing lists.</div>
-      </div>
-      <div class="field" style="max-width:160px;">
-        <label for="unit">Quantity unit</label>
-        <select id="unit" name="unit">
-          {% for u in DESIGN_UNITS %}
-            <option value="{{ u }}" {{ 'selected' if (data.unit | default('SQM', true)) == u }}>{{ u }}</option>
-          {% endfor %}
-        </select>
-        <div class="hint">What the quantity is measured in — prefills the Unit column on documents.</div>
-      </div>
-      <div class="field">
-        <label for="weight_class">Weight class</label>
-        <input type="text" id="weight_class" name="weight_class" value="{{ data.weight_class | default('', true) }}" placeholder="e.g. 18.5 KG / box">
-      </div>
-    </div>
+    <div class="hint">Packing, quantity and weight are set once on the product and shared by every design under it — edit them from the product's page.</div>
     <div class="field" style="max-width:280px;">
       <label for="price_usd">Price (USD)</label>
       <input type="number" step="0.01" id="price_usd" name="price_usd" value="{{ data.price_usd | default('', true) }}">
