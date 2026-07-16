@@ -218,21 +218,34 @@ CREATE TABLE IF NOT EXISTS our_company_bank_details (
 );
 
 -- ============================================================
--- PRODUCT CATALOG  (three levels: a PRODUCT is the tax/HSN identity AND the
--- physical packing spec (packing, quantity, alternate quantity, unit,
--- weight class) that quotations, proforma invoices and packing lists all
--- read from - every design under a product shares that spec; FOLDERS
--- organise designs under a product and can nest to any depth (but only
--- inside a product); a DESIGN is the sellable leaf holding price and photos)
+-- PRODUCT CATALOG  (category / product / sub category / design:
+-- a CATEGORY is a folder at the catalog root that groups products and can
+-- nest to any depth via self-reference (category_id=NULL products sit
+-- directly at the root, the same way a design can sit directly under a
+-- product); a PRODUCT is the tax/HSN identity AND the physical packing spec
+-- (packing, quantity, alternate quantity, unit, weight class) that
+-- quotations, proforma invoices and packing lists all read from - every
+-- design under a product shares that spec; SUB CATEGORIES (the
+-- product_folders table) organise designs under a product and can nest to
+-- any depth (but only inside a product); a DESIGN is the sellable leaf
+-- holding price and photos)
 -- ============================================================
+CREATE TABLE IF NOT EXISTS categories (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id  INTEGER NOT NULL REFERENCES tenants(id),
+    parent_id   INTEGER REFERENCES categories(id) ON DELETE CASCADE,  -- NULL = catalog root
+    name        TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS products (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     company_id          INTEGER NOT NULL REFERENCES tenants(id),
+    category_id         INTEGER REFERENCES categories(id) ON DELETE CASCADE,  -- NULL = catalog root
     product_name        TEXT NOT NULL,
     description         TEXT,
     hsn_code            TEXT,
-    gst_percent         REAL,           -- all four tax fields are percentages
-    igst_percent        REAL,
+    igst_percent        REAL,           -- the only tax input; SGST/CGST are stored as half of it
     sgst_percent        REAL,
     cgst_percent        REAL,
     packing             TEXT,
@@ -453,6 +466,10 @@ CREATE INDEX IF NOT EXISTS idx_comms_parent ON communications(parent_type, paren
 CREATE INDEX IF NOT EXISTS idx_comms_employee ON communications(employee_id);
 CREATE INDEX IF NOT EXISTS idx_payments_client ON payment_history(client_id);
 CREATE INDEX IF NOT EXISTS idx_documents_client ON documents(client_id);
+CREATE INDEX IF NOT EXISTS idx_categories_company ON categories(company_id);
+CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
+-- idx_products_category lives in database.py's _migrate: on a pre-v4 DB the
+-- category_id column doesn't exist yet when this script runs.
 CREATE INDEX IF NOT EXISTS idx_product_folders_product ON product_folders(product_id);
 CREATE INDEX IF NOT EXISTS idx_product_folders_parent ON product_folders(parent_id);
 CREATE INDEX IF NOT EXISTS idx_designs_product ON designs(product_id);

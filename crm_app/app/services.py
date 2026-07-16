@@ -29,13 +29,13 @@ from werkzeug.utils import secure_filename
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
 from app.models import (
     User, Lead, Client, ContactPerson, Communication, PaymentEntry, DocumentEntry,
-    LEAD_STATUSES, CLIENT_STATUSES, PRODUCT_UNITS, Product, ProductFolder, Design,
+    LEAD_STATUSES, CLIENT_STATUSES, PRODUCT_UNITS, Category, Product, ProductFolder, Design,
     Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem, PackingList, PackingListItem,
 )
 from app.repositories import (
     TenantRepository, UserRepositoryBase, LeadRepositoryBase, ClientRepositoryBase,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
-    ProductRepository, ProductFolderRepository, DesignRepository,
+    CategoryRepository, ProductRepository, ProductFolderRepository, DesignRepository,
     QuotationRepository, ProformaInvoiceRepository, PackingListRepository,
 )
 from app.database import Database, SCHEMA_VERSION
@@ -595,17 +595,93 @@ class ReportService:
 # sellable leaves with price/packing/photos)
 # ============================================================
 class ProductService:
-    def __init__(self, product_repo: ProductRepository, folder_repo: ProductFolderRepository,
-                 design_repo: DesignRepository, upload_folder: str, allowed_extensions: set):
+    def __init__(self, category_repo: CategoryRepository, product_repo: ProductRepository,
+                 folder_repo: ProductFolderRepository, design_repo: DesignRepository,
+                 upload_folder: str, allowed_extensions: set):
+        self.category_repo = category_repo
         self.product_repo = product_repo
         self.folder_repo = folder_repo
         self.design_repo = design_repo
         self.upload_folder = upload_folder
         self.allowed_extensions = allowed_extensions
 
+    # ---- categories (nestable folders at the catalog root) -------------------
+    def list_categories(self, company_id: int) -> List[Category]:
+        """Every category, flat - powers the product form's category picker."""
+        return self.category_repo.list_all(company_id)
+
+    def list_categories_tree(self, company_id: int) -> List[tuple]:
+        """Every category as (category, depth) pairs, ordered depth-first
+        (each category immediately followed by its own subtree) - lets the
+        product form's category <select> show nesting via indentation
+        without needing a recursive template."""
+        all_categories = self.category_repo.list_all(company_id)
+        children_by_parent = {}
+        for category in all_categories:
+            children_by_parent.setdefault(category.parent_id, []).append(category)
+
+        ordered = []
+
+        def visit(parent_id, depth):
+            for category in children_by_parent.get(parent_id, []):
+                ordered.append((category, depth))
+                visit(category.id, depth + 1)
+
+        visit(None, 0)
+        return ordered
+
+    def get_category(self, category_id: int, company_id: int) -> Category:
+        category = self.category_repo.get_by_id(category_id)
+        if not category or category.company_id != company_id:
+            raise NotFoundError(f"Category #{category_id} not found.")
+        return category
+
+    def category_breadcrumb(self, company_id: int, category_id: Optional[int]) -> List[Category]:
+        if not category_id:
+            return []
+        self.get_category(category_id, company_id)  # 404s if missing/another company's before walking up
+        return self.category_repo.list_ancestors(category_id)
+
+    def create_category(self, current_user: User, name: str, parent_id=None) -> Category:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can manage the product catalog.")
+        if not name or not name.strip():
+            raise ValidationError("Category name is compulsory.")
+        parent_id = self._parse_category_id(current_user.company_id, parent_id)
+        return self.category_repo.create(current_user.company_id, name.strip(), parent_id)
+
+    def rename_category(self, current_user: User, category_id: int, name: str) -> None:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can manage the product catalog.")
+        if not name or not name.strip():
+            raise ValidationError("Category name is compulsory.")
+        self.get_category(category_id, current_user.company_id)
+        self.category_repo.update(category_id, {"name": name.strip()})
+
+    def delete_category(self, current_user: User, category_id: int) -> None:
+        """Deletes the category, every subcategory nested under it, and every
+        product inside any of them - like deleting a folder tree. Each
+        product delete also cleans up its designs' image files and nulls out
+        document line references."""
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can manage the product catalog.")
+        self.get_category(category_id, current_user.company_id)
+        for descendant_id in self.category_repo.list_descendant_ids(category_id):
+            for product in self.product_repo.list_in_category(current_user.company_id, descendant_id):
+                self.delete_product(current_user, product.id)
+        self.category_repo.delete(category_id)  # cascades to subcategories in the DB
+
     # ---- products --------------------------------------------------
     def list_products(self, company_id: int) -> List[Product]:
         return self.product_repo.list_all(company_id)
+
+    def list_catalog(self, company_id: int, category_id: Optional[int]):
+        """Returns (subcategories, products) for one level of the catalog
+        root browser - category_id=None is the catalog root."""
+        if category_id is not None:
+            self.get_category(category_id, company_id)  # 404s if missing/another company's
+        return (self.category_repo.list_children(company_id, category_id),
+                self.product_repo.list_in_category(company_id, category_id))
 
     def get_product(self, product_id: int, company_id: int) -> Product:
         product = self.product_repo.get_by_id(product_id)
@@ -613,31 +689,43 @@ class ProductService:
             raise NotFoundError(f"Product #{product_id} not found.")
         return product
 
+    def _parse_category_id(self, company_id: int, category_id) -> Optional[int]:
+        """Shared by product.category_id and category.parent_id - both are
+        optional references to a category that must belong to this company."""
+        if category_id in (None, "", "None"):
+            return None
+        self.get_category(int(category_id), company_id)  # validates ownership
+        return int(category_id)
+
+    def _tax_fields(self, igst_percent: str) -> dict:
+        """IGST is the only tax input; SGST and CGST are each half of it."""
+        igst = self._parse_percent("IGST", igst_percent)
+        half = round(igst / 2, 2) if igst is not None else None
+        return {"igst_percent": igst, "sgst_percent": half, "cgst_percent": half}
+
     def create_product(self, current_user: User, product_name: str, description: str,
-                        hsn_code: str, gst_percent: str, igst_percent: str,
-                        sgst_percent: str, cgst_percent: str, packing: str, quantity: str,
-                        alternate_quantity: str, unit: str, weight_class: str) -> Product:
+                        hsn_code: str, igst_percent: str, packing: str, quantity: str,
+                        alternate_quantity: str, unit: str, weight_class: str,
+                        category_id=None) -> Product:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
         if not product_name or not product_name.strip():
             raise ValidationError("Product name is compulsory.")
         product = Product(
             id=None, company_id=current_user.company_id, product_name=product_name.strip(),
+            category_id=self._parse_category_id(current_user.company_id, category_id),
             description=description or None, hsn_code=hsn_code or None,
-            gst_percent=self._parse_percent("GST", gst_percent),
-            igst_percent=self._parse_percent("IGST", igst_percent),
-            sgst_percent=self._parse_percent("SGST", sgst_percent),
-            cgst_percent=self._parse_percent("CGST", cgst_percent),
             packing=packing or None, quantity=quantity or None,
             alternate_quantity=alternate_quantity or None, unit=self._parse_unit(unit),
             weight_class=weight_class or None,
+            **self._tax_fields(igst_percent),
         )
         return self.product_repo.create(product)
 
     def update_product(self, current_user: User, product_id: int, product_name: str,
-                        description: str, hsn_code: str, gst_percent: str, igst_percent: str,
-                        sgst_percent: str, cgst_percent: str, packing: str, quantity: str,
-                        alternate_quantity: str, unit: str, weight_class: str) -> None:
+                        description: str, hsn_code: str, igst_percent: str,
+                        packing: str, quantity: str, alternate_quantity: str,
+                        unit: str, weight_class: str, category_id=None) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
         if not product_name or not product_name.strip():
@@ -646,13 +734,11 @@ class ProductService:
         self.product_repo.update(product_id, {
             "product_name": product_name.strip(), "description": description or None,
             "hsn_code": hsn_code or None,
-            "gst_percent": self._parse_percent("GST", gst_percent),
-            "igst_percent": self._parse_percent("IGST", igst_percent),
-            "sgst_percent": self._parse_percent("SGST", sgst_percent),
-            "cgst_percent": self._parse_percent("CGST", cgst_percent),
+            "category_id": self._parse_category_id(current_user.company_id, category_id),
             "packing": packing or None, "quantity": quantity or None,
             "alternate_quantity": alternate_quantity or None, "unit": self._parse_unit(unit),
             "weight_class": weight_class or None,
+            **self._tax_fields(igst_percent),
         })
 
     def delete_product(self, current_user: User, product_id: int) -> None:

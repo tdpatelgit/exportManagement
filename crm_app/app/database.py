@@ -40,7 +40,7 @@ from datetime import datetime
 # Because `_migrate` is idempotent and runs on every startup AND on every
 # restore, any backup - however old - is carried forward through the whole
 # chain of steps, never discarded.
-SCHEMA_VERSION = 3  # v3: packing/quantity/alternate_quantity/unit/weight_class move from designs to products
+SCHEMA_VERSION = 5  # v5: categories can nest (self-referencing parent_id), like sub categories already do
 
 
 class Database:
@@ -252,6 +252,45 @@ class Database:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_designs_folder ON designs(folder_id)")
                 conn.execute("PRAGMA legacy_alter_table = OFF")
                 conn.execute("PRAGMA foreign_keys = ON")
+
+            # ---- v4: CATEGORY LEVEL + GST COLUMN RETIRED ----
+            # The catalog is now category -> product -> sub category ->
+            # design. Categories behave like folders at the catalog root:
+            # products carry a nullable category_id (NULL = catalog root).
+            # At the same time the product's standalone gst_percent input is
+            # retired: IGST is the only tax input, and SGST/CGST are always
+            # stored as half of it. Existing rows get their SGST/CGST
+            # recalculated from IGST once, then the gst_percent column is
+            # dropped (which is also the guard that makes this one-shot).
+            products_existing = {r["name"] for r in conn.execute("PRAGMA table_info(products)")}
+            if products_existing and "category_id" not in products_existing:
+                conn.execute(
+                    "ALTER TABLE products ADD COLUMN category_id INTEGER "
+                    "REFERENCES categories(id) ON DELETE CASCADE"
+                )
+            if products_existing and "gst_percent" in products_existing:
+                conn.execute("""
+                    UPDATE products
+                    SET sgst_percent = ROUND(igst_percent / 2.0, 2),
+                        cgst_percent = ROUND(igst_percent / 2.0, 2)
+                """)
+                conn.execute("ALTER TABLE products DROP COLUMN gst_percent")
+            # Lives here instead of schema.sql: on a pre-v4 DB the column
+            # doesn't exist yet when schema.sql runs.
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id)")
+
+            # ---- v5: CATEGORIES CAN NEST ----
+            # Categories now behave exactly like sub categories (product_folders):
+            # a self-referencing, nullable parent_id lets one category sit
+            # inside another to any depth. A plain ADD COLUMN is enough - no
+            # existing category has a parent to backfill.
+            categories_existing = {r["name"] for r in conn.execute("PRAGMA table_info(categories)")}
+            if categories_existing and "parent_id" not in categories_existing:
+                conn.execute(
+                    "ALTER TABLE categories ADD COLUMN parent_id INTEGER "
+                    "REFERENCES categories(id) ON DELETE CASCADE"
+                )
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id)")
 
             # The original `leads.status` CHECK constraint didn't allow
             # 'in_client', so converting a lead to a client crashed on the
@@ -511,7 +550,7 @@ class Database:
             # it on every root table now that the column is guaranteed to
             # exist (either from a fresh install's schema.sql, or from the
             # legacy-upgrade block above). Safe to run unconditionally.
-            for table in ("users", "leads", "clients", "products", "product_folders", "designs", "quotations"):
+            for table in ("users", "leads", "clients", "categories", "products", "product_folders", "designs", "quotations"):
                 conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_company ON {table}(company_id)")
 
     def _backup_db_file(self, tag: str) -> None:

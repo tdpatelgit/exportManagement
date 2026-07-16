@@ -325,18 +325,45 @@ class OurCompany:
 
 
 @dataclass
+class Category:
+    """A folder at the catalog root that groups products. `parent_id=None`
+    means it sits at the catalog's top level; categories nest to any depth
+    via self-reference, the same way sub categories (ProductFolder) nest
+    inside a product. Products with category_id=NULL sit directly at the
+    root, the same way a design can sit directly under a product."""
+    id: Optional[int]
+    company_id: int
+    name: str
+    parent_id: Optional[int] = None
+    created_at: Optional[str] = None
+
+    @staticmethod
+    def from_row(row) -> "Category":
+        return Category(
+            id=row["id"],
+            company_id=row["company_id"],
+            name=row["name"],
+            parent_id=row["parent_id"] if "parent_id" in row.keys() else None,
+            created_at=row["created_at"],
+        )
+
+
+@dataclass
 class Product:
-    """Top level of the catalog: the tax/HSN identity AND the physical
-    packing spec (packing, quantity, alternate quantity, unit, weight class)
-    that quotations, proforma invoices and packing lists all read from -
-    every design under a product shares the same packing spec. Folders and
-    designs live underneath it; price and photos belong to the Design."""
+    """Second level of the catalog (inside a category, or at the root when
+    category_id is None): the tax/HSN identity AND the physical packing spec
+    (packing, quantity, alternate quantity, unit, weight class) that
+    quotations, proforma invoices and packing lists all read from - every
+    design under a product shares the same packing spec. Sub categories and
+    designs live underneath it; price and photos belong to the Design.
+    IGST is the only tax input - SGST and CGST are always stored as half of
+    it (recalculated by ProductService on every save)."""
     id: Optional[int]
     company_id: int
     product_name: str
+    category_id: Optional[int] = None
     description: Optional[str] = None
     hsn_code: Optional[str] = None
-    gst_percent: Optional[float] = None
     igst_percent: Optional[float] = None
     sgst_percent: Optional[float] = None
     cgst_percent: Optional[float] = None
@@ -354,9 +381,9 @@ class Product:
             id=row["id"],
             company_id=row["company_id"],
             product_name=row["product_name"],
+            category_id=row["category_id"] if "category_id" in row.keys() else None,
             description=row["description"],
             hsn_code=row["hsn_code"],
-            gst_percent=row["gst_percent"],
             igst_percent=row["igst_percent"],
             sgst_percent=row["sgst_percent"],
             cgst_percent=row["cgst_percent"],
@@ -372,9 +399,10 @@ class Product:
 
 @dataclass
 class ProductFolder:
-    """A folder inside a product. `parent_id=None` means it sits at the
-    product's top level; folders can nest to any depth via self-reference,
-    but always belong to exactly one product."""
+    """A sub category inside a product (shown as "Sub Category" in the UI;
+    the table keeps its historical product_folders name). `parent_id=None`
+    means it sits at the product's top level; sub categories can nest to any
+    depth via self-reference, but always belong to exactly one product."""
     id: Optional[int]
     company_id: int
     product_id: int

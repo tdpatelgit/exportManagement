@@ -1,34 +1,75 @@
 {% extends "base.html" %}
-{% block title %}Products{% endblock %}
+{% block title %}{{ current_category.name if current_category else 'Products' }}{% endblock %}
 {% block content %}
 
 <div class="topbar">
   <div>
-    <div class="eyebrow">Catalog</div>
-    <h1>Products</h1>
-    <div class="text-sm text-soft">Each product carries its HSN code and tax percentages; folders and designs live inside it.</div>
+    <div class="eyebrow">Catalog{{ ' · Category' if current_category }}</div>
+    <h1>{{ current_category.name if current_category else 'Products' }}</h1>
+    <div class="text-sm text-soft">Categories group products like nested folders; each product carries its HSN code and IGST (SGST/CGST are half of it), with sub categories and designs inside.</div>
   </div>
   {% if current_user.is_admin %}
   <div class="topbar-actions">
-    <a href="{{ url_for('products.new_product') }}" class="btn btn-primary">+ New product</a>
+    {% if current_category %}
+    <a href="{{ url_for('products.edit_category', category_id=current_category.id) }}" class="btn btn-ghost">Rename category</a>
+    <form method="POST" action="{{ url_for('products.delete_category', category_id=current_category.id) }}" onsubmit="return confirm('Delete this category and everything inside it?');" style="display:inline;">
+      <button type="submit" class="btn btn-danger">Delete category</button>
+    </form>
+    {% endif %}
+    <a href="{{ url_for('products.new_category', parent_id=current_category.id if current_category else None) }}" class="btn btn-ghost">+ New category</a>
+    <a href="{{ url_for('products.new_product', category_id=current_category.id if current_category else None) }}" class="btn btn-primary">+ New product</a>
   </div>
   {% endif %}
 </div>
 
-{% if not products %}
+<div class="breadcrumb-trail">
+  <a href="{{ url_for('products.list_products') }}">Products</a>
+  {% for c in breadcrumb %}
+    <span class="crumb-sep">/</span>
+    <a href="{{ url_for('products.list_products', category_id=c.id) }}">{{ c.name }}</a>
+  {% endfor %}
+</div>
+
+{% if not categories and not products %}
   <div class="empty-state">
-    No products yet.
-    {% if current_user.is_admin %}Create a product to get started — designs and folders are added inside it.{% endif %}
+    {{ 'This category is empty.' if current_category else 'No categories or products yet.' }}
+    {% if current_user.is_admin %}Create a category or product to get started — categories can nest, and sub categories/designs are added inside a product.{% endif %}
   </div>
-{% else %}
+{% endif %}
+
+{% if categories %}
 <div class="card">
+  <div class="card-header"><h3>{{ 'Subcategories' if current_category else 'Categories' }}</h3></div>
+  <div class="folder-grid">
+    {% for category in categories %}
+    <div class="folder-tile">
+      <a class="folder-tile-link" href="{{ url_for('products.list_products', category_id=category.id) }}">
+        <span class="folder-icon">📁</span>
+        <span class="folder-name">{{ category.name }}</span>
+      </a>
+      {% if current_user.is_admin %}
+      <div class="folder-tile-actions">
+        <a href="{{ url_for('products.edit_category', category_id=category.id) }}" class="text-sm">Rename</a>
+        <form method="POST" action="{{ url_for('products.delete_category', category_id=category.id) }}" onsubmit="return confirm('Delete \'{{ category.name }}\' and everything inside it?');">
+          <button type="submit" class="btn-link-danger text-sm">Delete</button>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if products %}
+<div class="card">
+  <div class="card-header"><h3>Products</h3></div>
   <div class="table-wrap">
     <table class="ledger">
       <thead>
         <tr>
           <th>Product name</th>
           <th>HSN code</th>
-          <th>GST %</th>
           <th>IGST %</th>
           <th>SGST %</th>
           <th>CGST %</th>
@@ -43,7 +84,6 @@
             {% if product.description %}<div class="text-sm text-soft">{{ product.description | truncate(80) }}</div>{% endif %}
           </td>
           <td class="text-sm">{{ product.hsn_code or '—' }}</td>
-          <td class="text-sm">{{ product.gst_percent if product.gst_percent is not none else '—' }}</td>
           <td class="text-sm">{{ product.igst_percent if product.igst_percent is not none else '—' }}</td>
           <td class="text-sm">{{ product.sgst_percent if product.sgst_percent is not none else '—' }}</td>
           <td class="text-sm">{{ product.cgst_percent if product.cgst_percent is not none else '—' }}</td>

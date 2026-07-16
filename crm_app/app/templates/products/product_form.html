@@ -6,7 +6,7 @@
   <div>
     <div class="eyebrow">Catalog</div>
     <h1>{{ 'Edit product' if product else 'New product' }}</h1>
-    <div class="text-sm text-soft">A product holds the HSN code, tax percentages and packing spec (shared by every design under it). Price and photos belong to its designs.</div>
+    <div class="text-sm text-soft">A product holds the HSN code, IGST (SGST/CGST are auto-calculated as half of it) and packing spec (shared by every design under it). Price and photos belong to its designs.</div>
   </div>
 </div>
 
@@ -21,19 +21,29 @@
       <label for="description">Description</label>
       <textarea id="description" name="description" rows="3">{{ data.description | default('', true) }}</textarea>
     </div>
-    <div class="field" style="max-width:280px;">
-      <label for="hsn_code">HSN code</label>
-      <input type="text" id="hsn_code" name="hsn_code" value="{{ data.hsn_code | default('', true) }}">
+    <div class="form-row">
+      <div class="field" style="max-width:280px;">
+        <label for="hsn_code">HSN code</label>
+        <input type="text" id="hsn_code" name="hsn_code" value="{{ data.hsn_code | default('', true) }}">
+      </div>
+      <div class="field">
+        <label for="category_id">Category</label>
+        <select id="category_id" name="category_id">
+          {% set selected_category_id = (data.category_id | default(preselected_category_id, true)) %}
+          <option value="">— None (catalog root) —</option>
+          {% for category, depth in categories_tree %}
+            <option value="{{ category.id }}" {{ 'selected' if selected_category_id | string == category.id | string }}>{{ '　' * depth }}{{ '↳ ' if depth else '' }}{{ category.name }}</option>
+          {% endfor %}
+        </select>
+        <div class="hint">Categories group products like nested folders — manage them from the Products page.</div>
+      </div>
     </div>
     <div class="form-row">
-      <div class="field"><label for="gst_percent">GST %</label><input type="number" step="0.01" min="0" max="100" id="gst_percent" name="gst_percent" value="{{ data.gst_percent | default('', true) }}"></div>
       <div class="field"><label for="igst_percent">IGST %</label><input type="number" step="0.01" min="0" max="100" id="igst_percent" name="igst_percent" value="{{ data.igst_percent | default('', true) }}"></div>
+      <div class="field"><label for="sgst_display">SGST % (auto)</label><input type="number" id="sgst_display" value="{{ data.sgst_percent | default('', true) }}" readonly tabindex="-1"></div>
+      <div class="field"><label for="cgst_display">CGST % (auto)</label><input type="number" id="cgst_display" value="{{ data.cgst_percent | default('', true) }}" readonly tabindex="-1"></div>
     </div>
-    <div class="form-row">
-      <div class="field"><label for="sgst_percent">SGST %</label><input type="number" step="0.01" min="0" max="100" id="sgst_percent" name="sgst_percent" value="{{ data.sgst_percent | default('', true) }}"></div>
-      <div class="field"><label for="cgst_percent">CGST %</label><input type="number" step="0.01" min="0" max="100" id="cgst_percent" name="cgst_percent" value="{{ data.cgst_percent | default('', true) }}"></div>
-    </div>
-    <div class="hint">All four tax fields are percentages (0–100). Leave a field blank if it doesn't apply.</div>
+    <div class="hint">IGST is a percentage (0–100); leave it blank if it doesn't apply. SGST and CGST are calculated automatically as half of IGST.</div>
 
     <div class="form-row">
       <div class="field"><label for="packing">Packing (boxes per pallet)</label><input type="text" id="packing" name="packing" value="{{ data.packing | default('', true) }}"></div>
@@ -64,5 +74,21 @@
     <a href="{{ url_for('products.view_product', product_id=product.id) if product else url_for('products.list_products') }}" class="btn btn-ghost">Cancel</a>
   </form>
 </div>
+
+<script>
+(function () {
+  const igst = document.getElementById('igst_percent');
+  const sgst = document.getElementById('sgst_display');
+  const cgst = document.getElementById('cgst_display');
+  function recalc() {
+    const value = parseFloat(igst.value);
+    const half = isNaN(value) ? '' : Math.round(value * 50) / 100;
+    sgst.value = half;
+    cgst.value = half;
+  }
+  igst.addEventListener('input', recalc);
+  recalc();
+})();
+</script>
 
 {% endblock %}
