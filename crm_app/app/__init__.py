@@ -109,13 +109,14 @@ def create_app(config_class=Config) -> Flask:
     # --- make the current user + status constants available in every template --------------------------------------------------
     @app.context_processor
     def inject_globals():
-        from app.models import LEAD_STATUSES, CLIENT_STATUSES, CLIENT_TYPES, COMMUNICATION_MODES
+        from app.models import LEAD_STATUSES, CLIENT_STATUSES, CLIENT_TYPES, COMMUNICATION_MODES, DESIGN_UNITS
         return dict(
             current_user=g.get("user"),
             LEAD_STATUSES=LEAD_STATUSES,
             CLIENT_STATUSES=CLIENT_STATUSES,
             CLIENT_TYPES=CLIENT_TYPES,
             COMMUNICATION_MODES=COMMUNICATION_MODES,
+            DESIGN_UNITS=DESIGN_UNITS,
         )
 
     register_template_helpers(app)

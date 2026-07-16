@@ -723,11 +723,11 @@ class DesignRepository:
         new_id = self.db.execute(
             """INSERT INTO designs
                (company_id, product_id, folder_id, design_name, description, packing, quantity,
-                alternate_quantity, weight_class, price_usd, photo_path, dimension_photo_path, alt_text)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                alternate_quantity, unit, weight_class, price_usd, photo_path, dimension_photo_path, alt_text)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (design.company_id, design.product_id, design.folder_id, design.design_name,
              design.description, design.packing, design.quantity, design.alternate_quantity,
-             design.weight_class, design.price_usd, design.photo_path,
+             design.unit, design.weight_class, design.price_usd, design.photo_path,
              design.dimension_photo_path, design.alt_text),
         )
         return self.get_by_id(new_id)

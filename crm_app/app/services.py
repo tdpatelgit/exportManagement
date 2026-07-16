@@ -29,8 +29,8 @@ from werkzeug.utils import secure_filename
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
 from app.models import (
     User, Lead, Client, ContactPerson, Communication, PaymentEntry, DocumentEntry,
-    LEAD_STATUSES, CLIENT_STATUSES, Product, ProductFolder, Design, Quotation, QuotationItem,
-    ProformaInvoice, ProformaInvoiceItem, PackingList, PackingListItem,
+    LEAD_STATUSES, CLIENT_STATUSES, DESIGN_UNITS, Product, ProductFolder, Design,
+    Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem, PackingList, PackingListItem,
 )
 from app.repositories import (
     TenantRepository, UserRepositoryBase, LeadRepositoryBase, ClientRepositoryBase,
@@ -733,8 +733,8 @@ class ProductService:
 
     def create_design(self, current_user: User, product_id: int, folder_id: Optional[int],
                        design_name: str, description: str, packing: str, quantity: str,
-                       alternate_quantity: str, weight_class: str, price_usd: str, alt_text: str,
-                       photo_file, dimension_photo_file) -> Design:
+                       alternate_quantity: str, unit: str, weight_class: str, price_usd: str,
+                       alt_text: str, photo_file, dimension_photo_file) -> Design:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
         if not design_name or not design_name.strip():
@@ -751,14 +751,15 @@ class ProductService:
             id=None, company_id=current_user.company_id, product_id=product_id, folder_id=folder_id,
             design_name=design_name.strip(), description=description or None, packing=packing or None,
             quantity=quantity or None, alternate_quantity=alternate_quantity or None,
-            weight_class=weight_class or None, price_usd=self._parse_price(price_usd),
+            unit=self._parse_unit(unit), weight_class=weight_class or None,
+            price_usd=self._parse_price(price_usd),
             photo_path=photo_path, dimension_photo_path=dimension_photo_path, alt_text=alt_text or None,
         )
         return self.design_repo.create(design)
 
     def update_design(self, current_user: User, design_id: int, design_name: str,
                        description: str, packing: str, quantity: str, alternate_quantity: str,
-                       weight_class: str, price_usd: str, alt_text: str,
+                       unit: str, weight_class: str, price_usd: str, alt_text: str,
                        photo_file, dimension_photo_file) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
@@ -769,7 +770,8 @@ class ProductService:
         fields = {
             "design_name": design_name.strip(), "description": description or None,
             "packing": packing or None, "quantity": quantity or None,
-            "alternate_quantity": alternate_quantity or None, "weight_class": weight_class or None,
+            "alternate_quantity": alternate_quantity or None, "unit": self._parse_unit(unit),
+            "weight_class": weight_class or None,
             "price_usd": self._parse_price(price_usd), "alt_text": alt_text or None,
         }
         if photo_file and photo_file.filename:
@@ -797,6 +799,16 @@ class ProductService:
             return round(float(price_usd), 2)
         except ValueError:
             raise ValidationError("Price (USD) must be a number.")
+
+    @staticmethod
+    def _parse_unit(unit: str) -> str:
+        """The unit a design's quantity is measured in (SQM/LM/PCS/KG/SET).
+        Stored on the design so document forms can prefill their Unit column
+        instead of asking every time. Free-ish text on purpose - the form
+        offers the standard choices, but an unknown value just falls back to
+        SQM rather than blocking the save."""
+        unit = (unit or "").strip().upper()
+        return unit if unit in DESIGN_UNITS else "SQM"
 
     @staticmethod
     def _parse_percent(label: str, value: str) -> Optional[float]:

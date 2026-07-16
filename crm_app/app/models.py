@@ -139,6 +139,11 @@ CLIENT_TYPES = ["Supplier", "Exporter", "Buyer"]
 
 COMMUNICATION_MODES = ["WhatsApp", "WeChat", "Call", "Email", "In Person", "Other"]
 
+# What a design's quantity is measured in. One shared list drives the design
+# form, the Unit dropdowns on quotation/proforma/packing-list lines, and the
+# service-side fallback - so the choices can't drift apart.
+DESIGN_UNITS = ["SQM", "LM", "PCS", "KG", "SET"]
+
 
 @dataclass
 class Lead:
@@ -391,6 +396,7 @@ class Design:
     packing: Optional[str] = None
     quantity: Optional[str] = None
     alternate_quantity: Optional[str] = None
+    unit: str = "SQM"  # what the quantity is measured in; prefills document lines
     weight_class: Optional[str] = None
     price_usd: Optional[float] = None
     photo_path: Optional[str] = None
@@ -411,6 +417,7 @@ class Design:
             packing=row["packing"],
             quantity=row["quantity"],
             alternate_quantity=row["alternate_quantity"],
+            unit=row["unit"] if "unit" in row.keys() else "SQM",
             weight_class=row["weight_class"],
             price_usd=row["price_usd"],
             photo_path=row["photo_path"],

@@ -35,6 +35,15 @@
         <input type="text" id="alternate_quantity" name="alternate_quantity" value="{{ data.alternate_quantity | default('', true) }}">
         <div class="hint">Drives the Boxes × Alternate Quantity auto-calc on packing lists.</div>
       </div>
+      <div class="field" style="max-width:160px;">
+        <label for="unit">Quantity unit</label>
+        <select id="unit" name="unit">
+          {% for u in DESIGN_UNITS %}
+            <option value="{{ u }}" {{ 'selected' if (data.unit | default('SQM', true)) == u }}>{{ u }}</option>
+          {% endfor %}
+        </select>
+        <div class="hint">What the quantity is measured in — prefills the Unit column on documents.</div>
+      </div>
       <div class="field">
         <label for="weight_class">Weight class</label>
         <input type="text" id="weight_class" name="weight_class" value="{{ data.weight_class | default('', true) }}" placeholder="e.g. 18.5 KG / box">

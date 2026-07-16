@@ -40,7 +40,7 @@ from datetime import datetime
 # Because `_migrate` is idempotent and runs on every startup AND on every
 # restore, any backup - however old - is carried forward through the whole
 # chain of steps, never discarded.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # v2: designs.unit (what a design's quantity is measured in)
 
 
 class Database:

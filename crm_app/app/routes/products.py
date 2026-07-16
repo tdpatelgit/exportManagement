@@ -42,6 +42,7 @@ def _design_form_fields(form) -> dict:
         "packing": form.get("packing", ""),
         "quantity": form.get("quantity", ""),
         "alternate_quantity": form.get("alternate_quantity", ""),
+        "unit": form.get("unit", ""),
         "weight_class": form.get("weight_class", ""),
         "price_usd": form.get("price_usd", ""),
         "alt_text": form.get("alt_text", ""),
@@ -357,7 +358,7 @@ def api_browse_designs(product_id):
             {
                 "id": d.id, "name": d.design_name, "packing": d.packing,
                 "quantity": d.quantity, "alternate_quantity": d.alternate_quantity,
-                "weight_class": d.weight_class, "price_usd": d.price_usd,
+                "unit": d.unit, "weight_class": d.weight_class, "price_usd": d.price_usd,
                 "photo_url": url_for("static", filename=d.photo_path) if d.photo_path else None,
             }
             for d in designs

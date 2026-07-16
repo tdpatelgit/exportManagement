@@ -87,7 +87,7 @@
             <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required value="{{ row.quantity_value or '' }}"></td>
             <td>
               <select name="item_unit[]" class="js-unit">
-                {% for u in ['SQM', 'LM', 'PCS', 'KG', 'SET'] %}
+                {% for u in DESIGN_UNITS %}
                   <option value="{{ u }}" {{ 'selected' if row.unit == u }}>{{ u }}</option>
                 {% endfor %}
               </select>
@@ -217,7 +217,7 @@
       <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required></td>
       <td>
         <select name="item_unit[]" class="js-unit">
-          <option value="SQM">SQM</option><option value="LM">LM</option><option value="PCS">PCS</option><option value="KG">KG</option><option value="SET">SET</option>
+          {% for u in DESIGN_UNITS %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
         </select>
       </td>
       <td><input type="number" step="0.01" name="item_price_usd[]" class="js-price" required></td>

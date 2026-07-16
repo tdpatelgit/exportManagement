@@ -54,7 +54,8 @@
     <div><div class="text-sm text-soft">Description</div><div>{{ design.description or '—' }}</div></div>
     <div><div class="text-sm text-soft">Packing</div><div>{{ design.packing or '—' }}</div></div>
     <div><div class="text-sm text-soft">Quantity</div><div>{{ design.quantity or '—' }}</div></div>
-    <div><div class="text-sm text-soft">Alternate quantity</div><div>{{ design.alternate_quantity or '—' }}</div></div>
+    <div><div class="text-sm text-soft">Alternate quantity</div><div>{{ design.alternate_quantity or '—' }}{% if design.alternate_quantity %} {{ design.unit }}{% endif %}</div></div>
+    <div><div class="text-sm text-soft">Quantity unit</div><div>{{ design.unit }}</div></div>
     <div><div class="text-sm text-soft">Weight class</div><div>{{ design.weight_class or '—' }}</div></div>
     <div><div class="text-sm text-soft">Price (USD)</div><div>{{ '$ {:,.2f}'.format(design.price_usd) if design.price_usd is not none else '—' }}</div></div>
     <div><div class="text-sm text-soft">Alt text</div><div>{{ design.alt_text or '—' }}</div></div>
