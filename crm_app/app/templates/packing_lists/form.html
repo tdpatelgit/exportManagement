@@ -63,66 +63,88 @@
 
   <div class="card">
     <div class="card-header"><h3>Designs packed</h3></div>
-    <div class="table-wrap">
-      <table class="ledger" id="items-table">
-        <thead>
-          <tr>
-            <th>Sr</th>
-            <th style="min-width:180px;">Product</th>
-            <th style="min-width:160px;">Design</th>
-            <th>HSN code</th>
-            <th>Boxes<span class="required-mark">*</span></th>
-            <th>Box / plt</th>
-            <th>Plts</th>
-            <th>Pcs</th>
-            <th>Qty (SQM/LM)</th>
-            <th>Unit</th>
-            <th>Net wt (KG)</th>
-            <th>Gross wt (KG)</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="items-body">
-          {% set rows = form_items if form_items is not none else (packing_list.items if packing_list else []) %}
-          {% for row in rows %}
-          {% set pm = product_map.get(row.product_id | int) if row.product_id else None %}
-          <tr class="item-row" data-alt-qty="{{ (pm.alternate_quantity or '') if pm else '' }}" data-pcs-per-box="{{ (pm.quantity or '') if pm else '' }}"
-              data-net-per-box="{{ pm.net_weight_kg if pm and pm.net_weight_kg is not none else '' }}"
-              data-gross-per-box="{{ pm.gross_weight_kg if pm and pm.gross_weight_kg is not none else '' }}">
-            <td class="js-sr">{{ loop.index }}</td>
-            <td>
-              <input type="hidden" name="item_product_id[]" class="js-product-id" value="{{ row.product_id or '' }}">
-              <textarea name="item_product_name[]" class="js-product-name" rows="2" required>{{ row.product_name }}</textarea>
-              <button type="button" class="btn btn-ghost btn-sm js-choose-product">📦 Product</button>
-            </td>
-            <td>
-              <input type="hidden" name="item_design_id[]" class="js-design-id" value="{{ row.design_id or '' }}">
-              <textarea name="item_design_name[]" class="js-design-name" rows="2">{{ row.design_name or '' }}</textarea>
-              <button type="button" class="btn btn-ghost btn-sm js-choose-design">🎨 Design</button>
-            </td>
-            <td><input type="text" name="item_hsn_code[]" class="js-hsn" value="{{ row.hsn_code or '' }}" readonly tabindex="-1"></td>
-            <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" required value="{{ row.quantity_boxes or '' }}"></td>
-            <td><input type="number" step="0.01" name="item_box_per_pallet[]" class="js-box-per-pallet" value="{{ row.box_per_pallet or '' }}"></td>
-            <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets" value="{{ row.pallets or '' }}"></td>
-            <td><input type="number" step="0.01" name="item_pcs[]" class="js-pcs" value="{{ row.pcs or '' }}"></td>
-            <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" value="{{ row.quantity_value or '' }}"></td>
-            <td>
-              <select name="item_unit[]" class="js-unit">
-                {% for u in PRODUCT_UNITS %}
-                  <option value="{{ u }}" {{ 'selected' if row.unit == u }}>{{ u }}</option>
-                {% endfor %}
-              </select>
-            </td>
-            <td><input type="number" step="0.01" name="item_net_weight_kg[]" class="js-net" value="{{ row.net_weight_kg or '' }}"></td>
-            <td><input type="number" step="0.01" name="item_gross_weight_kg[]" class="js-gross" value="{{ row.gross_weight_kg or '' }}"></td>
-            <td><button type="button" class="btn-link-danger js-remove-row">Remove</button></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <div id="products-container">
+      {% for group in item_groups %}
+      {% set first = group[0] %}
+      {% set pm = product_map.get(first.product_id | int) if first.product_id else None %}
+      <div class="product-block" data-alt-qty="{{ (pm.alternate_quantity or '') if pm else '' }}" data-pcs-per-box="{{ (pm.quantity or '') if pm else '' }}"
+           data-net-per-box="{{ pm.net_weight_kg if pm and pm.net_weight_kg is not none else '' }}"
+           data-gross-per-box="{{ pm.gross_weight_kg if pm and pm.gross_weight_kg is not none else '' }}">
+        <div class="product-block-header">
+          <div class="field" style="flex:2; min-width:220px;">
+            <label>Product</label>
+            <input type="hidden" class="js-product-id" value="{{ first.product_id or '' }}">
+            <textarea class="js-product-name" rows="2" required>{{ first.product_name }}</textarea>
+            <button type="button" class="btn btn-ghost btn-sm js-choose-product">📦 Product</button>
+          </div>
+          <div class="field" style="max-width:140px;">
+            <label>HSN code</label>
+            <input type="text" class="js-hsn" readonly tabindex="-1" value="{{ first.hsn_code or '' }}">
+          </div>
+          <div class="field" style="max-width:100px;">
+            <label>Box / plt</label>
+            <input type="number" step="0.01" class="js-box-per-pallet" value="{{ first.box_per_pallet or '' }}">
+          </div>
+          <div class="field" style="max-width:100px;">
+            <label>Unit</label>
+            <select class="js-unit">
+              {% for u in PRODUCT_UNITS %}
+                <option value="{{ u }}" {{ 'selected' if first.unit == u }}>{{ u }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <button type="button" class="btn-link-danger js-remove-product">Remove product</button>
+        </div>
+
+        <div class="table-wrap">
+          <table class="ledger">
+            <thead>
+              <tr>
+                <th>Sr</th>
+                <th style="min-width:160px;">Design</th>
+                <th>Boxes<span class="required-mark">*</span></th>
+                <th>Pcs</th>
+                <th>Plts</th>
+                <th>Qty (SQM/LM)</th>
+                <th>Net wt (KG)</th>
+                <th>Gross wt (KG)</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody class="js-designs-body">
+              {% for item in group %}
+              <tr class="design-row">
+                <td class="js-sr"></td>
+                <td>
+                  <input type="hidden" name="item_design_id[]" class="js-design-id" value="{{ item.design_id or '' }}">
+                  <textarea name="item_design_name[]" class="js-design-name" rows="1">{{ item.design_name or '' }}</textarea>
+                  <input type="hidden" name="item_product_id[]" class="js-mirror-product-id" value="{{ item.product_id or '' }}">
+                  <input type="hidden" name="item_product_name[]" class="js-mirror-product-name" value="{{ item.product_name }}">
+                  <input type="hidden" name="item_hsn_code[]" class="js-mirror-hsn" value="{{ item.hsn_code or '' }}">
+                  <input type="hidden" name="item_box_per_pallet[]" class="js-mirror-box-per-pallet" value="{{ item.box_per_pallet or '' }}">
+                  <input type="hidden" name="item_unit[]" class="js-mirror-unit" value="{{ item.unit or 'SQM' }}">
+                </td>
+                <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" required value="{{ item.quantity_boxes or '' }}"></td>
+                <td><input type="number" step="0.01" name="item_pcs[]" class="js-pcs" value="{{ item.pcs or '' }}"></td>
+                <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets" value="{{ item.pallets or '' }}"></td>
+                <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" value="{{ item.quantity_value or '' }}"></td>
+                <td><input type="number" step="0.01" name="item_net_weight_kg[]" class="js-net" value="{{ item.net_weight_kg or '' }}"></td>
+                <td><input type="number" step="0.01" name="item_gross_weight_kg[]" class="js-gross" value="{{ item.gross_weight_kg or '' }}"></td>
+                <td><button type="button" class="btn-link-danger js-remove-design">Remove</button></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="product-block-footer">
+          <button type="button" class="btn btn-ghost btn-sm js-add-design">🎨 + Add design(s)</button>
+          <button type="button" class="btn btn-ghost btn-sm js-add-blank-design">+ Add blank design line</button>
+        </div>
+      </div>
+      {% endfor %}
     </div>
-    <button type="button" class="btn btn-ghost btn-sm" id="add-row-btn">+ Add design line</button>
-    <p class="hint">Boxes is compulsory; Qty fills in automatically and doesn't need to be typed. Picking a product fills in Box/plt, Unit and the per-box figures from its packing spec (shared by every design under it). Fill in either Boxes or Pallets — the other one, plus Pcs and Qty, is worked out from Box/plt and the product's per-box figures (or a "2 PCS = 0.72 SQM" note in the description). Pallets locks to the calculated value whenever Boxes divides evenly by Box/plt; it only opens up for you to type in by hand when there's a partial last pallet. Every auto-filled value stays editable.</p>
+    <button type="button" class="btn btn-ghost btn-sm" id="add-product-btn">+ Add product</button>
+    <p class="hint">Pick a product once, then use "Add design(s)" to tick as many designs as you need under it — they stay grouped in one product block here, but each still prints as its own numbered line on the packing list. Boxes is compulsory per design; Qty fills in automatically. Picking a product fills in Box/plt, Unit and the per-box figures from its packing spec (shared by every design under it). Fill in either Boxes or Plts on a design — the other one, plus Pcs and Qty, is worked out from Box/plt and the product's per-box figures (or a "2 PCS = 0.72 SQM" note in the product description). Every auto-filled value stays editable.</p>
     <div class="flex-between" style="margin-top:14px;">
       <div></div>
       <div class="text-sm">
@@ -160,65 +182,124 @@
   </div>
 </div>
 
-<!-- Design picker modal: browses the chosen product's folder tree -->
+<!-- Design picker modal: browses the chosen product's folder tree. Checkbox
+     multi-select - picking several designs adds each as its own design row
+     inside the current product block (no new outer row here on the edit
+     page), and each still prints as its own numbered line on the PDF. -->
 <div id="design-picker-overlay" class="modal-overlay" hidden>
   <div class="modal-box">
     <div class="modal-header">
-      <h3 id="design-picker-title">Choose a design</h3>
+      <h3 id="design-picker-title">Choose designs</h3>
       <button type="button" class="btn-link-danger" id="design-picker-close">✕ Close</button>
     </div>
+    <p class="hint">Tick as many designs as you need under this product — they're added to the block below, each printing as its own line.</p>
     <div class="breadcrumb-trail" id="design-picker-breadcrumb"></div>
     <div id="design-picker-folders" class="folder-grid"></div>
     <div id="design-picker-designs" class="table-wrap"></div>
+    <div class="modal-header" style="margin-top:12px; border-top:1px solid var(--color-line); padding-top:12px;">
+      <div id="design-picker-selected-count" class="text-sm text-soft">0 designs selected</div>
+      <button type="button" class="btn btn-primary btn-sm" id="design-picker-add-selected">+ Add selected designs</button>
+    </div>
   </div>
 </div>
 
 <script>
 (function () {
-  const itemsBody = document.getElementById('items-body');
-  const addRowBtn = document.getElementById('add-row-btn');
+  const productsContainer = document.getElementById('products-container');
+  const addProductBtn = document.getElementById('add-product-btn');
 
-  const rowTemplate = () => {
+  // ---- product block template (header fields, no name= attrs - those live
+  // only on the hidden mirror inputs inside each design row) --------------------------------------------------
+  const productBlockTemplate = () => {
+    const div = document.createElement('div');
+    div.className = 'product-block';
+    div.innerHTML = `
+      <div class="product-block-header">
+        <div class="field" style="flex:2; min-width:220px;">
+          <label>Product</label>
+          <input type="hidden" class="js-product-id">
+          <textarea class="js-product-name" rows="2" required></textarea>
+          <button type="button" class="btn btn-ghost btn-sm js-choose-product">📦 Product</button>
+        </div>
+        <div class="field" style="max-width:140px;">
+          <label>HSN code</label>
+          <input type="text" class="js-hsn" readonly tabindex="-1">
+        </div>
+        <div class="field" style="max-width:100px;">
+          <label>Box / plt</label>
+          <input type="number" step="0.01" class="js-box-per-pallet">
+        </div>
+        <div class="field" style="max-width:100px;">
+          <label>Unit</label>
+          <select class="js-unit">
+            {% for u in PRODUCT_UNITS %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
+          </select>
+        </div>
+        <button type="button" class="btn-link-danger js-remove-product">Remove product</button>
+      </div>
+      <div class="table-wrap">
+        <table class="ledger">
+          <thead>
+            <tr>
+              <th>Sr</th>
+              <th style="min-width:160px;">Design</th>
+              <th>Boxes<span class="required-mark">*</span></th>
+              <th>Pcs</th>
+              <th>Plts</th>
+              <th>Qty (SQM/LM)</th>
+              <th>Net wt (KG)</th>
+              <th>Gross wt (KG)</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody class="js-designs-body"></tbody>
+        </table>
+      </div>
+      <div class="product-block-footer">
+        <button type="button" class="btn btn-ghost btn-sm js-add-design">🎨 + Add design(s)</button>
+        <button type="button" class="btn btn-ghost btn-sm js-add-blank-design">+ Add blank design line</button>
+      </div>`;
+    return div;
+  };
+
+  // ---- design row template: hidden inputs mirror the enclosing product
+  // block's header fields (product id/name/hsn/box-per-pallet/unit) so the
+  // form still submits one full item_*[] entry per design, matching what
+  // the backend/printed PDF expect - the header is only edited once per
+  // product block, not once per design. --------------------------------------------------
+  const designRowTemplate = () => {
     const tr = document.createElement('tr');
-    tr.className = 'item-row';
+    tr.className = 'design-row';
     tr.innerHTML = `
       <td class="js-sr"></td>
       <td>
-        <input type="hidden" name="item_product_id[]" class="js-product-id">
-        <textarea name="item_product_name[]" class="js-product-name" rows="2" required></textarea>
-        <button type="button" class="btn btn-ghost btn-sm js-choose-product">📦 Product</button>
-      </td>
-      <td>
         <input type="hidden" name="item_design_id[]" class="js-design-id">
-        <textarea name="item_design_name[]" class="js-design-name" rows="2"></textarea>
-        <button type="button" class="btn btn-ghost btn-sm js-choose-design">🎨 Design</button>
+        <textarea name="item_design_name[]" class="js-design-name" rows="1"></textarea>
+        <input type="hidden" name="item_product_id[]" class="js-mirror-product-id">
+        <input type="hidden" name="item_product_name[]" class="js-mirror-product-name">
+        <input type="hidden" name="item_hsn_code[]" class="js-mirror-hsn">
+        <input type="hidden" name="item_box_per_pallet[]" class="js-mirror-box-per-pallet">
+        <input type="hidden" name="item_unit[]" class="js-mirror-unit">
       </td>
-      <td><input type="text" name="item_hsn_code[]" class="js-hsn" readonly tabindex="-1"></td>
       <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" required></td>
-      <td><input type="number" step="0.01" name="item_box_per_pallet[]" class="js-box-per-pallet"></td>
-      <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets"></td>
       <td><input type="number" step="0.01" name="item_pcs[]" class="js-pcs"></td>
+      <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets"></td>
       <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty"></td>
-      <td>
-        <select name="item_unit[]" class="js-unit">
-          {% for u in PRODUCT_UNITS %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
-        </select>
-      </td>
       <td><input type="number" step="0.01" name="item_net_weight_kg[]" class="js-net"></td>
       <td><input type="number" step="0.01" name="item_gross_weight_kg[]" class="js-gross"></td>
-      <td><button type="button" class="btn-link-danger js-remove-row">Remove</button></td>`;
+      <td><button type="button" class="btn-link-danger js-remove-design">Remove</button></td>`;
     return tr;
   };
 
   function renumber() {
-    itemsBody.querySelectorAll('.item-row').forEach((tr, i) => {
+    productsContainer.querySelectorAll('.design-row').forEach((tr, i) => {
       tr.querySelector('.js-sr').textContent = i + 1;
     });
   }
 
   function recalcTotals() {
     let boxes = 0, pcs = 0, qty = 0, net = 0, gross = 0;
-    itemsBody.querySelectorAll('.item-row').forEach((tr) => {
+    productsContainer.querySelectorAll('.design-row').forEach((tr) => {
       boxes += parseFloat(tr.querySelector('.js-boxes').value) || 0;
       pcs += parseFloat(tr.querySelector('.js-pcs').value) || 0;
       qty += parseFloat(tr.querySelector('.js-qty').value) || 0;
@@ -232,19 +313,36 @@
     document.getElementById('total-gross-display').textContent = gross.toFixed(2);
   }
 
-  // Per-box factors for a row: from the picked product (dataset) when
-  // known - every design under a product shares the same packing spec -
-  // otherwise parsed from a "2 PCS = 0.72 SQM" pattern in the description.
-  // That fallback is what keeps the auto-calc alive on rows prefilled from
-  // a proforma invoice, reopened for editing, or typed in by hand.
-  function packInfo(tr) {
-    const desc = tr.querySelector('.js-product-name').value || '';
+  // Copies the product block's header fields into a single design row's
+  // hidden mirrors - called when a design row is first added, and again on
+  // every existing row whenever the header changes (product picked,
+  // box/plt or unit edited by hand).
+  function mirrorProductFields(block, row) {
+    row.querySelector('.js-mirror-product-id').value = block.querySelector('.js-product-id').value;
+    row.querySelector('.js-mirror-product-name').value = block.querySelector('.js-product-name').value;
+    row.querySelector('.js-mirror-hsn').value = block.querySelector('.js-hsn').value;
+    row.querySelector('.js-mirror-box-per-pallet').value = block.querySelector('.js-box-per-pallet').value;
+    row.querySelector('.js-mirror-unit').value = block.querySelector('.js-unit').value;
+  }
+
+  function mirrorProductFieldsToAllDesigns(block) {
+    block.querySelectorAll('.design-row').forEach((row) => mirrorProductFields(block, row));
+  }
+
+  // Per-box factors for a design row: from the block's picked product
+  // (dataset) when known - every design under a product shares the same
+  // packing spec - otherwise parsed from a "2 PCS = 0.72 SQM" pattern in
+  // the product description. That fallback is what keeps the auto-calc
+  // alive on rows prefilled from a proforma invoice/quotation, reopened
+  // for editing, or typed in by hand.
+  function packInfo(block) {
+    const desc = block.querySelector('.js-product-name').value || '';
     const m = desc.match(/([\d.]+)\s*PCS?\s*=\s*([\d.]+)\s*(SQM|LM)/i);
     return {
-      pcsPerBox: parseFloat(tr.dataset.pcsPerBox) || (m ? parseFloat(m[1]) : 0),
-      qtyPerBox: parseFloat(tr.dataset.altQty) || (m ? parseFloat(m[2]) : 0),
-      netPerBox: parseFloat(tr.dataset.netPerBox) || 0,
-      grossPerBox: parseFloat(tr.dataset.grossPerBox) || 0,
+      pcsPerBox: parseFloat(block.dataset.pcsPerBox) || (m ? parseFloat(m[1]) : 0),
+      qtyPerBox: parseFloat(block.dataset.altQty) || (m ? parseFloat(m[2]) : 0),
+      netPerBox: parseFloat(block.dataset.netPerBox) || 0,
+      grossPerBox: parseFloat(block.dataset.grossPerBox) || 0,
     };
   }
 
@@ -260,10 +358,10 @@
   // can't drift out of sync. When Boxes ISN'T a perfect multiple (a partial
   // last pallet), there's no clean quotient to show, so Pallets unlocks for
   // the user to type in by hand.
-  function updatePallets(tr) {
-    const boxes = parseFloat(tr.querySelector('.js-boxes').value) || 0;
-    const perPallet = parseFloat(tr.querySelector('.js-box-per-pallet').value) || 0;
-    const palletsEl = tr.querySelector('.js-pallets');
+  function updatePallets(block, row) {
+    const boxes = parseFloat(row.querySelector('.js-boxes').value) || 0;
+    const perPallet = parseFloat(block.querySelector('.js-box-per-pallet').value) || 0;
+    const palletsEl = row.querySelector('.js-pallets');
     if (boxes && isPerfectMultiple(boxes, perPallet)) {
       palletsEl.value = +(boxes / perPallet).toFixed(2);
       palletsEl.readOnly = true;
@@ -272,61 +370,99 @@
     }
   }
 
-  function recalcQtyPcs(tr) {
-    const boxes = parseFloat(tr.querySelector('.js-boxes').value) || 0;
-    const { pcsPerBox, qtyPerBox, netPerBox, grossPerBox } = packInfo(tr);
-    if (boxes && pcsPerBox) tr.querySelector('.js-pcs').value = +(boxes * pcsPerBox).toFixed(2);
-    if (boxes && qtyPerBox) tr.querySelector('.js-qty').value = (boxes * qtyPerBox).toFixed(2);
-    if (boxes && netPerBox) tr.querySelector('.js-net').value = (boxes * netPerBox).toFixed(2);
-    if (boxes && grossPerBox) tr.querySelector('.js-gross').value = (boxes * grossPerBox).toFixed(2);
+  function recalcQtyPcs(block, row) {
+    const boxes = parseFloat(row.querySelector('.js-boxes').value) || 0;
+    const { pcsPerBox, qtyPerBox, netPerBox, grossPerBox } = packInfo(block);
+    if (boxes && pcsPerBox) row.querySelector('.js-pcs').value = +(boxes * pcsPerBox).toFixed(2);
+    if (boxes && qtyPerBox) row.querySelector('.js-qty').value = (boxes * qtyPerBox).toFixed(2);
+    if (boxes && netPerBox) row.querySelector('.js-net').value = (boxes * netPerBox).toFixed(2);
+    if (boxes && grossPerBox) row.querySelector('.js-gross').value = (boxes * grossPerBox).toFixed(2);
   }
 
   // The row calculates from whichever of Boxes / Pallets was just filled
   // in: editing Pallets back-fills Boxes (Pallets x Box-per-pallet) since
-  // Boxes can't be left blank; editing Boxes (or Box-per-pallet, once Boxes
-  // is already known) instead re-derives Pallets. Either way Pcs/Qty follow
-  // from the resulting Boxes. Every auto-filled value stays editable -
-  // typing into it directly isn't overwritten until an upstream field
-  // changes again.
-  function recalcRow(tr, source) {
-    const boxesEl = tr.querySelector('.js-boxes');
-    const perPallet = parseFloat(tr.querySelector('.js-box-per-pallet').value) || 0;
-    const pallets = parseFloat(tr.querySelector('.js-pallets').value) || 0;
+  // Boxes can't be left blank; editing Boxes (or the block's Box-per-pallet,
+  // once Boxes is already known) instead re-derives Pallets. Either way
+  // Pcs/Qty follow from the resulting Boxes. Every auto-filled value stays
+  // editable - typing into it directly isn't overwritten until an upstream
+  // field changes again.
+  function recalcRow(row, source) {
+    const block = row.closest('.product-block');
+    const boxesEl = row.querySelector('.js-boxes');
+    const perPallet = parseFloat(block.querySelector('.js-box-per-pallet').value) || 0;
+    const pallets = parseFloat(row.querySelector('.js-pallets').value) || 0;
     if (source === 'pallets' || (!boxesEl.value && perPallet && pallets)) {
       if (perPallet && pallets) boxesEl.value = +(perPallet * pallets).toFixed(2);
     }
-    updatePallets(tr);
-    recalcQtyPcs(tr);
+    updatePallets(block, row);
+    recalcQtyPcs(block, row);
   }
 
-  addRowBtn.addEventListener('click', () => {
-    itemsBody.appendChild(rowTemplate());
-    renumber();
-  });
+  function addProductBlock() {
+    const block = productBlockTemplate();
+    productsContainer.appendChild(block);
+    return block;
+  }
 
-  itemsBody.addEventListener('click', (e) => {
-    if (e.target.classList.contains('js-remove-row')) {
-      e.target.closest('tr').remove();
+  function addDesignRow(block, opts) {
+    opts = opts || {};
+    const row = designRowTemplate();
+    block.querySelector('.js-designs-body').appendChild(row);
+    mirrorProductFields(block, row);
+    if (opts.designId) row.querySelector('.js-design-id').value = opts.designId;
+    if (opts.designName) row.querySelector('.js-design-name').value = opts.designName;
+    return row;
+  }
+
+  addProductBtn.addEventListener('click', () => { addProductBlock(); });
+
+  productsContainer.addEventListener('click', (e) => {
+    if (e.target.classList.contains('js-remove-product')) {
+      e.target.closest('.product-block').remove();
+      renumber();
+      recalcTotals();
+    } else if (e.target.classList.contains('js-remove-design')) {
+      e.target.closest('.design-row').remove();
       renumber();
       recalcTotals();
     } else if (e.target.classList.contains('js-choose-product')) {
-      openProductPicker(e.target.closest('tr'));
-    } else if (e.target.classList.contains('js-choose-design')) {
-      openDesignPicker(e.target.closest('tr'));
+      openProductPicker(e.target.closest('.product-block'));
+    } else if (e.target.classList.contains('js-add-design')) {
+      openDesignPicker(e.target.closest('.product-block'));
+    } else if (e.target.classList.contains('js-add-blank-design')) {
+      const block = e.target.closest('.product-block');
+      if (!block.querySelector('.js-product-id').value) {
+        alert('Choose a catalog product for this block first.');
+        return;
+      }
+      addDesignRow(block);
+      renumber();
+      recalcTotals();
     }
   });
 
-  itemsBody.addEventListener('input', (e) => {
+  productsContainer.addEventListener('input', (e) => {
     if (e.target.classList.contains('js-boxes')) {
-      recalcRow(e.target.closest('tr'), 'boxes');
+      recalcRow(e.target.closest('.design-row'), 'boxes');
       recalcTotals();
     } else if (e.target.classList.contains('js-pallets')) {
-      recalcRow(e.target.closest('tr'), 'pallets');
+      recalcRow(e.target.closest('.design-row'), 'pallets');
       recalcTotals();
-    } else if (['js-box-per-pallet', 'js-product-name'].some(c => e.target.classList.contains(c))) {
-      recalcRow(e.target.closest('tr'));
+    } else if (e.target.classList.contains('js-box-per-pallet') || e.target.classList.contains('js-unit') || e.target.classList.contains('js-product-name')) {
+      // Header field edited by hand (not via the pickers) - keep every
+      // design row's hidden mirrors and derived figures in sync.
+      const block = e.target.closest('.product-block');
+      mirrorProductFieldsToAllDesigns(block);
+      block.querySelectorAll('.design-row').forEach((row) => recalcRow(row));
       recalcTotals();
     } else if (['js-pcs', 'js-qty', 'js-net', 'js-gross'].some(c => e.target.classList.contains(c))) {
+      recalcTotals();
+    }
+  });
+  productsContainer.addEventListener('change', (e) => {
+    if (e.target.classList.contains('js-unit')) {
+      const block = e.target.closest('.product-block');
+      mirrorProductFieldsToAllDesigns(block);
       recalcTotals();
     }
   });
@@ -355,11 +491,11 @@
   const productOverlay = document.getElementById('product-picker-overlay');
   const productListEl = document.getElementById('product-picker-list');
   const productSearchEl = document.getElementById('product-picker-search');
-  let activeRow = null;
+  let activeBlock = null;
   let allProducts = [];
 
-  function openProductPicker(row) {
-    activeRow = row;
+  function openProductPicker(block) {
+    activeBlock = block;
     productOverlay.hidden = false;
     productSearchEl.value = '';
     fetch('/products/api/list').then(r => r.json()).then(data => {
@@ -404,44 +540,67 @@
   }
 
   function selectProduct(p) {
-    if (!activeRow) return;
-    activeRow.querySelector('.js-product-id').value = p.id;
-    activeRow.querySelector('.js-product-name').value = p.name;
-    activeRow.querySelector('.js-hsn').value = p.hsn_code || '';
-    // A design belongs to one product - clear any design picked for a different product.
-    activeRow.querySelector('.js-design-id').value = '';
-    activeRow.querySelector('.js-design-name').value = '';
+    if (!activeBlock) return;
+    activeBlock.querySelector('.js-product-id').value = p.id;
+    activeBlock.querySelector('.js-product-name').value = p.name;
+    activeBlock.querySelector('.js-hsn').value = p.hsn_code || '';
+    // A different product invalidates any designs already picked under the
+    // old one - clear them so the block starts fresh under the new product.
+    activeBlock.querySelectorAll('.design-row').forEach((row) => {
+      row.querySelector('.js-design-id').value = '';
+      row.querySelector('.js-design-name').value = '';
+    });
     // The product carries the packing spec shared by every design under it
-    // (Box/plt, per-box Pcs/Qty figures, Unit) - prefill the row from it the
-    // same way picking a product fills in the HSN code.
-    if (p.unit) activeRow.querySelector('.js-unit').value = p.unit;
-    activeRow.dataset.altQty = parseFloat(p.alternate_quantity) || '';
-    activeRow.dataset.pcsPerBox = parseFloat(p.quantity) || '';
-    activeRow.dataset.netPerBox = p.net_weight_kg || '';
-    activeRow.dataset.grossPerBox = p.gross_weight_kg || '';
+    // (Box/plt, per-box Pcs/Qty figures, Unit) - prefill the block from it
+    // the same way picking a product fills in the HSN code.
+    if (p.unit) activeBlock.querySelector('.js-unit').value = p.unit;
+    activeBlock.dataset.altQty = parseFloat(p.alternate_quantity) || '';
+    activeBlock.dataset.pcsPerBox = parseFloat(p.quantity) || '';
+    activeBlock.dataset.netPerBox = p.net_weight_kg || '';
+    activeBlock.dataset.grossPerBox = p.gross_weight_kg || '';
     const boxPerPallet = parseFloat(p.packing) || null;
-    if (boxPerPallet) activeRow.querySelector('.js-box-per-pallet').value = boxPerPallet;
-    recalcRow(activeRow);
+    if (boxPerPallet) activeBlock.querySelector('.js-box-per-pallet').value = boxPerPallet;
+    mirrorProductFieldsToAllDesigns(activeBlock);
+    activeBlock.querySelectorAll('.design-row').forEach((row) => recalcRow(row));
     recalcTotals();
     productOverlay.hidden = true;
   }
 
-  // ---- design picker modal (browses the row's product folder tree) --------------------------------------------------
+  // ---- design picker modal (browses the active product block's folder tree) --------------------------------------------------
+  // Checkbox multi-select: designs can live in different sub-folders of the
+  // same product, so the selection set survives folder navigation
+  // (selectedDesigns, keyed by design id) and is only cleared when the
+  // picker is opened fresh for a block. Adding selected designs appends a
+  // new design row to THIS block (no new outer product row) - already-
+  // attached designs are pre-ticked and skipped on re-add to avoid dupes.
   const designOverlay = document.getElementById('design-picker-overlay');
   const designTitleEl = document.getElementById('design-picker-title');
   const designBreadcrumbEl = document.getElementById('design-picker-breadcrumb');
   const designFoldersEl = document.getElementById('design-picker-folders');
   const designListEl = document.getElementById('design-picker-designs');
+  const designSelectedCountEl = document.getElementById('design-picker-selected-count');
+  const designAddSelectedBtn = document.getElementById('design-picker-add-selected');
   let designPickerProductId = null;
+  let selectedDesigns = new Map();
 
-  function openDesignPicker(row) {
-    const productId = row.querySelector('.js-product-id').value;
+  function existingDesignIds(block) {
+    return new Set(
+      Array.from(block.querySelectorAll('.design-row .js-design-id'))
+        .map((el) => el.value)
+        .filter(Boolean)
+    );
+  }
+
+  function openDesignPicker(block) {
+    const productId = block.querySelector('.js-product-id').value;
     if (!productId) {
-      alert('Choose a catalog product for this row first — designs live inside a product.');
+      alert('Choose a catalog product for this block first — designs live inside a product.');
       return;
     }
-    activeRow = row;
+    activeBlock = block;
     designPickerProductId = productId;
+    selectedDesigns = new Map();
+    updateSelectedCount();
     designOverlay.hidden = false;
     loadDesignFolder(null);
   }
@@ -449,10 +608,16 @@
   document.getElementById('design-picker-close').addEventListener('click', () => { designOverlay.hidden = true; });
   designOverlay.addEventListener('click', (e) => { if (e.target === designOverlay) designOverlay.hidden = true; });
 
+  function updateSelectedCount() {
+    const n = selectedDesigns.size;
+    designSelectedCountEl.textContent = n === 0 ? 'No designs selected' : `${n} design${n === 1 ? '' : 's'} selected`;
+  }
+
   function loadDesignFolder(folderId) {
     const url = `/products/api/${designPickerProductId}/designs` + (folderId ? `?folder_id=${folderId}` : '');
     fetch(url).then(r => r.json()).then(data => {
-      designTitleEl.textContent = `Choose a design — ${data.product.name}`;
+      designTitleEl.textContent = `Choose designs — ${data.product.name}`;
+      const alreadyAttached = existingDesignIds(activeBlock);
 
       designBreadcrumbEl.innerHTML = '';
       const rootLink = document.createElement('a');
@@ -483,17 +648,25 @@
       } else {
         const table = document.createElement('table');
         table.className = 'ledger';
-        table.innerHTML = '<thead><tr><th></th><th>Design</th><th>Price (USD)</th><th></th></tr></thead>';
+        table.innerHTML = '<thead><tr><th></th><th></th><th>Design</th><th>Price (USD)</th></tr></thead>';
         const tbody = document.createElement('tbody');
         data.designs.forEach(d => {
           const tr = document.createElement('tr');
+          const idStr = String(d.id);
+          const alreadyIn = alreadyAttached.has(idStr);
           tr.innerHTML = `
+            <td><input type="checkbox" class="js-design-pick" ${alreadyIn ? 'disabled' : ''}></td>
             <td>${d.photo_url ? `<img class="thumb" src="${d.photo_url}">` : ''}</td>
-            <td><strong></strong></td>
-            <td class="text-sm">${d.price_usd != null ? '$ ' + Number(d.price_usd).toFixed(2) : '—'}</td>
-            <td><button type="button" class="btn btn-primary btn-sm">Select</button></td>`;
+            <td><strong></strong>${alreadyIn ? ' <span class="text-soft text-sm">(already added)</span>' : ''}</td>
+            <td class="text-sm">${d.price_usd != null ? '$ ' + Number(d.price_usd).toFixed(2) : '—'}</td>`;
           tr.querySelector('strong').textContent = d.name;
-          tr.querySelector('button').addEventListener('click', () => selectDesign(d));
+          const cb = tr.querySelector('.js-design-pick');
+          cb.checked = selectedDesigns.has(idStr);
+          cb.addEventListener('change', () => {
+            if (cb.checked) selectedDesigns.set(idStr, { id: idStr, name: d.name });
+            else selectedDesigns.delete(idStr);
+            updateSelectedCount();
+          });
           tbody.appendChild(tr);
         });
         table.appendChild(tbody);
@@ -503,17 +676,22 @@
     });
   }
 
-  // A design is just the specific finish/color variant picked for the row's
-  // description - its packing spec (Box/plt, per-box figures, Unit) comes
-  // from the row's PRODUCT instead, set when the product was chosen above.
-  function selectDesign(d) {
-    if (!activeRow) return;
-    activeRow.querySelector('.js-design-id').value = d.id;
-    activeRow.querySelector('.js-design-name').value = d.name;
+  // Every selected design becomes its own new design row inside the active
+  // product block (not a new outer row) - the block's product/HSN/Box-plt/
+  // Unit are mirrored into each new row automatically.
+  designAddSelectedBtn.addEventListener('click', () => {
+    if (!activeBlock || selectedDesigns.size === 0) { designOverlay.hidden = true; return; }
+    Array.from(selectedDesigns.values()).forEach((d) => {
+      addDesignRow(activeBlock, { designId: d.id, designName: d.name });
+    });
+    renumber();
+    recalcTotals();
     designOverlay.hidden = true;
-  }
+  });
 
-  itemsBody.querySelectorAll('.item-row').forEach((tr) => updatePallets(tr));
+  productsContainer.querySelectorAll('.product-block').forEach((block) => {
+    block.querySelectorAll('.design-row').forEach((row) => updatePallets(block, row));
+  });
   renumber();
   recalcTotals();
 })();

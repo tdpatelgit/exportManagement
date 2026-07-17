@@ -309,6 +309,15 @@ input[readonly]:focus { box-shadow: none; border-color: #c9c1ab; }
 fieldset { border: 1px solid var(--color-line); border-radius: var(--radius); padding: 14px 16px; margin: 0 0 16px; }
 legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0 6px; }
 
+/* Packing list edit form: one product block can hold several design rows
+   without adding extra outer table rows - only the printed PDF splits them
+   onto separate lines (see packing_lists/_sheet.html). */
+.product-block { border: 1px solid var(--color-line); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px; background: var(--color-paper); }
+.product-block-header { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 12px; }
+.product-block-header .field { margin-bottom: 0; }
+.product-block .ledger { background: var(--color-surface); }
+.product-block-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+
 .repeatable-row {
   display: flex;
   gap: 8px;
