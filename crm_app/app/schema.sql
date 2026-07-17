@@ -253,6 +253,8 @@ CREATE TABLE IF NOT EXISTS products (
     alternate_quantity  TEXT,           -- per-box quantity, drives the Boxes x AltQty auto-calc
     unit                TEXT NOT NULL DEFAULT 'SQM',   -- what the quantity is measured in; prefills document lines
     weight_class        TEXT,
+    net_weight_kg       REAL,           -- net weight per box (KG); drives the packing list's Boxes x weight auto-calc
+    gross_weight_kg     REAL,           -- gross weight per box (KG); same auto-calc as net_weight_kg
     created_at          TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -408,10 +410,12 @@ CREATE TABLE IF NOT EXISTS proforma_invoice_items (
 
 -- ============================================================
 -- PACKING LISTS  (header + line items, number generated as
--- PL{YYYYMMDD}{seq-of-that-day} per company. Started from an existing
--- proforma invoice - proforma_invoice_id is a "generated from" reference
--- only, same pattern as proforma_invoices.quotation_id. Each line breaks a
--- product's quantity down into a specific DESIGN in smaller quantities.)
+-- PL{YYYYMMDD}{seq-of-that-day} per company. Normally started from an
+-- existing proforma invoice, but can also be started directly from a
+-- Quotation (skipping the PI step) - proforma_invoice_id/quotation_id are
+-- both "generated from" reference only, same pattern as
+-- proforma_invoices.quotation_id. Each line breaks a product's quantity down
+-- into a specific DESIGN in smaller quantities.)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS packing_lists (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -420,6 +424,7 @@ CREATE TABLE IF NOT EXISTS packing_lists (
     packing_list_date       TEXT NOT NULL,
     lead_id                 INTEGER REFERENCES leads(id),               -- optional, prefill/reference only
     proforma_invoice_id     INTEGER REFERENCES proforma_invoices(id),   -- optional, "generated from" reference only
+    quotation_id            INTEGER REFERENCES quotations(id),         -- optional, "generated from" reference only (skips the PI step)
     export_ref_no           TEXT,
     buyer_order_no          TEXT,
     other_reference         TEXT,

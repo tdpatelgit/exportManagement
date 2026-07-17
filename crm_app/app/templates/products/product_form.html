@@ -69,6 +69,17 @@
         <input type="text" id="weight_class" name="weight_class" value="{{ data.weight_class | default('', true) }}" placeholder="e.g. 18.5 KG / box">
       </div>
     </div>
+    <div class="form-row">
+      <div class="field">
+        <label for="net_weight_kg">Net weight per box (KG)</label>
+        <input type="number" step="0.001" min="0" id="net_weight_kg" name="net_weight_kg" value="{{ data.net_weight_kg | default('', true) }}">
+      </div>
+      <div class="field">
+        <label for="gross_weight_kg">Gross weight per box (KG)</label>
+        <input type="number" step="0.001" min="0" id="gross_weight_kg" name="gross_weight_kg" value="{{ data.gross_weight_kg | default('', true) }}">
+        <div class="hint">Drives the Boxes × weight auto-calc on a packing list's Net wt/Gross wt columns (stays editable per row on any packing list).</div>
+      </div>
+    </div>
 
     <button type="submit" class="btn btn-primary">{{ 'Save' if product else 'Add product' }}</button>
     <a href="{{ url_for('products.view_product', product_id=product.id) if product else url_for('products.list_products') }}" class="btn btn-ghost">Cancel</a>

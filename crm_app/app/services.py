@@ -708,6 +708,7 @@ class ProductService:
     def create_product(self, current_user: User, product_name: str, description: str,
                         hsn_code: str, igst_percent: str, packing: str, quantity: str,
                         alternate_quantity: str, unit: str, weight_class: str,
+                        net_weight_kg: str = "", gross_weight_kg: str = "",
                         category_id=None) -> Product:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
@@ -720,6 +721,8 @@ class ProductService:
             packing=packing or None, quantity=quantity or None,
             alternate_quantity=alternate_quantity or None, unit=self._parse_unit(unit),
             weight_class=weight_class or None,
+            net_weight_kg=self._parse_weight("Net weight", net_weight_kg),
+            gross_weight_kg=self._parse_weight("Gross weight", gross_weight_kg),
             **self._tax_fields(igst_percent),
         )
         return self.product_repo.create(product)
@@ -727,7 +730,8 @@ class ProductService:
     def update_product(self, current_user: User, product_id: int, product_name: str,
                         description: str, hsn_code: str, igst_percent: str,
                         packing: str, quantity: str, alternate_quantity: str,
-                        unit: str, weight_class: str, category_id=None) -> None:
+                        unit: str, weight_class: str, net_weight_kg: str = "", gross_weight_kg: str = "",
+                        category_id=None) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
         if not product_name or not product_name.strip():
@@ -740,6 +744,8 @@ class ProductService:
             "packing": packing or None, "quantity": quantity or None,
             "alternate_quantity": alternate_quantity or None, "unit": self._parse_unit(unit),
             "weight_class": weight_class or None,
+            "net_weight_kg": self._parse_weight("Net weight", net_weight_kg),
+            "gross_weight_kg": self._parse_weight("Gross weight", gross_weight_kg),
             **self._tax_fields(igst_percent),
         })
 
@@ -891,6 +897,20 @@ class ProductService:
             return round(float(price_usd), 2)
         except ValueError:
             raise ValidationError("Price (USD) must be a number.")
+
+    @staticmethod
+    def _parse_weight(label: str, value: str) -> Optional[float]:
+        """Net/gross weight per box (KG) - drives the packing list's Boxes x
+        weight auto-calc, same role alternate_quantity plays for Qty."""
+        if not value or not str(value).strip():
+            return None
+        try:
+            weight = float(value)
+        except ValueError:
+            raise ValidationError(f"{label} must be a number (KG per box).")
+        if weight < 0:
+            raise ValidationError(f"{label} can't be negative.")
+        return round(weight, 3)
 
     @staticmethod
     def _parse_unit(unit: str) -> str:
@@ -1458,13 +1478,15 @@ class PackingListService:
 
     def __init__(self, packing_list_repo: PackingListRepository, product_repo: ProductRepository,
                  design_repo: DesignRepository, lead_repo: LeadRepositoryBase,
-                 proforma_invoice_repo: ProformaInvoiceRepository, version_service: "DocumentVersionService"):
+                 proforma_invoice_repo: ProformaInvoiceRepository, version_service: "DocumentVersionService",
+                 quotation_repo: Optional[QuotationRepository] = None):
         self.packing_list_repo = packing_list_repo
         self.product_repo = product_repo
         self.design_repo = design_repo
         self.lead_repo = lead_repo
         self.proforma_invoice_repo = proforma_invoice_repo
         self.version_service = version_service
+        self.quotation_repo = quotation_repo
 
     # ---- reads --------------------------------------------------
     def get(self, packing_list_id: int, company_id: int) -> PackingList:
@@ -1488,6 +1510,13 @@ class PackingListService:
         """Every packing list generated from one proforma invoice, company-
         scoped - drives the combined invoice + packing details print view."""
         return [pl for pl in self.packing_list_repo.list_for_proforma(proforma_invoice_id)
+                if pl.company_id == company_id]
+
+    def list_for_quotation(self, quotation_id: int, company_id: int) -> List[PackingList]:
+        """Every packing list generated directly from a quotation (skipping
+        the proforma invoice step), company-scoped - drives the combined
+        quotation + packing details print view, same as list_for_proforma."""
+        return [pl for pl in self.packing_list_repo.list_for_quotation(quotation_id)
                 if pl.company_id == company_id]
 
     # ---- permission --------------------------------------------------
@@ -1532,6 +1561,32 @@ class PackingListService:
                 "net_weight_kg": "", "gross_weight_kg": "",
             }
             for item in invoice.items
+        ]
+        return {"fields": fields, "items": items}
+
+    # ---- prefill from an existing quotation (skips the PI step) --------------------------------------------------
+    def build_prefill_from_quotation(self, quotation: Quotation) -> dict:
+        """Same shape as build_prefill_from_proforma, but starting straight
+        from a Quotation - lets a packing list be generated without an
+        intermediate proforma invoice. Caller must have already loaded
+        `quotation` via QuotationService.get(quotation_id, current_user.company_id)
+        so cross-company ownership is already verified."""
+        fields = {
+            "quotation_id": quotation.id,
+            "lead_id": quotation.lead_id,
+            "buyer_order_no": quotation.buyer_reference_no,
+            "remarks": "MADE IN INDIA",
+        }
+        items = [
+            {
+                "product_id": item.product_id, "product_name": item.product_name,
+                "design_id": None, "design_name": "",
+                "hsn_code": item.hsn_code, "box_per_pallet": "", "pallets": "",
+                "quantity_boxes": "", "pcs": "",
+                "quantity_value": "", "unit": item.unit,
+                "net_weight_kg": "", "gross_weight_kg": "",
+            }
+            for item in quotation.items
         ]
         return {"fields": fields, "items": items}
 
@@ -1611,6 +1666,18 @@ class PackingListService:
             if pcs is None and quantity_boxes and pcs_per_box:
                 pcs = round(quantity_boxes * pcs_per_box, 2)
 
+            # Net/gross weight auto-calculate from Boxes x the row's catalog
+            # product's per-box weight, same trigger as Qty/Pcs above - but
+            # only to fill in a blank: a weight the row already submitted
+            # (typed by hand, or set from the client-side auto-calc) is kept
+            # as-is, so it stays manually editable on this document instead
+            # of being silently recalculated back on every save.
+            if product and quantity_boxes:
+                if net_weight_kg is None and product.net_weight_kg:
+                    net_weight_kg = round(quantity_boxes * product.net_weight_kg, 2)
+                if gross_weight_kg is None and product.gross_weight_kg:
+                    gross_weight_kg = round(quantity_boxes * product.gross_weight_kg, 2)
+
             items.append(PackingListItem(
                 id=None, packing_list_id=None, sr_no=i, product_id=product_id, product_name=product_name,
                 design_id=design_id, design_name=design_name,
@@ -1646,10 +1713,18 @@ class PackingListService:
             if not invoice or invoice.company_id != current_user.company_id:
                 proforma_invoice_id = None
 
+        quotation_id = int(fields["quotation_id"]) if fields.get("quotation_id") else None
+        if quotation_id is not None and self.quotation_repo is not None:
+            # Only trust a quotation from this same company - same reasoning as lead_id above.
+            quotation = self.quotation_repo.get_by_id(quotation_id)
+            if not quotation or quotation.company_id != current_user.company_id:
+                quotation_id = None
+
         return PackingList(
             id=None, company_id=current_user.company_id, packing_list_number="",
             packing_list_date=packing_list_date, consignee_name="",
             created_by=current_user.id, lead_id=lead_id, proforma_invoice_id=proforma_invoice_id,
+            quotation_id=quotation_id,
             export_ref_no=(fields.get("export_ref_no") or "").strip() or None,
             buyer_order_no=(fields.get("buyer_order_no") or "").strip() or None,
             other_reference=(fields.get("other_reference") or "").strip() or None,

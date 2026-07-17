@@ -373,6 +373,8 @@ class Product:
     alternate_quantity: Optional[str] = None  # per-box quantity, drives the Boxes x AltQty auto-calc
     unit: str = "SQM"  # what the quantity is measured in; prefills document lines
     weight_class: Optional[str] = None
+    net_weight_kg: Optional[float] = None    # net weight per box (KG) - drives the packing list's Boxes x weight auto-calc
+    gross_weight_kg: Optional[float] = None  # gross weight per box (KG) - same auto-calc as net_weight_kg
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -393,6 +395,8 @@ class Product:
             alternate_quantity=row["alternate_quantity"] if "alternate_quantity" in row.keys() else None,
             unit=row["unit"] if "unit" in row.keys() else "SQM",
             weight_class=row["weight_class"] if "weight_class" in row.keys() else None,
+            net_weight_kg=row["net_weight_kg"] if "net_weight_kg" in row.keys() else None,
+            gross_weight_kg=row["gross_weight_kg"] if "gross_weight_kg" in row.keys() else None,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -637,6 +641,7 @@ class PackingList:
     created_by: int
     lead_id: Optional[int] = None
     proforma_invoice_id: Optional[int] = None
+    quotation_id: Optional[int] = None
     export_ref_no: Optional[str] = None
     buyer_order_no: Optional[str] = None
     other_reference: Optional[str] = None
@@ -656,6 +661,7 @@ class PackingList:
     updated_at: Optional[str] = None
     created_by_name: Optional[str] = None  # populated by joined queries only
     proforma_invoice_number: Optional[str] = None  # populated by joined queries only
+    quotation_number: Optional[str] = None  # populated by joined queries only
     items: List[PackingListItem] = field(default_factory=list)
 
     @staticmethod
@@ -667,6 +673,7 @@ class PackingList:
             packing_list_date=row["packing_list_date"],
             lead_id=row["lead_id"],
             proforma_invoice_id=row["proforma_invoice_id"],
+            quotation_id=row["quotation_id"] if "quotation_id" in row.keys() else None,
             export_ref_no=row["export_ref_no"],
             buyer_order_no=row["buyer_order_no"],
             other_reference=row["other_reference"],
@@ -688,6 +695,7 @@ class PackingList:
             updated_at=row["updated_at"],
             created_by_name=row["created_by_name"] if "created_by_name" in row.keys() else None,
             proforma_invoice_number=row["proforma_invoice_number"] if "proforma_invoice_number" in row.keys() else None,
+            quotation_number=row["quotation_number"] if "quotation_number" in row.keys() else None,
         )
 
     @property

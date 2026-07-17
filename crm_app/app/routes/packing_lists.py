@@ -19,7 +19,7 @@ from app.utils import login_required, admin_required
 packing_lists_bp = Blueprint("packing_lists", __name__, url_prefix="/packing-lists")
 
 _HEADER_FIELDS = [
-    "packing_list_date", "lead_id", "proforma_invoice_id", "export_ref_no", "buyer_order_no",
+    "packing_list_date", "lead_id", "proforma_invoice_id", "quotation_id", "export_ref_no", "buyer_order_no",
     "other_reference", "remarks",
 ]
 
@@ -66,7 +66,8 @@ def _form_context():
     container = current_app.container
     leads = container.lead_service.list_for_dashboard(g.user)
     invoices = container.proforma_invoice_service.list_all(g.user.company_id)
-    return leads, invoices
+    quotations = container.quotation_service.list_all(g.user.company_id)
+    return leads, invoices, quotations
 
 
 def _product_map(items) -> dict:
@@ -133,23 +134,33 @@ def new_packing_list():
             return redirect(url_for("packing_lists.view_packing_list", packing_list_id=packing_list.id))
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
-            leads, invoices = _form_context()
+            leads, invoices, quotations = _form_context()
             items = _extract_items(request.form)
             return render_template(
-                "packing_lists/form.html", packing_list=None, leads=leads, invoices=invoices,
+                "packing_lists/form.html", packing_list=None, leads=leads, invoices=invoices, quotations=quotations,
                 form_data=request.form, form_items=items, product_map=_product_map(items),
                 today=date.today().isoformat(),
             ), 400
 
-    leads, invoices = _form_context()
+    leads, invoices, quotations = _form_context()
     prefill = None
     form_items = None
     proforma_invoice_id = request.args.get("proforma_invoice_id")
+    quotation_id = request.args.get("quotation_id")
     lead_id = request.args.get("lead_id")
     if proforma_invoice_id:
         try:
             invoice = container.proforma_invoice_service.get(int(proforma_invoice_id), g.user.company_id)
             built = container.packing_list_service.build_prefill_from_proforma(invoice)
+            prefill = built["fields"]
+            prefill["packing_list_date"] = date.today().isoformat()
+            form_items = built["items"]
+        except (NotFoundError, ValueError):
+            pass
+    elif quotation_id:
+        try:
+            quotation = container.quotation_service.get(int(quotation_id), g.user.company_id)
+            built = container.packing_list_service.build_prefill_from_quotation(quotation)
             prefill = built["fields"]
             prefill["packing_list_date"] = date.today().isoformat()
             form_items = built["items"]
@@ -162,7 +173,7 @@ def new_packing_list():
         except (NotFoundError, ValueError):
             pass
     return render_template(
-        "packing_lists/form.html", packing_list=None, leads=leads, invoices=invoices,
+        "packing_lists/form.html", packing_list=None, leads=leads, invoices=invoices, quotations=quotations,
         form_data=prefill, form_items=form_items,
         product_map=_product_map(form_items) if form_items else {}, today=date.today().isoformat(),
     )
@@ -201,17 +212,18 @@ def edit_packing_list(packing_list_id):
             return redirect(url_for("packing_lists.view_packing_list", packing_list_id=packing_list_id))
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
-            leads, invoices = _form_context()
+            leads, invoices, quotations = _form_context()
             items = _extract_items(request.form)
             return render_template(
                 "packing_lists/form.html", packing_list=packing_list, leads=leads, invoices=invoices,
+                quotations=quotations,
                 form_data=request.form, form_items=items, product_map=_product_map(items),
                 today=date.today().isoformat(),
             ), 400
 
-    leads, invoices = _form_context()
+    leads, invoices, quotations = _form_context()
     return render_template(
-        "packing_lists/form.html", packing_list=packing_list, leads=leads, invoices=invoices,
+        "packing_lists/form.html", packing_list=packing_list, leads=leads, invoices=invoices, quotations=quotations,
         form_data=None, form_items=None, product_map=_product_map(packing_list.items),
         today=date.today().isoformat(),
     )

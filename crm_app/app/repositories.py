@@ -692,11 +692,13 @@ class ProductRepository:
             """INSERT INTO products
                (company_id, category_id, product_name, description, hsn_code,
                 igst_percent, sgst_percent, cgst_percent,
-                packing, quantity, alternate_quantity, unit, weight_class)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                packing, quantity, alternate_quantity, unit, weight_class,
+                net_weight_kg, gross_weight_kg)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (product.company_id, product.category_id, product.product_name, product.description,
              product.hsn_code, product.igst_percent, product.sgst_percent, product.cgst_percent,
-             product.packing, product.quantity, product.alternate_quantity, product.unit, product.weight_class),
+             product.packing, product.quantity, product.alternate_quantity, product.unit, product.weight_class,
+             product.net_weight_kg, product.gross_weight_kg),
         )
         return self.get_by_id(new_id)
 
@@ -1143,10 +1145,12 @@ class PackingListRepository:
         return row["cnt"] if row else 0
 
     _SELECT = """
-        SELECT pl.*, u.full_name AS created_by_name, pi.invoice_number AS proforma_invoice_number
+        SELECT pl.*, u.full_name AS created_by_name, pi.invoice_number AS proforma_invoice_number,
+               q.quotation_number AS quotation_number
         FROM packing_lists pl
         JOIN users u ON u.id = pl.created_by
         LEFT JOIN proforma_invoices pi ON pi.id = pl.proforma_invoice_id
+        LEFT JOIN quotations q ON q.id = pl.quotation_id
     """
 
     def get_by_id(self, packing_list_id: int) -> Optional[PackingList]:
@@ -1195,17 +1199,28 @@ class PackingListRepository:
         )
         return self._attach_items([PackingList.from_row(r) for r in rows])
 
+    def list_for_quotation(self, quotation_id: int) -> List[PackingList]:
+        """Every packing list generated directly from a quotation (skipping
+        the proforma invoice step) - drives the combined quotation + packing
+        details print view, same as list_for_proforma."""
+        rows = self.db.query(
+            self._SELECT + " WHERE pl.quotation_id = ? ORDER BY pl.id",
+            (quotation_id,),
+        )
+        return self._attach_items([PackingList.from_row(r) for r in rows])
+
     def create(self, packing_list: PackingList) -> PackingList:
         new_id = self.db.execute(
             """INSERT INTO packing_lists
                (company_id, packing_list_number, packing_list_date, lead_id, proforma_invoice_id,
-                export_ref_no, buyer_order_no, other_reference, consignee_name, consignee_address,
+                quotation_id, export_ref_no, buyer_order_no, other_reference, consignee_name, consignee_address,
                 notify_name, notify_address, country_of_origin, country_of_destination, vessel_flight,
                 port_of_loading, port_of_discharge, final_destination, container_details,
                 terms_of_delivery, remarks, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (packing_list.company_id, packing_list.packing_list_number, packing_list.packing_list_date,
-             packing_list.lead_id, packing_list.proforma_invoice_id, packing_list.export_ref_no,
+             packing_list.lead_id, packing_list.proforma_invoice_id, packing_list.quotation_id,
+             packing_list.export_ref_no,
              packing_list.buyer_order_no, packing_list.other_reference, packing_list.consignee_name,
              packing_list.consignee_address, packing_list.notify_name, packing_list.notify_address,
              packing_list.country_of_origin, packing_list.country_of_destination,
@@ -1219,6 +1234,7 @@ class PackingListRepository:
     def update(self, packing_list_id: int, packing_list: PackingList) -> None:
         self.db.execute(
             """UPDATE packing_lists SET packing_list_date = ?, lead_id = ?, proforma_invoice_id = ?,
+                                         quotation_id = ?,
                                          export_ref_no = ?, buyer_order_no = ?, other_reference = ?,
                                          consignee_name = ?, consignee_address = ?, notify_name = ?,
                                          notify_address = ?, country_of_origin = ?, country_of_destination = ?,
@@ -1227,6 +1243,7 @@ class PackingListRepository:
                                          remarks = ?, updated_at = datetime('now')
                WHERE id = ?""",
             (packing_list.packing_list_date, packing_list.lead_id, packing_list.proforma_invoice_id,
+             packing_list.quotation_id,
              packing_list.export_ref_no, packing_list.buyer_order_no, packing_list.other_reference,
              packing_list.consignee_name, packing_list.consignee_address, packing_list.notify_name,
              packing_list.notify_address, packing_list.country_of_origin,
