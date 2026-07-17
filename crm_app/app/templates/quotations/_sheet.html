@@ -6,7 +6,7 @@
 {% set phone = (company.contact_details | selectattr('type', 'equalto', 'phone') | list | first) if company else None %}
 {% set email = (company.contact_details | selectattr('type', 'equalto', 'email') | list | first) if company else None %}
 
-{% set QUOTE_ANNEX_START = 2 %}
+{% set QUOTE_ANNEX_START = 6 %}
 {% set main_items = quotation.items[:QUOTE_ANNEX_START] %}
 {% set annex_items = quotation.items[QUOTE_ANNEX_START:] %}
 {% set main_total = main_items | sum(attribute='total_usd') %}
@@ -77,8 +77,8 @@
 
   <table class="quote-items-table">
     <colgroup>
-      <col style="width:4%"><col style="width:19%"><col style="width:12%"><col style="width:8%">
-      <col style="width:10%"><col style="width:7%"><col style="width:19%"><col style="width:21%">
+      <col style="width:4%"><col style="width:28%"><col style="width:12%"><col style="width:8%">
+      <col style="width:10%"><col style="width:7%"><col style="width:10%"><col style="width:21%">
     </colgroup>
     <thead>
       <tr>
@@ -127,23 +127,23 @@
         <td class="num">$ {{ '{:,.2f}'.format(annex_total) }}</td>
       </tr>
       {% endif %}
-      <tr>
+      <tr class="quote-charge-row">
         <td colspan="5" class="num">SEA FREIGHT</td>
         <td class="num">$ {{ '{:,.2f}'.format(quotation.sea_freight) }}</td>
       </tr>
-      <tr>
+      <tr class="quote-charge-row">
         <td colspan="5" class="num">INSURANCE</td>
         <td class="num">$ {{ '{:,.2f}'.format(quotation.insurance) }}</td>
       </tr>
-      <tr>
+      <tr class="quote-charge-row">
         <td colspan="5" class="num">CERTIFICATION</td>
         <td class="num">$ {{ '{:,.2f}'.format(quotation.certification) }}</td>
       </tr>
-      <tr>
+      <tr class="quote-charge-row">
         <td colspan="5" class="num">OTHER</td>
         <td class="num">$ {{ '{:,.2f}'.format(quotation.other_charges) }}</td>
       </tr>
-      <tr>
+      <tr class="quote-charge-row">
         <td colspan="5" class="num">DISCOUNT</td>
         <td class="num">$ {{ '{:,.2f}'.format(quotation.discount_amount) }}</td>
       </tr>
