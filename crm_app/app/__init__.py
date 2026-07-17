@@ -85,6 +85,7 @@ class ServiceContainer:
         self.packing_list_service = PackingListService(
             self.packing_list_repo, self.product_repo, self.design_repo,
             self.lead_repo, self.proforma_invoice_repo, self.document_version_service,
+            self.quotation_repo,
         )
         self.backup_service = BackupService(
             db, Config.DATABASE_PATH, Config.PRODUCT_UPLOAD_FOLDER, Config.SCHEMA_PATH,

@@ -42,18 +42,18 @@
 <div class="pk-sheet">
   <table>
     <colgroup>
-      <col style="width:6.5%"><col style="width:15%"><col style="width:16.5%"><col style="width:5%">
-      <col style="width:6%"><col style="width:7%"><col style="width:12%"><col style="width:7%">
-      <col style="width:8.5%"><col style="width:8.5%"><col style="width:8%">
+      <col style="width:6.5%"><col style="width:12%"><col style="width:16.5%"><col style="width:5%">
+      <col style="width:6%"><col style="width:6%"><col style="width:9%"><col style="width:6%">
+      <col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:6%"><col style="width:6%">
     </colgroup>
 
-    <tr><td class="pk-title" colspan="11">&lt; &lt; &lt; &lt; &lt; &nbsp;PACKING DETAILS&nbsp; &gt; &gt; &gt; &gt; &gt;</td></tr>
+    <tr><td class="pk-title" colspan="13">&lt; &lt; &lt; &lt; &lt; &nbsp;PACKING DETAILS&nbsp; &gt; &gt; &gt; &gt; &gt;</td></tr>
 
     <tr>
-      <td class="pk-label pk-left" colspan="2">PROFORMA INVOICE NO</td>
-      <td class="pk-label" colspan="3">{{ packing_list.proforma_invoice_number or '-' }}</td>
+      <td class="pk-label pk-left" colspan="2">{{ 'QUOTATION NO' if packing_list.quotation_id and not packing_list.proforma_invoice_id else 'PROFORMA INVOICE NO' }}</td>
+      <td class="pk-label" colspan="3">{{ (packing_list.quotation_number if packing_list.quotation_id and not packing_list.proforma_invoice_id else packing_list.proforma_invoice_number) or '-' }}</td>
       <td class="pk-label">DATE</td>
-      <td class="pk-label" colspan="5">{{ packing_list.packing_list_date | long_date }}</td>
+      <td class="pk-label" colspan="7">{{ packing_list.packing_list_date | long_date }}</td>
     </tr>
 
     <tr class="pk-head">
@@ -65,6 +65,7 @@
       <td rowspan="2">MODEL NO<br>OR NAME</td>
       <td rowspan="2">NO OF<br>PALLET</td>
       <td colspan="3">TOTAL QUANTITY</td>
+      <td colspan="2">WEIGHT (KG)</td>
     </tr>
     <tr class="pk-head">
       <td>PCS</td>
@@ -72,6 +73,8 @@
       <td>BOXES</td>
       <td>PCS</td>
       <td>SQM / LM/<br>PCS</td>
+      <td>NET</td>
+      <td>GROSS</td>
     </tr>
 
     {% for item in packing_list.items %}
@@ -93,6 +96,8 @@
       <td>{{ num(item.quantity_boxes) }}</td>
       <td>{{ num(item.pcs) }}</td>
       <td>{{ num(item.quantity_value) }}</td>
+      <td>{{ num(item.net_weight_kg) }}</td>
+      <td>{{ num(item.gross_weight_kg) }}</td>
     </tr>
     {% endfor %}
 
@@ -102,19 +107,21 @@
       <td class="pk-label">{{ num(packing_list.total_boxes) }}</td>
       <td class="pk-label">{{ num(packing_list.total_pcs) }}</td>
       <td class="pk-label">{{ num(packing_list.total_quantity) }}</td>
+      <td class="pk-label">{{ num(packing_list.total_net_weight_kg) }}</td>
+      <td class="pk-label">{{ num(packing_list.total_gross_weight_kg) }}</td>
     </tr>
     <tr>
       <td class="pk-label pk-left" colspan="2">REMARKS :</td>
-      <td class="pk-left" colspan="9">{{ (packing_list.remarks or '')|upper }}</td>
+      <td class="pk-left" colspan="11">{{ (packing_list.remarks or '')|upper }}</td>
     </tr>
     <tr>
-      <td class="pk-sign-cell" colspan="5">
+      <td class="pk-sign-cell" colspan="6">
         <div class="pk-sign-flex">
           <div class="pk-label">ACCEPTED BY BUYER</div>
           <div class="pk-label">SEAL &amp; SIGNATURE</div>
         </div>
       </td>
-      <td class="pk-sign-cell" colspan="6">
+      <td class="pk-sign-cell" colspan="7">
         <div class="pk-sign-flex pk-sign-right">
           <div class="pk-label">FOR&nbsp; {{ company.company_name|upper if company else '' }}</div>
           <div class="pk-label">AUTHORISED SIGNATORY</div>

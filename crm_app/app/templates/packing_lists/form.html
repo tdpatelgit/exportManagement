@@ -25,6 +25,15 @@
         </select>
       </div>
       <div class="field">
+        <label for="quotation_select">Prefill from an existing quotation <span class="text-soft text-sm">(optional, skips the proforma invoice step)</span></label>
+        <select id="quotation_select">
+          <option value="">— Select a quotation —</option>
+          {% for q in quotations %}
+            <option value="{{ q.id }}" {{ 'selected' if data and data.quotation_id | string == q.id | string }}>{{ q.quotation_number }} — {{ q.buyer_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
         <label for="lead_select">Prefill from an existing lead <span class="text-soft text-sm">(optional)</span></label>
         <select id="lead_select">
           <option value="">— Select a lead to prefill —</option>
@@ -34,9 +43,10 @@
         </select>
       </div>
     </div>
-    <p class="hint">Choosing a proforma invoice reloads this page with one starting row per product — you then pick the design for each row and split the quantities into smaller, per-design amounts.</p>
+    <p class="hint">Choosing a proforma invoice or a quotation reloads this page with one starting row per product — you then pick the design for each row and split the quantities into smaller, per-design amounts.</p>
     <input type="hidden" name="lead_id" id="lead_id" value="{{ data.lead_id | default('', true) }}">
     <input type="hidden" name="proforma_invoice_id" id="proforma_invoice_id" value="{{ data.proforma_invoice_id | default('', true) }}">
+    <input type="hidden" name="quotation_id" id="quotation_id" value="{{ data.quotation_id | default('', true) }}">
   </div>
 
   <div class="card">
@@ -76,7 +86,9 @@
           {% set rows = form_items if form_items is not none else (packing_list.items if packing_list else []) %}
           {% for row in rows %}
           {% set pm = product_map.get(row.product_id | int) if row.product_id else None %}
-          <tr class="item-row" data-alt-qty="{{ (pm.alternate_quantity or '') if pm else '' }}" data-pcs-per-box="{{ (pm.quantity or '') if pm else '' }}">
+          <tr class="item-row" data-alt-qty="{{ (pm.alternate_quantity or '') if pm else '' }}" data-pcs-per-box="{{ (pm.quantity or '') if pm else '' }}"
+              data-net-per-box="{{ pm.net_weight_kg if pm and pm.net_weight_kg is not none else '' }}"
+              data-gross-per-box="{{ pm.gross_weight_kg if pm and pm.gross_weight_kg is not none else '' }}">
             <td class="js-sr">{{ loop.index }}</td>
             <td>
               <input type="hidden" name="item_product_id[]" class="js-product-id" value="{{ row.product_id or '' }}">
@@ -231,6 +243,8 @@
     return {
       pcsPerBox: parseFloat(tr.dataset.pcsPerBox) || (m ? parseFloat(m[1]) : 0),
       qtyPerBox: parseFloat(tr.dataset.altQty) || (m ? parseFloat(m[2]) : 0),
+      netPerBox: parseFloat(tr.dataset.netPerBox) || 0,
+      grossPerBox: parseFloat(tr.dataset.grossPerBox) || 0,
     };
   }
 
@@ -260,9 +274,11 @@
 
   function recalcQtyPcs(tr) {
     const boxes = parseFloat(tr.querySelector('.js-boxes').value) || 0;
-    const { pcsPerBox, qtyPerBox } = packInfo(tr);
+    const { pcsPerBox, qtyPerBox, netPerBox, grossPerBox } = packInfo(tr);
     if (boxes && pcsPerBox) tr.querySelector('.js-pcs').value = +(boxes * pcsPerBox).toFixed(2);
     if (boxes && qtyPerBox) tr.querySelector('.js-qty').value = (boxes * qtyPerBox).toFixed(2);
+    if (boxes && netPerBox) tr.querySelector('.js-net').value = (boxes * netPerBox).toFixed(2);
+    if (boxes && grossPerBox) tr.querySelector('.js-gross').value = (boxes * grossPerBox).toFixed(2);
   }
 
   // The row calculates from whichever of Boxes / Pallets was just filled
@@ -320,6 +336,13 @@
     const id = e.target.value;
     if (!id) return;
     window.location = '{{ url_for("packing_lists.new_packing_list") }}?proforma_invoice_id=' + encodeURIComponent(id);
+  });
+
+  // ---- quotation dropdown prefill (reloads the page with ?quotation_id=, skipping the PI step) --------------------------------------------------
+  document.getElementById('quotation_select').addEventListener('change', (e) => {
+    const id = e.target.value;
+    if (!id) return;
+    window.location = '{{ url_for("packing_lists.new_packing_list") }}?quotation_id=' + encodeURIComponent(id);
   });
 
   // ---- lead dropdown prefill --------------------------------------------------
@@ -394,6 +417,8 @@
     if (p.unit) activeRow.querySelector('.js-unit').value = p.unit;
     activeRow.dataset.altQty = parseFloat(p.alternate_quantity) || '';
     activeRow.dataset.pcsPerBox = parseFloat(p.quantity) || '';
+    activeRow.dataset.netPerBox = p.net_weight_kg || '';
+    activeRow.dataset.grossPerBox = p.gross_weight_kg || '';
     const boxPerPallet = parseFloat(p.packing) || null;
     if (boxPerPallet) activeRow.querySelector('.js-box-per-pallet').value = boxPerPallet;
     recalcRow(activeRow);

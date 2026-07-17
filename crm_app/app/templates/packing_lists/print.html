@@ -29,6 +29,9 @@
       {% if packing_list.proforma_invoice_id %}
       <a href="{{ url_for('proforma_invoices.view_proforma_invoice', proforma_invoice_id=packing_list.proforma_invoice_id) }}" class="btn btn-ghost btn-sm">View proforma</a>
       <a href="{{ url_for('proforma_invoices.combined_proforma_invoice', proforma_invoice_id=packing_list.proforma_invoice_id) }}" class="btn btn-ghost btn-sm">Combined document</a>
+      {% elif packing_list.quotation_id %}
+      <a href="{{ url_for('quotations.view_quotation', quotation_id=packing_list.quotation_id) }}" class="btn btn-ghost btn-sm">View quotation</a>
+      <a href="{{ url_for('quotations.combined_quotation', quotation_id=packing_list.quotation_id) }}" class="btn btn-ghost btn-sm">Combined document</a>
       {% endif %}
       <a href="{{ url_for('packing_lists.edit_packing_list', packing_list_id=packing_list.id) }}" class="btn btn-ghost btn-sm">Edit</a>
       {% if current_user.is_admin %}

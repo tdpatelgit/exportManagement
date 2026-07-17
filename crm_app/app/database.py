@@ -40,7 +40,7 @@ from datetime import datetime
 # Because `_migrate` is idempotent and runs on every startup AND on every
 # restore, any backup - however old - is carried forward through the whole
 # chain of steps, never discarded.
-SCHEMA_VERSION = 8  # v8: added document_versions - append-only version history for quotations/proforma invoices/packing lists
+SCHEMA_VERSION = 9  # v9: product net/gross weight per box (drives packing list auto-calc) + packing_lists.quotation_id (packing list can be generated directly from a quotation)
 
 
 class Database:
@@ -178,6 +178,21 @@ class Database:
             existing = {r["name"] for r in conn.execute("PRAGMA table_info(proforma_invoice_items)")}
             if existing and "surface" not in existing:
                 conn.execute("ALTER TABLE proforma_invoice_items ADD COLUMN surface TEXT")
+
+            # v9: product net/gross weight per box (KG) - drives the packing
+            # list's Boxes x weight auto-calc, same pattern as
+            # alternate_quantity driving the Qty auto-calc.
+            existing = {r["name"] for r in conn.execute("PRAGMA table_info(products)")}
+            for column in ("net_weight_kg", "gross_weight_kg"):
+                if existing and column not in existing:
+                    conn.execute(f"ALTER TABLE products ADD COLUMN {column} REAL")
+
+            # v9: a packing list can now be generated directly from a
+            # Quotation (skipping the proforma invoice step) - same
+            # "generated from" reference pattern as proforma_invoice_id.
+            existing = {r["name"] for r in conn.execute("PRAGMA table_info(packing_lists)")}
+            if existing and "quotation_id" not in existing:
+                conn.execute("ALTER TABLE packing_lists ADD COLUMN quotation_id INTEGER REFERENCES quotations(id)")
 
             # ---- PACKING SPEC MOVES FROM DESIGN TO PRODUCT ----
             # packing / quantity / alternate_quantity / unit / weight_class

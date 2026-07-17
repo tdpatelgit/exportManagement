@@ -142,7 +142,29 @@ def view_quotation(quotation_id):
         abort(404)
     company = container.company_service.get(g.user.company_id)
     existing_pi = container.proforma_invoice_service.get_for_quotation(quotation_id)
-    return render_template("quotations/print.html", quotation=quotation, company=company, existing_pi=existing_pi)
+    packing_lists = container.packing_list_service.list_for_quotation(quotation_id, g.user.company_id)
+    return render_template("quotations/print.html", quotation=quotation, company=company,
+                           existing_pi=existing_pi, packing_lists=packing_lists)
+
+
+@quotations_bp.route("/<int:quotation_id>/combined")
+@login_required
+def combined_quotation(quotation_id):
+    """The combined printable document: the quotation page followed by its
+    packing details page(s), each on its own A4 sheet - mirrors
+    proforma_invoices.combined_proforma_invoice for a packing list generated
+    directly from a quotation (skipping the proforma invoice step)."""
+    container = current_app.container
+    try:
+        quotation = container.quotation_service.get(quotation_id, g.user.company_id)
+    except NotFoundError:
+        abort(404)
+    company = container.company_service.get(g.user.company_id)
+    packing_lists = container.packing_list_service.list_for_quotation(quotation_id, g.user.company_id)
+    from app.routes.packing_lists import catalog_maps
+    product_map, design_map = catalog_maps(packing_lists)
+    return render_template("quotations/print_combined.html", quotation=quotation, company=company,
+                           packing_lists=packing_lists, product_map=product_map, design_map=design_map)
 
 
 @quotations_bp.route("/<int:quotation_id>/edit", methods=["GET", "POST"])
@@ -232,5 +254,5 @@ def view_quotation_version(quotation_id, version_number):
     company = container.company_service.get(g.user.company_id)
     return render_template(
         "quotations/print.html", quotation=historical_quotation, company=company,
-        existing_pi=None, historical_version=version,
+        existing_pi=None, packing_lists=[], historical_version=version,
     )

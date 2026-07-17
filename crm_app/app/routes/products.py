@@ -40,6 +40,8 @@ def _product_form_fields(form) -> dict:
         "alternate_quantity": form.get("alternate_quantity", ""),
         "unit": form.get("unit", ""),
         "weight_class": form.get("weight_class", ""),
+        "net_weight_kg": form.get("net_weight_kg", ""),
+        "gross_weight_kg": form.get("gross_weight_kg", ""),
     }
 
 
@@ -394,6 +396,7 @@ def _product_json(p) -> dict:
         "cgst_percent": p.cgst_percent,
         "packing": p.packing, "quantity": p.quantity, "alternate_quantity": p.alternate_quantity,
         "unit": p.unit, "weight_class": p.weight_class,
+        "net_weight_kg": p.net_weight_kg, "gross_weight_kg": p.gross_weight_kg,
     }
 
 
