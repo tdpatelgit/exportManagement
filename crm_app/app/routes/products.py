@@ -47,6 +47,7 @@ def _design_form_fields(form) -> dict:
     return {
         "design_name": form.get("design_name", ""),
         "description": form.get("description", ""),
+        "surface": form.get("surface", ""),
         "price_usd": form.get("price_usd", ""),
         "alt_text": form.get("alt_text", ""),
     }

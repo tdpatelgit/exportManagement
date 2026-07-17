@@ -1,0 +1,61 @@
+{# Shared goods-row renderer for the invoice sheet and the annexure sheet.
+   Groups consecutive items under a category heading row ("FIRST LINE OF
+   NAME - HSNC xxx"), like the original Excel documents:
+
+   - mode 'index'   : every item line gets a running number (printed in the
+                      Marks column), numbering continues across the annexure.
+   - mode 'surface' : items additionally split by their surface finish, and
+                      the group's SURFACE (GLOSSY / MATT / ...) prints in the
+                      Marks column of the heading row; no line numbers.
+
+   An item whose name has extra lines below the first prints those lines as
+   its description (the first line lives in the heading); a single-line item
+   prints just its quantities under the heading. #}
+
+{% macro group_key(item, mode) -%}
+  {{- (item.product_name or '').split('\n')[0]|trim|upper }}|{{ item.hsn_code or '' }}{% if mode == 'surface' %}|{{ (item.surface or '')|trim|upper }}{% endif -%}
+{%- endmacro %}
+
+{% macro rows(items, mode, sr_start=0) %}
+  {% set gs = namespace(sr=sr_start, key=none, first=true) %}
+  {% for item in items %}
+    {% set key = group_key(item, mode) %}
+    {% if key != gs.key %}
+      {% set gs.key = key %}
+      {% if not gs.first %}
+      <tr class="pi-goods pi-group-gap">
+        <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+      </tr>
+      {% endif %}
+      <tr class="pi-goods">
+        <td class="pi-val pi-center">{% if mode == 'surface' %}{{ (item.surface or '')|upper }}{% endif %}</td>
+        <td class="pi-val">{{ (item.product_name or '').split('\n')[0]|upper }}{% if item.hsn_code %} - HSNC {{ item.hsn_code }}{% endif %}</td>
+        <td></td><td></td><td></td><td></td><td></td><td></td>
+      </tr>
+    {% endif %}
+    {% set gs.first = false %}
+    {% set gs.sr = gs.sr + 1 %}
+    {% set rest = (item.product_name or '').split('\n')[1:] | join('\n') %}
+    <tr class="pi-goods">
+      <td class="pi-val pi-center">{% if mode == 'index' %}{{ gs.sr }}{% endif %}</td>
+      <td class="pi-val">{{ rest|upper|e|replace('\n', '<br>')|safe }}</td>
+      <td class="pi-val pi-center">{{ '{:,.0f}'.format(item.pallets) if item.pallets else '' }}</td>
+      <td class="pi-val pi-center">{{ '{:,.0f}'.format(item.quantity_boxes) if item.quantity_boxes else '' }}</td>
+      <td class="pi-val pi-right">{{ '{:,.2f}'.format(item.quantity_value or 0) }}</td>
+      <td class="pi-val pi-right">${{ '{:,.2f}'.format(item.price_usd or 0) }}</td>
+      <td class="pi-val pi-center">{{ item.unit }}</td>
+      <td class="pi-val pi-right">{% if item.total_usd %}$&nbsp;{{ '{:,.2f}'.format(item.total_usd) }}{% else %}$&nbsp;-{% endif %}</td>
+    </tr>
+  {% endfor %}
+{% endmacro %}
+
+{# how many extra rows (headings + gaps) grouping adds - the invoice page's
+   filler height calculation needs it to keep the sheet on one page #}
+{% macro extra_row_count(items, mode) -%}
+  {%- set gs = namespace(count=0, key=none) -%}
+  {%- for item in items -%}
+    {%- set key = group_key(item, mode) -%}
+    {%- if key != gs.key %}{% set gs.count = gs.count + 1 %}{% set gs.key = key %}{% endif -%}
+  {%- endfor -%}
+  {{- gs.count * 2 - 1 if gs.count else 0 -}}
+{%- endmacro %}

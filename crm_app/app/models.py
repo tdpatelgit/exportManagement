@@ -435,6 +435,7 @@ class Design:
     design_name: str
     folder_id: Optional[int] = None
     description: Optional[str] = None
+    surface: Optional[str] = None  # optional finish, e.g. GLOSSY / MATT / CHROME
     price_usd: Optional[float] = None
     photo_path: Optional[str] = None
     dimension_photo_path: Optional[str] = None
@@ -451,6 +452,7 @@ class Design:
             folder_id=row["folder_id"],
             design_name=row["design_name"],
             description=row["description"],
+            surface=row["surface"] if "surface" in row.keys() else None,
             price_usd=row["price_usd"],
             photo_path=row["photo_path"],
             dimension_photo_path=row["dimension_photo_path"],
@@ -721,6 +723,7 @@ class ProformaInvoiceItem:
     product_id: Optional[int] = None
     dimension_mm: Optional[str] = None
     hsn_code: Optional[str] = None
+    surface: Optional[str] = None  # optional finish (GLOSSY / MATT / ...), drives the surface-grouped print view
     pallets: Optional[float] = None
     quantity_boxes: Optional[float] = None
     quantity_value: float = 0
@@ -738,6 +741,7 @@ class ProformaInvoiceItem:
             product_name=row["product_name"],
             dimension_mm=row["dimension_mm"],
             hsn_code=row["hsn_code"],
+            surface=row["surface"] if "surface" in row.keys() else None,
             pallets=row["pallets"],
             quantity_boxes=row["quantity_boxes"],
             quantity_value=row["quantity_value"],
@@ -788,6 +792,7 @@ class ProformaInvoice:
     bank_swift_code: Optional[str] = None
     bank_branch: Optional[str] = None
     bank_address: Optional[str] = None
+    display_mode: str = "index"  # goods layout: 'index' (numbered) | 'surface' (grouped by category + surface)
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     created_by_name: Optional[str] = None  # populated by joined queries only
@@ -835,6 +840,7 @@ class ProformaInvoice:
             bank_swift_code=row["bank_swift_code"],
             bank_branch=row["bank_branch"],
             bank_address=row["bank_address"],
+            display_mode=(row["display_mode"] if "display_mode" in row.keys() else None) or "index",
             created_by=row["created_by"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],

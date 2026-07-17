@@ -82,7 +82,7 @@
               <textarea name="item_product_name[]" class="js-product-name" rows="2" required>{{ row.product_name }}</textarea>
               <button type="button" class="btn btn-ghost btn-sm js-choose-product">📦 Choose product</button>
             </td>
-            <td><input type="text" name="item_hsn_code[]" class="js-hsn" value="{{ row.hsn_code or '' }}"></td>
+            <td><input type="text" name="item_hsn_code[]" class="js-hsn" value="{{ row.hsn_code or '' }}" readonly tabindex="-1"></td>
             <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" value="{{ row.quantity_boxes or '' }}"></td>
             <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required value="{{ row.quantity_value or '' }}"></td>
             <td>
@@ -219,7 +219,7 @@
         <textarea name="item_product_name[]" class="js-product-name" rows="2" required></textarea>
         <button type="button" class="btn btn-ghost btn-sm js-choose-product">📦 Choose product</button>
       </td>
-      <td><input type="text" name="item_hsn_code[]" class="js-hsn"></td>
+      <td><input type="text" name="item_hsn_code[]" class="js-hsn" readonly tabindex="-1"></td>
       <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes"></td>
       <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required></td>
       <td>

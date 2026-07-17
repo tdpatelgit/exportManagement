@@ -1,0 +1,91 @@
+{# The ANNEXURE sheet: overflow goods lines that didn't fit on the invoice
+   page, with their own TOTAL row and signatory block - like the original
+   Excel document's "(CONTINUE TO ANNEXURE----->)" pages. Renders nothing at
+   all when every item fits on the invoice page - UNLESS the including
+   template sets `annex_force = true` (the combined document does), in which
+   case an invoice without overflow still gets an annexure page listing the
+   full goods detail. Must be included AFTER proforma_invoices/_sheet.html
+   (it reuses the .pi-* styles that partial brings along). Keep
+   PI_ANNEX_START in sync with _sheet.html. #}
+{% import 'proforma_invoices/_goods_rows.html' as goods %}
+{% set PI_ANNEX_START = 6 %}
+{% set annex_items = invoice.items[PI_ANNEX_START:] %}
+{% if not annex_items and (annex_force | default(false)) %}
+  {% set annex_items = invoice.items %}
+{% endif %}
+{% if annex_items %}
+{% set pi_mode = invoice.display_mode or 'index' %}
+{# line numbering continues from the invoice page (index view) #}
+{% set annex_sr_start = invoice.items|length - annex_items|length %}
+
+{% macro ax_usd(v) -%}
+  {%- if v %}$&nbsp;{{ '{:,.2f}'.format(v) }}{% else %}$&nbsp;-{% endif -%}
+{%- endmacro %}
+
+<style>
+  .pi-annex-page { break-before: page; page-break-before: always; }
+  .pi-annex-page .pi-items tbody tr { break-inside: avoid; page-break-inside: avoid; }
+</style>
+
+{% set axns = namespace(pallets=0, boxes=0, qty=0, amount=0) %}
+{% for item in annex_items %}
+  {% set axns.pallets = axns.pallets + (item.pallets or 0) %}
+  {% set axns.boxes = axns.boxes + (item.quantity_boxes or 0) %}
+  {% set axns.qty = axns.qty + (item.quantity_value or 0) %}
+  {% set axns.amount = axns.amount + (item.total_usd or 0) %}
+{% endfor %}
+
+<div class="pi-annex-page">
+  <div class="pi-sheet">
+    <div class="pi-title">ANNEXURE</div>
+
+    <table class="pi-items">
+      <colgroup>
+        <col style="width:17%"><col style="width:36%"><col style="width:5.5%"><col style="width:7%">
+        <col style="width:9.5%"><col style="width:7.5%"><col style="width:5.5%"><col style="width:12%">
+      </colgroup>
+      <thead>
+        <tr>
+          <td rowspan="2">Marks &amp; Nos / Container No</td>
+          <td rowspan="2">Description Of Goods</td>
+          <td colspan="3">Quantity Details</td>
+          <td rowspan="2">Rate<br>In USD</td>
+          <td rowspan="2">Per</td>
+          <td rowspan="2">Total<br>Amount</td>
+        </tr>
+        <tr>
+          <td>Plts</td>
+          <td>Boxes</td>
+          <td>SQM /<br>LM</td>
+        </tr>
+      </thead>
+      <tbody>
+        {{ goods.rows(annex_items, pi_mode, annex_sr_start) }}
+        <tr>
+          <td></td>
+          <td class="pi-val pi-center">TOTAL</td>
+          <td class="pi-val pi-center">{{ '{:,.0f}'.format(axns.pallets) if axns.pallets else '' }}</td>
+          <td class="pi-val pi-center">{{ '{:,.0f}'.format(axns.boxes) if axns.boxes else '' }}</td>
+          <td class="pi-val pi-right">{{ '{:,.2f}'.format(axns.qty) }}</td>
+          <td></td>
+          <td></td>
+          <td class="pi-val pi-right">{{ ax_usd(axns.amount) }}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <table>
+      <colgroup><col style="width:55%"><col></colgroup>
+      <tr>
+        <td class="pi-sign-cell"></td>
+        <td class="pi-sign-cell">
+          <div class="pi-sign-flex pi-stamp">
+            <div class="pi-val">FOR&nbsp; {{ company.company_name|upper if company else '' }}</div>
+            <div class="pi-val">AUTHORISED SIGNATORY</div>
+          </div>
+        </td>
+      </tr>
+    </table>
+  </div>
+</div>
+{% endif %}

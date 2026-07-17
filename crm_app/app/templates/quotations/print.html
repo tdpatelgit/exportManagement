@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ quotation.quotation_number }} · Quotation</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    @media print {
+      @page { size: A4 portrait; margin: 8mm; }
+    }
+  </style>
 </head>
 <body class="quote-print-body">
 
@@ -22,6 +27,17 @@
 
   {% set phone = (company.contact_details | selectattr('type', 'equalto', 'phone') | list | first) if company else None %}
   {% set email = (company.contact_details | selectattr('type', 'equalto', 'email') | list | first) if company else None %}
+
+  {# Items beyond what fits on the quotation page spill onto an ANNEXURE page
+     (_annexure.html) - same "not enough space" rule as proforma invoices:
+     up to 8 lines fit on the main sheet. Keep QUOTE_ANNEX_START in sync with
+     quotations/_annexure.html. #}
+  {% set QUOTE_ANNEX_START = 2 %}
+  {% set main_items = quotation.items[:QUOTE_ANNEX_START] %}
+  {% set annex_items = quotation.items[QUOTE_ANNEX_START:] %}
+  {% set main_total = main_items | sum(attribute='total_usd') %}
+  {% set annex_total = annex_items | sum(attribute='total_usd') %}
+  {% set charge_rows = 7 + (1 if annex_items else 0) %}
 
   <div class="quote-sheet">
     <div class="quote-banner">&lt; &lt; &lt; &lt; &lt; QUOTATION &gt; &gt; &gt; &gt; &gt;</div>
@@ -86,6 +102,10 @@
     {% endif %}
 
     <table class="quote-items-table">
+      <colgroup>
+        <col style="width:4%"><col style="width:19%"><col style="width:12%"><col style="width:8%">
+        <col style="width:10%"><col style="width:7%"><col style="width:19%"><col style="width:21%">
+      </colgroup>
       <thead>
         <tr>
           <th>SR</th>
@@ -99,7 +119,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for item in quotation.items %}
+        {% for item in main_items %}
         <tr>
           <td class="num">{{ item.sr_no }}</td>
           <td>{{ item.product_name|replace('\n', '<br>')|safe }}</td>
@@ -111,16 +131,28 @@
           <td class="num">$ {{ '{:,.2f}'.format(item.total_usd) }}</td>
         </tr>
         {% endfor %}
+        {% if annex_items %}
+        <tr>
+          <td></td>
+          <td colspan="7"><strong>(CONTINUE TO ANNEXURE-----&gt;)</strong></td>
+        </tr>
+        {% endif %}
       </tbody>
       <tfoot>
         <tr>
-          <td rowspan="7" colspan="2" class="quote-amount-words">
+          <td rowspan="{{ charge_rows }}" colspan="2" class="quote-amount-words">
             AMOUNT IN WORDS<br>
             <strong>{{ quotation.invoice_value_usd | amount_in_words }}</strong>
           </td>
           <td colspan="5" class="num"><strong>SUBTOTAL</strong></td>
-          <td class="num">$ {{ '{:,.2f}'.format(quotation.subtotal_usd) }}</td>
+          <td class="num">$ {{ '{:,.2f}'.format(main_total) }}</td>
         </tr>
+        {% if annex_items %}
+        <tr>
+          <td colspan="5" class="num">ANNEXURE</td>
+          <td class="num">$ {{ '{:,.2f}'.format(annex_total) }}</td>
+        </tr>
+        {% endif %}
         <tr>
           <td colspan="5" class="num">SEA FREIGHT</td>
           <td class="num">$ {{ '{:,.2f}'.format(quotation.sea_freight) }}</td>
@@ -178,6 +210,8 @@
       </div>
     </div>
   </div>
+
+  {% include 'quotations/_annexure.html' %}
 
 </body>
 </html>

@@ -53,6 +53,7 @@
   <div class="grid grid-2">
     <div><div class="text-sm text-soft">Description</div><div>{{ design.description or '—' }}</div></div>
     <div><div class="text-sm text-soft">Price (USD)</div><div>{{ '$ {:,.2f}'.format(design.price_usd) if design.price_usd is not none else '—' }}</div></div>
+    <div><div class="text-sm text-soft">Surface</div><div>{{ design.surface or '—' }}</div></div>
     <div><div class="text-sm text-soft">Alt text</div><div>{{ design.alt_text or '—' }}</div></div>
   </div>
 </div>
