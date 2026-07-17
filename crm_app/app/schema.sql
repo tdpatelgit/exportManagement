@@ -461,6 +461,28 @@ CREATE TABLE IF NOT EXISTS packing_list_items (
     gross_weight_kg     REAL
 );
 
+-- ============================================================
+-- DOCUMENT VERSIONS  (append-only history for quotations, proforma
+-- invoices and packing lists. Every create/update snapshots the full
+-- header+items state of the document as JSON under the next version
+-- number for that (document_type, document_id) pair - the live row in
+-- quotations/proforma_invoices/packing_lists always stays the current
+-- version, editing never mints a new document number, and admins can
+-- browse/open any past version read-only via this table.)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS document_versions (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id          INTEGER NOT NULL REFERENCES tenants(id),
+    document_type       TEXT NOT NULL,   -- 'quotation' | 'proforma_invoice' | 'packing_list'
+    document_id         INTEGER NOT NULL,
+    version_number      INTEGER NOT NULL,
+    document_number     TEXT NOT NULL,   -- snapshot of quotation_number/invoice_number/packing_list_number, for display
+    snapshot            TEXT NOT NULL,   -- JSON: full header fields + items, as they were at this version
+    changed_by          INTEGER NOT NULL REFERENCES users(id),
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (document_type, document_id, version_number)
+);
+
 -- Helpful indexes for the dashboards/reports (grouping by employee, date
 -- range filters, and lookups by parent are the hottest queries).
 CREATE INDEX IF NOT EXISTS idx_leads_created_by ON leads(created_by);
@@ -489,3 +511,4 @@ CREATE INDEX IF NOT EXISTS idx_packing_lists_company ON packing_lists(company_id
 CREATE INDEX IF NOT EXISTS idx_packing_lists_created_by ON packing_lists(created_by);
 CREATE INDEX IF NOT EXISTS idx_packing_lists_date ON packing_lists(packing_list_date);
 CREATE INDEX IF NOT EXISTS idx_packing_list_items_list ON packing_list_items(packing_list_id);
+CREATE INDEX IF NOT EXISTS idx_document_versions_lookup ON document_versions(document_type, document_id);

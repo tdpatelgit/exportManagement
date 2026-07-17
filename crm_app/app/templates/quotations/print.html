@@ -13,10 +13,21 @@
 </head>
 <body class="quote-print-body">
 
+  {% if historical_version %}
+  <div class="quote-toolbar no-print" style="background:#fff4d6;">
+    <div>Viewing <strong>version {{ historical_version.version_number }}</strong> of {{ quotation.quotation_number }} - saved {{ historical_version.created_at | friendly_date }} by {{ historical_version.changed_by_name }}. Read-only.</div>
+    <a href="{{ url_for('quotations.view_quotation', quotation_id=quotation.id) }}" class="btn btn-ghost btn-sm">View current version →</a>
+  </div>
+  {% endif %}
+
   <div class="quote-toolbar no-print">
     <a href="{{ url_for('quotations.list_quotations') }}" class="btn btn-ghost btn-sm">← All quotations</a>
     <div class="flex gap-8">
+      {% if not historical_version %}
       <a href="{{ url_for('quotations.edit_quotation', quotation_id=quotation.id) }}" class="btn btn-ghost btn-sm">Edit</a>
+      {% if current_user.is_admin %}
+      <a href="{{ url_for('quotations.quotation_versions', quotation_id=quotation.id) }}" class="btn btn-ghost btn-sm">Version history</a>
+      {% endif %}
       {% if existing_pi %}
       <a href="{{ url_for('proforma_invoices.view_proforma_invoice', proforma_invoice_id=existing_pi.id) }}" class="btn btn-ghost btn-sm">View Proforma Invoice ({{ existing_pi.invoice_number }})</a>
       {% else %}
@@ -25,6 +36,7 @@
       <form method="POST" action="{{ url_for('quotations.delete_quotation', quotation_id=quotation.id) }}" onsubmit="return confirm('Delete this quotation?');">
         <button type="submit" class="btn btn-danger btn-sm">Delete</button>
       </form>
+      {% endif %}
       <button type="button" class="btn btn-primary btn-sm" onclick="window.print()">🖨 Print / Save as PDF</button>
     </div>
   </div>

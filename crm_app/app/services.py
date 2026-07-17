@@ -19,6 +19,7 @@ import shutil
 import zipfile
 import tempfile
 import sqlite3
+import dataclasses
 from datetime import datetime, date
 from typing import Optional, List
 
@@ -31,12 +32,13 @@ from app.models import (
     User, Lead, Client, ContactPerson, Communication, PaymentEntry, DocumentEntry,
     LEAD_STATUSES, CLIENT_STATUSES, PRODUCT_UNITS, Category, Product, ProductFolder, Design,
     Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem, PackingList, PackingListItem,
+    DocumentVersion,
 )
 from app.repositories import (
     TenantRepository, UserRepositoryBase, LeadRepositoryBase, ClientRepositoryBase,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
     CategoryRepository, ProductRepository, ProductFolderRepository, DesignRepository,
-    QuotationRepository, ProformaInvoiceRepository, PackingListRepository,
+    QuotationRepository, ProformaInvoiceRepository, PackingListRepository, DocumentVersionRepository,
 )
 from app.database import Database, SCHEMA_VERSION
 
@@ -938,14 +940,71 @@ class ProductService:
 
 
 # ============================================================
+# DOCUMENT VERSION SERVICE (shared version-history mechanism for
+# quotations/proforma invoices/packing lists - see DocumentVersionRepository
+# and the document_versions table in schema.sql)
+# ============================================================
+
+# document_type -> (header dataclass, item dataclass, number field name).
+# Every versioned document exposes an `items: List[...]` field, so a single
+# rehydrate routine works for all three.
+_VERSIONED_TYPES = {
+    "quotation": (Quotation, QuotationItem, "quotation_number"),
+    "proforma_invoice": (ProformaInvoice, ProformaInvoiceItem, "invoice_number"),
+    "packing_list": (PackingList, PackingListItem, "packing_list_number"),
+}
+
+
+class DocumentVersionService:
+    """Snapshots a document's full state on every create/update, under the
+    same document number - editing a quotation/PI/packing list never mints a
+    new document number, it just adds a version. Read access is admin-only,
+    enforced at the route layer (a low-privilege user's own edit history
+    isn't theirs to browse)."""
+
+    def __init__(self, version_repo: DocumentVersionRepository):
+        self.version_repo = version_repo
+
+    def record(self, document_type: str, document, changed_by: int) -> None:
+        """`document` is the freshly persisted Quotation/ProformaInvoice/
+        PackingList (company_id/id/number/items already set by the caller's
+        create()/update())."""
+        _, _, number_field = _VERSIONED_TYPES[document_type]
+        self.version_repo.record(
+            company_id=document.company_id, document_type=document_type, document_id=document.id,
+            document_number=getattr(document, number_field), snapshot=dataclasses.asdict(document),
+            changed_by=changed_by,
+        )
+
+    def list_for_document(self, document_type: str, document_id: int) -> List[DocumentVersion]:
+        return self.version_repo.list_for_document(document_type, document_id)
+
+    def get_version(self, document_type: str, document_id: int, version_number: int):
+        """Returns (rehydrated document, DocumentVersion) for one historical
+        version - rehydrated back into its real dataclass (not a bare dict)
+        so print templates and computed properties like invoice_value_usd
+        keep working unmodified."""
+        version = self.version_repo.get_version(document_type, document_id, version_number)
+        if not version:
+            raise NotFoundError(f"Version {version_number} not found.")
+        header_cls, item_cls, _ = _VERSIONED_TYPES[document_type]
+        data = dict(version.snapshot)
+        items_data = data.pop("items", [])
+        document = header_cls(**data)
+        document.items = [item_cls(**item) for item in items_data]
+        return document, version
+
+
+# ============================================================
 # QUOTATION SERVICE
 # ============================================================
 class QuotationService:
     def __init__(self, quotation_repo: QuotationRepository, product_repo: ProductRepository,
-                 lead_repo: LeadRepositoryBase):
+                 lead_repo: LeadRepositoryBase, version_service: "DocumentVersionService"):
         self.quotation_repo = quotation_repo
         self.product_repo = product_repo
         self.lead_repo = lead_repo
+        self.version_service = version_service
 
     # ---- reads --------------------------------------------------
     def get(self, quotation_id: int, company_id: int) -> Quotation:
@@ -1091,7 +1150,9 @@ class QuotationService:
         items = self._build_items(current_user.company_id, raw_items)
         quotation = self._build_header(current_user, fields, items)
         quotation.quotation_number = self._generate_number(current_user.company_id, quotation.quotation_date)
-        return self.quotation_repo.create(quotation)
+        created = self.quotation_repo.create(quotation)
+        self.version_service.record("quotation", created, current_user.id)
+        return created
 
     def update(self, current_user: User, quotation_id: int, fields: dict, raw_items: list) -> Quotation:
         existing = self.get(quotation_id, current_user.company_id)
@@ -1099,7 +1160,9 @@ class QuotationService:
         items = self._build_items(current_user.company_id, raw_items)
         quotation = self._build_header(current_user, fields, items)
         self.quotation_repo.update(quotation_id, quotation)
-        return self.get(quotation_id, current_user.company_id)
+        updated = self.get(quotation_id, current_user.company_id)
+        self.version_service.record("quotation", updated, current_user.id)
+        return updated
 
     def delete(self, current_user: User, quotation_id: int) -> None:
         existing = self.get(quotation_id, current_user.company_id)
@@ -1118,11 +1181,13 @@ class ProformaInvoiceService:
     Quotation from a Lead."""
 
     def __init__(self, invoice_repo: ProformaInvoiceRepository, product_repo: ProductRepository,
-                 lead_repo: LeadRepositoryBase, quotation_repo: QuotationRepository):
+                 lead_repo: LeadRepositoryBase, quotation_repo: QuotationRepository,
+                 version_service: "DocumentVersionService"):
         self.invoice_repo = invoice_repo
         self.product_repo = product_repo
         self.lead_repo = lead_repo
         self.quotation_repo = quotation_repo
+        self.version_service = version_service
 
     # ---- reads --------------------------------------------------
     def get(self, invoice_id: int, company_id: int) -> ProformaInvoice:
@@ -1329,7 +1394,9 @@ class ProformaInvoiceService:
         items = self._build_items(current_user.company_id, raw_items)
         invoice = self._build_header(current_user, fields, items)
         invoice.invoice_number = self._generate_number(current_user.company_id, invoice.invoice_date)
-        return self.invoice_repo.create(invoice)
+        created = self.invoice_repo.create(invoice)
+        self.version_service.record("proforma_invoice", created, current_user.id)
+        return created
 
     def update(self, current_user: User, invoice_id: int, fields: dict, raw_items: list) -> ProformaInvoice:
         existing = self.get(invoice_id, current_user.company_id)
@@ -1337,7 +1404,9 @@ class ProformaInvoiceService:
         items = self._build_items(current_user.company_id, raw_items)
         invoice = self._build_header(current_user, fields, items)
         self.invoice_repo.update(invoice_id, invoice)
-        return self.get(invoice_id, current_user.company_id)
+        updated = self.get(invoice_id, current_user.company_id)
+        self.version_service.record("proforma_invoice", updated, current_user.id)
+        return updated
 
     def delete(self, current_user: User, invoice_id: int) -> None:
         existing = self.get(invoice_id, current_user.company_id)
@@ -1389,12 +1458,13 @@ class PackingListService:
 
     def __init__(self, packing_list_repo: PackingListRepository, product_repo: ProductRepository,
                  design_repo: DesignRepository, lead_repo: LeadRepositoryBase,
-                 proforma_invoice_repo: ProformaInvoiceRepository):
+                 proforma_invoice_repo: ProformaInvoiceRepository, version_service: "DocumentVersionService"):
         self.packing_list_repo = packing_list_repo
         self.product_repo = product_repo
         self.design_repo = design_repo
         self.lead_repo = lead_repo
         self.proforma_invoice_repo = proforma_invoice_repo
+        self.version_service = version_service
 
     # ---- reads --------------------------------------------------
     def get(self, packing_list_id: int, company_id: int) -> PackingList:
@@ -1594,7 +1664,9 @@ class PackingListService:
         packing_list.packing_list_number = self._generate_number(
             current_user.company_id, packing_list.packing_list_date
         )
-        return self.packing_list_repo.create(packing_list)
+        created = self.packing_list_repo.create(packing_list)
+        self.version_service.record("packing_list", created, current_user.id)
+        return created
 
     def update(self, current_user: User, packing_list_id: int, fields: dict, raw_items: list) -> PackingList:
         existing = self.get(packing_list_id, current_user.company_id)
@@ -1602,7 +1674,9 @@ class PackingListService:
         items = self._build_items(current_user.company_id, raw_items)
         packing_list = self._build_header(current_user, fields, items)
         self.packing_list_repo.update(packing_list_id, packing_list)
-        return self.get(packing_list_id, current_user.company_id)
+        updated = self.get(packing_list_id, current_user.company_id)
+        self.version_service.record("packing_list", updated, current_user.id)
+        return updated
 
     def delete(self, current_user: User, packing_list_id: int) -> None:
         existing = self.get(packing_list_id, current_user.company_id)

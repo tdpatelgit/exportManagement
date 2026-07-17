@@ -15,17 +15,29 @@
 </head>
 <body class="quote-print-body">
 
+  {% if historical_version %}
+  <div class="quote-toolbar no-print" style="background:#fff4d6;">
+    <div>Viewing <strong>version {{ historical_version.version_number }}</strong> of {{ packing_list.packing_list_number }} - saved {{ historical_version.created_at | friendly_date }} by {{ historical_version.changed_by_name }}. Read-only.</div>
+    <a href="{{ url_for('packing_lists.view_packing_list', packing_list_id=packing_list.id) }}" class="btn btn-ghost btn-sm">View current version →</a>
+  </div>
+  {% endif %}
+
   <div class="quote-toolbar no-print">
     <a href="{{ url_for('packing_lists.list_packing_lists') }}" class="btn btn-ghost btn-sm">← All packing lists</a>
     <div class="flex gap-8">
+      {% if not historical_version %}
       {% if packing_list.proforma_invoice_id %}
       <a href="{{ url_for('proforma_invoices.view_proforma_invoice', proforma_invoice_id=packing_list.proforma_invoice_id) }}" class="btn btn-ghost btn-sm">View proforma</a>
       <a href="{{ url_for('proforma_invoices.combined_proforma_invoice', proforma_invoice_id=packing_list.proforma_invoice_id) }}" class="btn btn-ghost btn-sm">Combined document</a>
       {% endif %}
       <a href="{{ url_for('packing_lists.edit_packing_list', packing_list_id=packing_list.id) }}" class="btn btn-ghost btn-sm">Edit</a>
+      {% if current_user.is_admin %}
+      <a href="{{ url_for('packing_lists.packing_list_versions', packing_list_id=packing_list.id) }}" class="btn btn-ghost btn-sm">Version history</a>
+      {% endif %}
       <form method="POST" action="{{ url_for('packing_lists.delete_packing_list', packing_list_id=packing_list.id) }}" onsubmit="return confirm('Delete this packing list?');">
         <button type="submit" class="btn btn-danger btn-sm">Delete</button>
       </form>
+      {% endif %}
       <button type="button" class="btn btn-primary btn-sm" onclick="window.print()">🖨 Print / Save as PDF</button>
     </div>
   </div>

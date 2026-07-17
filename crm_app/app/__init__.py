@@ -19,12 +19,13 @@ from app.repositories import (
     TenantRepository, SqliteUserRepository, SqliteLeadRepository, SqliteClientRepository,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
     CategoryRepository, ProductRepository, ProductFolderRepository, DesignRepository,
-    QuotationRepository, ProformaInvoiceRepository, PackingListRepository,
+    QuotationRepository, ProformaInvoiceRepository, PackingListRepository, DocumentVersionRepository,
 )
 from app.services import (
     AuthService, LeadService, ClientService, CurrencyService,
     CommunicationService, StatsService, CompanyService, ReportService, ProductService,
     QuotationService, ProformaInvoiceService, PackingListService, BackupService,
+    DocumentVersionService,
 )
 from app.utils import register_template_helpers
 
@@ -54,6 +55,7 @@ class ServiceContainer:
         self.quotation_repo = QuotationRepository(db)
         self.proforma_invoice_repo = ProformaInvoiceRepository(db)
         self.packing_list_repo = PackingListRepository(db)
+        self.document_version_repo = DocumentVersionRepository(db)
 
         # Services (business logic layer)
         self.auth_service = AuthService(self.user_repo, self.tenant_repo)
@@ -72,13 +74,17 @@ class ServiceContainer:
             self.category_repo, self.product_repo, self.product_folder_repo, self.design_repo,
             Config.PRODUCT_UPLOAD_FOLDER, Config.ALLOWED_IMAGE_EXTENSIONS,
         )
-        self.quotation_service = QuotationService(self.quotation_repo, self.product_repo, self.lead_repo)
+        self.document_version_service = DocumentVersionService(self.document_version_repo)
+        self.quotation_service = QuotationService(
+            self.quotation_repo, self.product_repo, self.lead_repo, self.document_version_service,
+        )
         self.proforma_invoice_service = ProformaInvoiceService(
             self.proforma_invoice_repo, self.product_repo, self.lead_repo, self.quotation_repo,
+            self.document_version_service,
         )
         self.packing_list_service = PackingListService(
             self.packing_list_repo, self.product_repo, self.design_repo,
-            self.lead_repo, self.proforma_invoice_repo,
+            self.lead_repo, self.proforma_invoice_repo, self.document_version_service,
         )
         self.backup_service = BackupService(
             db, Config.DATABASE_PATH, Config.PRODUCT_UPLOAD_FOLDER, Config.SCHEMA_PATH,

@@ -11,7 +11,7 @@ from datetime import date
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
-from app.utils import login_required
+from app.utils import login_required, admin_required
 
 quotations_bp = Blueprint("quotations", __name__, url_prefix="/quotations")
 
@@ -191,3 +191,46 @@ def delete_quotation(quotation_id):
     except NotFoundError:
         abort(404)
     return redirect(url_for("quotations.list_quotations"))
+
+
+@quotations_bp.route("/<int:quotation_id>/versions")
+@admin_required
+def quotation_versions(quotation_id):
+    container = current_app.container
+    try:
+        quotation = container.quotation_service.get(quotation_id, g.user.company_id)
+    except NotFoundError:
+        abort(404)
+    versions = container.document_version_service.list_for_document("quotation", quotation_id)
+    rows = [
+        {
+            "version_number": v.version_number,
+            "created_at": v.created_at,
+            "changed_by_name": v.changed_by_name,
+            "url": url_for("quotations.view_quotation", quotation_id=quotation_id) if i == 0 else
+                   url_for("quotations.view_quotation_version", quotation_id=quotation_id, version_number=v.version_number),
+        }
+        for i, v in enumerate(versions)
+    ]
+    return render_template(
+        "document_versions/list.html", document_number=quotation.quotation_number, versions=rows,
+        back_url=url_for("quotations.view_quotation", quotation_id=quotation_id),
+    )
+
+
+@quotations_bp.route("/<int:quotation_id>/versions/<int:version_number>")
+@admin_required
+def view_quotation_version(quotation_id, version_number):
+    container = current_app.container
+    try:
+        container.quotation_service.get(quotation_id, g.user.company_id)  # tenant-scope check
+        historical_quotation, version = container.document_version_service.get_version(
+            "quotation", quotation_id, version_number
+        )
+    except NotFoundError:
+        abort(404)
+    company = container.company_service.get(g.user.company_id)
+    return render_template(
+        "quotations/print.html", quotation=historical_quotation, company=company,
+        existing_pi=None, historical_version=version,
+    )
