@@ -514,6 +514,7 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
   white-space: nowrap;
 }
 .quote-items-table tfoot td { border: 1px solid var(--color-line-dark); padding: 6px 8px; background: var(--color-paper); }
+.quote-charge-row td { padding: 2px 8px; }
 .quote-total-row td { background: var(--color-paper); }
 .quote-amount-words {
   vertical-align: top; font-size: .5975rem; text-transform: uppercase;
@@ -532,7 +533,13 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
 @media print {
   .no-print { display: none !important; }
   .quote-print-body { background: #fff; }
-  .quote-sheet { box-shadow: none; margin: 0; max-width: 100%; }
+  .quote-sheet { box-shadow: none; margin: 0; max-width: 100%; padding: 14px 34px; }
+  .quote-banner { margin-bottom: 8px; }
+  .quote-meta-table { margin-bottom: 8px; }
+  .quote-footnote { margin-bottom: 8px; }
+  .quote-bank-table { margin-bottom: 14px; }
+  .quote-items-table td, .quote-items-table th, .quote-items-table tfoot td { padding: 4px 8px; }
+  .quote-charge-row td { padding: 1px 8px; }
   /* Some browsers "print-economy" thin, dark table borders down to nothing
      (treating them like backgrounds to be lightened for ink-saving) - this
      is what was dropping the box around EXPORTER/IMPORTER. Forcing exact
