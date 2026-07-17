@@ -1142,6 +1142,19 @@ class ProformaInvoiceService:
             return []
         return self.invoice_repo.list_for_lead(lead_id)
 
+    def get_for_quotation(self, quotation_id: Optional[int]) -> Optional[ProformaInvoice]:
+        """Returns the most recently created proforma invoice already
+        generated from this quotation, or None if none exists yet."""
+        if not quotation_id:
+            return None
+        invoices = self.invoice_repo.list_for_quotation(quotation_id)
+        return invoices[0] if invoices else None
+
+    def map_by_quotation(self, company_id: int) -> dict:
+        """quotation_id -> most recent proforma_invoice id, for the quotations
+        list page to switch "Generate PI" to "View PI" without an N+1 query."""
+        return self.invoice_repo.map_by_quotation(company_id)
+
     # ---- permission --------------------------------------------------
     def _assert_can_modify(self, invoice: ProformaInvoice, current_user: User):
         if current_user.is_admin:
@@ -1185,6 +1198,7 @@ class ProformaInvoiceService:
             "bank_swift_code": quotation.bank_swift_code,
             "bank_branch": quotation.bank_branch,
             "bank_address": quotation.bank_address,
+            "remarks": quotation.remarks,
         }
         items = [
             {

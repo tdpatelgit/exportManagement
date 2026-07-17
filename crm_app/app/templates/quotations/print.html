@@ -17,7 +17,11 @@
     <a href="{{ url_for('quotations.list_quotations') }}" class="btn btn-ghost btn-sm">← All quotations</a>
     <div class="flex gap-8">
       <a href="{{ url_for('quotations.edit_quotation', quotation_id=quotation.id) }}" class="btn btn-ghost btn-sm">Edit</a>
+      {% if existing_pi %}
+      <a href="{{ url_for('proforma_invoices.view_proforma_invoice', proforma_invoice_id=existing_pi.id) }}" class="btn btn-ghost btn-sm">View Proforma Invoice ({{ existing_pi.invoice_number }})</a>
+      {% else %}
       <a href="{{ url_for('proforma_invoices.new_proforma_invoice', quotation_id=quotation.id) }}" class="btn btn-ghost btn-sm">Generate Proforma Invoice</a>
+      {% endif %}
       <form method="POST" action="{{ url_for('quotations.delete_quotation', quotation_id=quotation.id) }}" onsubmit="return confirm('Delete this quotation?');">
         <button type="submit" class="btn btn-danger btn-sm">Delete</button>
       </form>

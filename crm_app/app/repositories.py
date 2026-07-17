@@ -1027,6 +1027,31 @@ class ProformaInvoiceRepository:
         )
         return [ProformaInvoice.from_row(r) for r in rows]
 
+    def list_for_quotation(self, quotation_id: int) -> List[ProformaInvoice]:
+        """Every proforma invoice generated from this quotation, newest first -
+        used to link back to an already-generated PI instead of starting a
+        duplicate one."""
+        rows = self.db.query(
+            """SELECT pi.*, u.full_name AS created_by_name FROM proforma_invoices pi
+               JOIN users u ON u.id = pi.created_by
+               WHERE pi.quotation_id = ?
+               ORDER BY pi.id DESC""",
+            (quotation_id,),
+        )
+        return [ProformaInvoice.from_row(r) for r in rows]
+
+    def map_by_quotation(self, company_id: int) -> dict:
+        """quotation_id -> most recently created proforma_invoice id, for this
+        company. Powers the quotations list page's "View PI" link."""
+        rows = self.db.query(
+            "SELECT quotation_id, id FROM proforma_invoices WHERE company_id = ? AND quotation_id IS NOT NULL ORDER BY id",
+            (company_id,),
+        )
+        result = {}
+        for row in rows:
+            result[row["quotation_id"]] = row["id"]
+        return result
+
     def create(self, invoice: ProformaInvoice) -> ProformaInvoice:
         new_id = self.db.execute(
             """INSERT INTO proforma_invoices

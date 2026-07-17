@@ -87,8 +87,10 @@ def _alt_qty_map(items) -> dict:
 @quotations_bp.route("/")
 @login_required
 def list_quotations():
-    quotations = current_app.container.quotation_service.list_all(g.user.company_id)
-    return render_template("quotations/list.html", quotations=quotations)
+    container = current_app.container
+    quotations = container.quotation_service.list_all(g.user.company_id)
+    pi_map = container.proforma_invoice_service.map_by_quotation(g.user.company_id)
+    return render_template("quotations/list.html", quotations=quotations, pi_map=pi_map)
 
 
 @quotations_bp.route("/new", methods=["GET", "POST"])
@@ -139,7 +141,8 @@ def view_quotation(quotation_id):
     except NotFoundError:
         abort(404)
     company = container.company_service.get(g.user.company_id)
-    return render_template("quotations/print.html", quotation=quotation, company=company)
+    existing_pi = container.proforma_invoice_service.get_for_quotation(quotation_id)
+    return render_template("quotations/print.html", quotation=quotation, company=company, existing_pi=existing_pi)
 
 
 @quotations_bp.route("/<int:quotation_id>/edit", methods=["GET", "POST"])

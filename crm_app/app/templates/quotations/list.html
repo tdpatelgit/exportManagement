@@ -36,7 +36,12 @@
           <td class="num">$ {{ '{:,.2f}'.format(q.invoice_value_usd) }}</td>
           <td class="flex gap-8">
             <a href="{{ url_for('quotations.view_quotation', quotation_id=q.id) }}" class="text-sm">Open →</a>
+            {% set pi_id = pi_map.get(q.id) %}
+            {% if pi_id %}
+            <a href="{{ url_for('proforma_invoices.view_proforma_invoice', proforma_invoice_id=pi_id) }}" class="text-sm">View PI →</a>
+            {% else %}
             <a href="{{ url_for('proforma_invoices.new_proforma_invoice', quotation_id=q.id) }}" class="text-sm">Generate PI →</a>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
