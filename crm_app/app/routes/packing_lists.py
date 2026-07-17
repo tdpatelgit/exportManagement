@@ -62,6 +62,26 @@ def _extract_items(form) -> list:
     return items
 
 
+def _group_items_by_product(items) -> list:
+    """Groups raw item dicts/PackingListItem rows by (product_id,
+    product_name), preserving first-seen order of both groups and items
+    within a group. The edit form renders one 'product block' per group,
+    holding every design line for that product - purely a rendering
+    grouping: each design still submits its own full set of item_*[]
+    fields (see _extract_items) and becomes its own PackingListItem /
+    printed row regardless of how the form displayed it."""
+    def get(item, key):
+        return (item.get(key) if isinstance(item, dict) else getattr(item, key)) or ""
+    groups, index = [], {}
+    for item in items:
+        key = (get(item, "product_id"), get(item, "product_name"))
+        if key not in index:
+            index[key] = len(groups)
+            groups.append([])
+        groups[index[key]].append(item)
+    return groups
+
+
 def _form_context():
     container = current_app.container
     leads = container.lead_service.list_for_dashboard(g.user)
@@ -138,8 +158,8 @@ def new_packing_list():
             items = _extract_items(request.form)
             return render_template(
                 "packing_lists/form.html", packing_list=None, leads=leads, invoices=invoices, quotations=quotations,
-                form_data=request.form, form_items=items, product_map=_product_map(items),
-                today=date.today().isoformat(),
+                form_data=request.form, form_items=items, item_groups=_group_items_by_product(items),
+                product_map=_product_map(items), today=date.today().isoformat(),
             ), 400
 
     leads, invoices, quotations = _form_context()
@@ -174,7 +194,7 @@ def new_packing_list():
             pass
     return render_template(
         "packing_lists/form.html", packing_list=None, leads=leads, invoices=invoices, quotations=quotations,
-        form_data=prefill, form_items=form_items,
+        form_data=prefill, form_items=form_items, item_groups=_group_items_by_product(form_items or []),
         product_map=_product_map(form_items) if form_items else {}, today=date.today().isoformat(),
     )
 
@@ -217,15 +237,15 @@ def edit_packing_list(packing_list_id):
             return render_template(
                 "packing_lists/form.html", packing_list=packing_list, leads=leads, invoices=invoices,
                 quotations=quotations,
-                form_data=request.form, form_items=items, product_map=_product_map(items),
-                today=date.today().isoformat(),
+                form_data=request.form, form_items=items, item_groups=_group_items_by_product(items),
+                product_map=_product_map(items), today=date.today().isoformat(),
             ), 400
 
     leads, invoices, quotations = _form_context()
     return render_template(
         "packing_lists/form.html", packing_list=packing_list, leads=leads, invoices=invoices, quotations=quotations,
-        form_data=None, form_items=None, product_map=_product_map(packing_list.items),
-        today=date.today().isoformat(),
+        form_data=None, form_items=None, item_groups=_group_items_by_product(packing_list.items),
+        product_map=_product_map(packing_list.items), today=date.today().isoformat(),
     )
 
 
