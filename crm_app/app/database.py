@@ -40,7 +40,7 @@ from datetime import datetime
 # Because `_migrate` is idempotent and runs on every startup AND on every
 # restore, any backup - however old - is carried forward through the whole
 # chain of steps, never discarded.
-SCHEMA_VERSION = 5  # v5: categories can nest (self-referencing parent_id), like sub categories already do
+SCHEMA_VERSION = 7  # v7: proforma invoices get a goods `display_mode` and per-line `surface` (category/surface-grouped print view)
 
 
 class Database:
@@ -165,6 +165,19 @@ class Database:
             for column in ("box_per_pallet", "pcs"):
                 if existing and column not in existing:
                     conn.execute(f"ALTER TABLE packing_list_items ADD COLUMN {column} REAL")
+
+            # v6: optional surface finish on designs (GLOSSY / MATT / ...)
+            existing = {r["name"] for r in conn.execute("PRAGMA table_info(designs)")}
+            if existing and "surface" not in existing:
+                conn.execute("ALTER TABLE designs ADD COLUMN surface TEXT")
+
+            # v7: proforma goods layout choice + per-line surface finish
+            existing = {r["name"] for r in conn.execute("PRAGMA table_info(proforma_invoices)")}
+            if existing and "display_mode" not in existing:
+                conn.execute("ALTER TABLE proforma_invoices ADD COLUMN display_mode TEXT NOT NULL DEFAULT 'index'")
+            existing = {r["name"] for r in conn.execute("PRAGMA table_info(proforma_invoice_items)")}
+            if existing and "surface" not in existing:
+                conn.execute("ALTER TABLE proforma_invoice_items ADD COLUMN surface TEXT")
 
             # ---- PACKING SPEC MOVES FROM DESIGN TO PRODUCT ----
             # packing / quantity / alternate_quantity / unit / weight_class

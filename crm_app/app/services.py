@@ -827,7 +827,8 @@ class ProductService:
 
     def create_design(self, current_user: User, product_id: int, folder_id: Optional[int],
                        design_name: str, description: str, price_usd: str,
-                       alt_text: str, photo_file, dimension_photo_file) -> Design:
+                       alt_text: str, photo_file, dimension_photo_file,
+                       surface: str = "") -> Design:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
         if not design_name or not design_name.strip():
@@ -843,6 +844,7 @@ class ProductService:
         design = Design(
             id=None, company_id=current_user.company_id, product_id=product_id, folder_id=folder_id,
             design_name=design_name.strip(), description=description or None,
+            surface=(surface or "").strip() or None,
             price_usd=self._parse_price(price_usd),
             photo_path=photo_path, dimension_photo_path=dimension_photo_path, alt_text=alt_text or None,
         )
@@ -850,7 +852,7 @@ class ProductService:
 
     def update_design(self, current_user: User, design_id: int, design_name: str,
                        description: str, price_usd: str, alt_text: str,
-                       photo_file, dimension_photo_file) -> None:
+                       photo_file, dimension_photo_file, surface: str = "") -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
         if not design_name or not design_name.strip():
@@ -859,6 +861,7 @@ class ProductService:
 
         fields = {
             "design_name": design_name.strip(), "description": description or None,
+            "surface": (surface or "").strip() or None,
             "price_usd": self._parse_price(price_usd), "alt_text": alt_text or None,
         }
         if photo_file and photo_file.filename:
@@ -1230,6 +1233,7 @@ class ProformaInvoiceService:
             items.append(ProformaInvoiceItem(
                 id=None, proforma_invoice_id=None, sr_no=i, product_id=product_id, product_name=product_name,
                 hsn_code=(raw.get("hsn_code") or "").strip() or None,
+                surface=(raw.get("surface") or "").strip() or None,
                 pallets=pallets, quantity_boxes=quantity_boxes, quantity_value=quantity_value,
                 unit=(raw.get("unit") or "SQM").strip() or "SQM",
                 price_usd=price_usd, total_usd=round(quantity_value * price_usd, 2),
@@ -1301,6 +1305,7 @@ class ProformaInvoiceService:
             bank_swift_code=(fields.get("bank_swift_code") or "").strip() or None,
             bank_branch=(fields.get("bank_branch") or "").strip() or None,
             bank_address=(fields.get("bank_address") or "").strip() or None,
+            display_mode=fields.get("display_mode") if fields.get("display_mode") in ("index", "surface") else "index",
             items=items,
         )
         return invoice
@@ -1394,6 +1399,12 @@ class PackingListService:
         if not lead_id:
             return []
         return self.packing_list_repo.list_for_lead(lead_id)
+
+    def list_for_proforma(self, proforma_invoice_id: int, company_id: int) -> List[PackingList]:
+        """Every packing list generated from one proforma invoice, company-
+        scoped - drives the combined invoice + packing details print view."""
+        return [pl for pl in self.packing_list_repo.list_for_proforma(proforma_invoice_id)
+                if pl.company_id == company_id]
 
     # ---- permission --------------------------------------------------
     def _assert_can_modify(self, packing_list: PackingList, current_user: User):

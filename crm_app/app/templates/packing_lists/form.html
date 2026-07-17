@@ -88,7 +88,7 @@
               <textarea name="item_design_name[]" class="js-design-name" rows="2">{{ row.design_name or '' }}</textarea>
               <button type="button" class="btn btn-ghost btn-sm js-choose-design">🎨 Design</button>
             </td>
-            <td><input type="text" name="item_hsn_code[]" class="js-hsn" value="{{ row.hsn_code or '' }}"></td>
+            <td><input type="text" name="item_hsn_code[]" class="js-hsn" value="{{ row.hsn_code or '' }}" readonly tabindex="-1"></td>
             <td><input type="number" step="0.01" name="item_box_per_pallet[]" class="js-box-per-pallet" value="{{ row.box_per_pallet or '' }}"></td>
             <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets" value="{{ row.pallets or '' }}"></td>
             <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" required value="{{ row.quantity_boxes or '' }}"></td>
@@ -181,7 +181,7 @@
         <textarea name="item_design_name[]" class="js-design-name" rows="2"></textarea>
         <button type="button" class="btn btn-ghost btn-sm js-choose-design">🎨 Design</button>
       </td>
-      <td><input type="text" name="item_hsn_code[]" class="js-hsn"></td>
+      <td><input type="text" name="item_hsn_code[]" class="js-hsn" readonly tabindex="-1"></td>
       <td><input type="number" step="0.01" name="item_box_per_pallet[]" class="js-box-per-pallet"></td>
       <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets"></td>
       <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" required></td>

@@ -273,6 +273,7 @@ CREATE TABLE IF NOT EXISTS designs (
     folder_id               INTEGER REFERENCES product_folders(id) ON DELETE CASCADE,  -- NULL = directly under the product
     design_name             TEXT NOT NULL,
     description             TEXT,
+    surface                 TEXT,          -- optional finish, e.g. GLOSSY / MATT / CHROME (prints on packing lists)
     price_usd               REAL,
     photo_path              TEXT,
     dimension_photo_path    TEXT,
@@ -381,6 +382,7 @@ CREATE TABLE IF NOT EXISTS proforma_invoices (
     bank_swift_code           TEXT,
     bank_branch               TEXT,
     bank_address               TEXT,
+    display_mode              TEXT NOT NULL DEFAULT 'index',  -- goods layout: 'index' (numbered) | 'surface' (grouped by category + surface)
     created_by                 INTEGER NOT NULL REFERENCES users(id),
     created_at                  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at                  TEXT NOT NULL DEFAULT (datetime('now')),
@@ -395,6 +397,7 @@ CREATE TABLE IF NOT EXISTS proforma_invoice_items (
     product_name          TEXT NOT NULL,
     dimension_mm          TEXT,
     hsn_code              TEXT,
+    surface               TEXT,      -- optional finish (GLOSSY / MATT / ...), drives the surface-grouped print view
     pallets                REAL,      -- "Plts" column
     quantity_boxes        REAL,
     quantity_value         REAL NOT NULL DEFAULT 0,

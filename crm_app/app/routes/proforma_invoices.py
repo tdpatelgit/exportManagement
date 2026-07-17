@@ -27,6 +27,7 @@ _HEADER_FIELDS = [
     "container_details", "terms_of_delivery", "payment_terms", "remarks",
     "sea_freight", "insurance", "certification", "other_charges", "discount_amount",
     "bank_name", "bank_account_number", "bank_ifsc_code", "bank_swift_code", "bank_branch", "bank_address",
+    "display_mode",
 ]
 
 
@@ -38,6 +39,7 @@ def _extract_items(form) -> list:
     product_ids = form.getlist("item_product_id[]")
     product_names = form.getlist("item_product_name[]")
     hsn_codes = form.getlist("item_hsn_code[]")
+    surfaces = form.getlist("item_surface[]")
     pallets = form.getlist("item_pallets[]")
     boxes = form.getlist("item_quantity_boxes[]")
     values = form.getlist("item_quantity_value[]")
@@ -49,6 +51,7 @@ def _extract_items(form) -> list:
             "product_id": product_ids[i] if i < len(product_ids) else "",
             "product_name": product_names[i],
             "hsn_code": hsn_codes[i] if i < len(hsn_codes) else "",
+            "surface": surfaces[i] if i < len(surfaces) else "",
             "pallets": pallets[i] if i < len(pallets) else "",
             "quantity_boxes": boxes[i] if i < len(boxes) else "",
             "quantity_value": values[i] if i < len(values) else "",
@@ -157,7 +160,27 @@ def view_proforma_invoice(proforma_invoice_id):
     except NotFoundError:
         abort(404)
     company = container.company_service.get(g.user.company_id)
-    return render_template("proforma_invoices/print.html", invoice=invoice, company=company)
+    packing_lists = container.packing_list_service.list_for_proforma(proforma_invoice_id, g.user.company_id)
+    return render_template("proforma_invoices/print.html", invoice=invoice, company=company,
+                           packing_lists=packing_lists)
+
+
+@proforma_invoices_bp.route("/<int:proforma_invoice_id>/combined")
+@login_required
+def combined_proforma_invoice(proforma_invoice_id):
+    """The combined printable document: the proforma invoice page followed by
+    its packing details page(s), each on its own A4 sheet."""
+    container = current_app.container
+    try:
+        invoice = container.proforma_invoice_service.get(proforma_invoice_id, g.user.company_id)
+    except NotFoundError:
+        abort(404)
+    company = container.company_service.get(g.user.company_id)
+    packing_lists = container.packing_list_service.list_for_proforma(proforma_invoice_id, g.user.company_id)
+    from app.routes.packing_lists import catalog_maps
+    product_map, design_map = catalog_maps(packing_lists)
+    return render_template("proforma_invoices/print_combined.html", invoice=invoice, company=company,
+                           packing_lists=packing_lists, product_map=product_map, design_map=design_map)
 
 
 @proforma_invoices_bp.route("/<int:proforma_invoice_id>/edit", methods=["GET", "POST"])

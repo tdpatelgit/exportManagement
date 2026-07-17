@@ -91,6 +91,28 @@ def _product_map(items) -> dict:
     return result
 
 
+def catalog_maps(packing_lists) -> tuple:
+    """(product_map, design_map) for every item across the given packing
+    lists - the print sheet reads each product's shared per-box packing spec
+    and each design's photo from these. Also used by the combined
+    invoice + packing view in routes/proforma_invoices.py."""
+    container = current_app.container
+    product_map, design_map = {}, {}
+    for packing_list in packing_lists:
+        for item in packing_list.items:
+            if item.product_id and item.product_id not in product_map:
+                try:
+                    product_map[item.product_id] = container.product_service.get_product(item.product_id, g.user.company_id)
+                except NotFoundError:
+                    pass
+            if item.design_id and item.design_id not in design_map:
+                try:
+                    design_map[item.design_id] = container.product_service.get_design(item.design_id, g.user.company_id)
+                except NotFoundError:
+                    pass
+    return product_map, design_map
+
+
 @packing_lists_bp.route("/")
 @login_required
 def list_packing_lists():
@@ -155,7 +177,9 @@ def view_packing_list(packing_list_id):
     except NotFoundError:
         abort(404)
     company = container.company_service.get(g.user.company_id)
-    return render_template("packing_lists/print.html", packing_list=packing_list, company=company)
+    product_map, design_map = catalog_maps([packing_list])
+    return render_template("packing_lists/print.html", packing_list=packing_list, company=company,
+                           product_map=product_map, design_map=design_map)
 
 
 @packing_lists_bp.route("/<int:packing_list_id>/edit", methods=["GET", "POST"])

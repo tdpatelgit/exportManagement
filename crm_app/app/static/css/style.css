@@ -318,6 +318,8 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
   border-bottom: 1px dashed var(--color-line);
 }
 .repeatable-row .field { margin-bottom: 0; flex: 1; }
+.radio-wrap { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.radio-wrap label { margin: 0; }
 .repeatable-row .radio-wrap { display: flex; align-items: center; gap: 5px; padding-bottom: 9px; }
 .repeatable-row .radio-wrap label { margin: 0; font-size: .74rem; font-weight: 500; }
 
@@ -468,46 +470,51 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
 .quote-toolbar .btn-danger:hover { background: rgba(231, 154, 154, 0.15); }
 .quote-sheet {
   max-width: 960px; margin: 24px auto 60px; background: #fff; padding: 30px 34px;
-  box-shadow: var(--shadow-card); font-size: .82rem; color: var(--color-text);
+  box-shadow: var(--shadow-card); font-size: .6975rem; color: var(--color-text);
 }
 .quote-banner {
   text-align: center; font-family: var(--font-mono); font-weight: 600; letter-spacing: .1em;
-  color: var(--color-ink); margin-bottom: 14px; font-size: .95rem;
+  color: var(--color-ink); margin-bottom: 14px; font-size: .8275rem;
 }
 .quote-meta-table { width: 100%; border-collapse: collapse; border: 1px solid var(--color-ink); margin-bottom: 16px; }
 .quote-meta-table td { border: 1px solid var(--color-line-dark); padding: 6px 9px; vertical-align: top; }
 .quote-side-label {
   writing-mode: vertical-rl; transform: rotate(180deg); text-align: center;
-  font-weight: 700; font-size: .72rem; letter-spacing: .08em; background: var(--color-paper); width: 26px;
+  font-weight: 700; font-size: .5975rem; letter-spacing: .08em; background: var(--color-paper); width: 26px;
 }
 .quote-side-label-upright {
   writing-mode: horizontal-tb; transform: none; text-align: center;
-  font-weight: 700; font-size: .72rem; letter-spacing: normal; line-height: 1.3;
+  font-weight: 700; font-size: .5975rem; letter-spacing: normal; line-height: 1.3;
   background: var(--color-paper); width: 78px;
 }
 .quote-block { width: 40%; }
-.quote-field-label { font-weight: 600; font-size: .72rem; text-transform: uppercase; color: var(--color-text-soft); width: 26%; background: var(--color-paper); }
+.quote-field-label { font-weight: 600; font-size: .5975rem; text-transform: uppercase; color: var(--color-text-soft); width: 26%; background: var(--color-paper); }
 .quote-field-value { font-weight: 500; }
 
-.quote-remarks { border: 1px solid var(--color-line-dark); padding: 8px 10px; margin-bottom: 16px; font-size: .78rem; }
+.quote-remarks { border: 1px solid var(--color-line-dark); padding: 8px 10px; margin-bottom: 16px; font-size: .6575rem; }
 
-.quote-items-table { width: 100%; border-collapse: collapse; border: 1px solid var(--color-ink); margin-bottom: 6px; }
+.quote-items-table { width: 100%; table-layout: fixed; border-collapse: collapse; border: 1px solid var(--color-ink); margin-bottom: 6px; }
 .quote-items-table th {
   border: 1px solid var(--color-line-dark); background: var(--color-paper); padding: 6px 8px;
-  font-size: .68rem; text-transform: uppercase; letter-spacing: .05em;
+  font-size: .5575rem; text-transform: uppercase; letter-spacing: .05em;
 }
-.quote-items-table td { border: 1px solid var(--color-line-dark); padding: 6px 8px; }
+.quote-items-table td { border: 1px solid var(--color-line-dark); padding: 6px 8px; overflow-wrap: break-word; }
+/* PRICE (USD) / TOTAL (USD) columns are numeric-only - never let them wrap,
+   even a 7-figure amount ("$ 1,234,567.89") must sit on one line. */
+.quote-items-table td.num, .quote-items-table th:nth-child(7), .quote-items-table th:nth-child(8) {
+  white-space: nowrap;
+}
 .quote-items-table tfoot td { border: 1px solid var(--color-line-dark); padding: 6px 8px; background: var(--color-paper); }
 .quote-total-row td { background: var(--color-paper); }
 .quote-amount-words {
-  vertical-align: top; font-size: .72rem; text-transform: uppercase;
+  vertical-align: top; font-size: .5975rem; text-transform: uppercase;
   letter-spacing: .02em; line-height: 1.4;
 }
 
-.quote-footnote { font-size: .74rem; color: var(--color-text-soft); margin-bottom: 16px; }
+.quote-footnote { font-size: .6175rem; color: var(--color-text-soft); margin-bottom: 16px; }
 
 .quote-bank-table { width: 100%; border-collapse: collapse; border: 1px solid var(--color-ink); margin-bottom: 30px; }
-.quote-bank-table th { border: 1px solid var(--color-line-dark); background: var(--color-paper); padding: 6px 8px; font-size: .74rem; }
+.quote-bank-table th { border: 1px solid var(--color-line-dark); background: var(--color-paper); padding: 6px 8px; font-size: .6175rem; }
 .quote-bank-table td { border: 1px solid var(--color-line-dark); padding: 8px 10px; vertical-align: top; width: 50%; }
 
 .quote-signature { display: flex; justify-content: space-between; align-items: flex-end; }
@@ -517,6 +524,20 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
   .no-print { display: none !important; }
   .quote-print-body { background: #fff; }
   .quote-sheet { box-shadow: none; margin: 0; max-width: 100%; }
+  /* Some browsers "print-economy" thin, dark table borders down to nothing
+     (treating them like backgrounds to be lightened for ink-saving) - this
+     is what was dropping the box around EXPORTER/IMPORTER. Forcing exact
+     color adjustment keeps every border/background rendered as authored. */
+  .quote-sheet, .quote-sheet * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .quote-meta-table, .quote-meta-table td,
+  .quote-items-table, .quote-items-table th, .quote-items-table td,
+  .quote-bank-table, .quote-bank-table th, .quote-bank-table td,
+  .quote-remarks {
+    border-color: var(--color-ink) !important;
+  }
 }
 
 .login-shell {

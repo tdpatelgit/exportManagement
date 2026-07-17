@@ -1,0 +1,125 @@
+{# The Packing Details sheet (replica of the AAYU EXIM Excel format with the
+   product-photo index layout). Shared by print.html (standalone) and
+   proforma_invoices/print_combined.html. Expects `packing_list` plus
+   `product_map` (product_id -> Product, for the shared per-box packing spec)
+   and `design_map` (design_id -> Design, for the photo) in context; brings
+   its own scoped .pk-* styles along. Rows flow onto extra pages naturally -
+   no fixed page padding. #}
+<style>
+  .pk-sheet {
+    background: #fff;
+    color: #000;
+    width: 205mm;
+    margin: 24px auto 48px;
+    padding: 6mm 6mm 8mm;
+    box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    font-family: Verdana, Arial, Helvetica, sans-serif;
+    font-size: 8px;
+    line-height: 1.35;
+  }
+  .pk-sheet table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .pk-sheet td { border: 1px solid #000; padding: 3px 4px; vertical-align: middle; text-align: center; word-wrap: break-word; }
+  .pk-sheet tr { break-inside: avoid; page-break-inside: avoid; }
+  .pk-title { font-weight: bold; font-size: 11px; letter-spacing: 1px; padding: 4px; }
+  .pk-label { font-weight: bold; }
+  .pk-left { text-align: left; }
+  .pk-head td { font-weight: bold; }
+  .pk-item td { height: 88px; }
+  .pk-photo img { max-width: 100%; max-height: 84px; object-fit: contain; }
+  .pk-desc { white-space: pre-line; }
+  .pk-sign-cell { height: 70px; padding: 4px 6px; vertical-align: top; }
+  .pk-sign-flex { display: flex; flex-direction: column; justify-content: space-between; height: 100%; text-align: left; }
+  .pk-sign-right { text-align: right; }
+  @media print {
+    .pk-sheet { width: auto; margin: 0; padding: 0; box-shadow: none; }
+  }
+</style>
+
+{% macro num(v) -%}
+  {%- if v is not none and v != '' and v != 0 %}{{ '{:g}'.format(v | round(2)) }}{% elif v == 0 and v is not none %}0{% endif -%}
+{%- endmacro %}
+
+<div class="pk-sheet">
+  <table>
+    <colgroup>
+      <col style="width:6.5%"><col style="width:15%"><col style="width:16.5%"><col style="width:5%">
+      <col style="width:6%"><col style="width:7%"><col style="width:12%"><col style="width:7%">
+      <col style="width:8.5%"><col style="width:8.5%"><col style="width:8%">
+    </colgroup>
+
+    <tr><td class="pk-title" colspan="11">&lt; &lt; &lt; &lt; &lt; &nbsp;PACKING DETAILS&nbsp; &gt; &gt; &gt; &gt; &gt;</td></tr>
+
+    <tr>
+      <td class="pk-label pk-left" colspan="2">PROFORMA INVOICE NO</td>
+      <td class="pk-label" colspan="3">{{ packing_list.proforma_invoice_number or '-' }}</td>
+      <td class="pk-label">DATE</td>
+      <td class="pk-label" colspan="5">{{ packing_list.packing_list_date | long_date }}</td>
+    </tr>
+
+    <tr class="pk-head">
+      <td rowspan="2">INDEX</td>
+      <td rowspan="2">PRODUCT</td>
+      <td rowspan="2">PRODUCT</td>
+      <td colspan="2">BOX PACKING</td>
+      <td rowspan="2">SURFACE</td>
+      <td rowspan="2">MODEL NO<br>OR NAME</td>
+      <td rowspan="2">NO OF<br>PALLET</td>
+      <td colspan="3">TOTAL QUANTITY</td>
+    </tr>
+    <tr class="pk-head">
+      <td>PCS</td>
+      <td>SQM / LM</td>
+      <td>BOXES</td>
+      <td>PCS</td>
+      <td>SQM / LM/<br>PCS</td>
+    </tr>
+
+    {% for item in packing_list.items %}
+    {% set product = product_map.get(item.product_id) if item.product_id else None %}
+    {% set design = design_map.get(item.design_id) if item.design_id else None %}
+    <tr class="pk-item">
+      <td>{{ loop.index }}</td>
+      <td class="pk-photo">
+        {% if design and design.photo_path %}
+          <img src="{{ url_for('static', filename=design.photo_path) }}" alt="{{ design.alt_text or design.design_name }}">
+        {% endif %}
+      </td>
+      <td class="pk-desc">{{ item.product_name }}</td>
+      <td>{{ product.quantity if product and product.quantity else '' }}</td>
+      <td>{{ product.alternate_quantity if product and product.alternate_quantity else '' }}</td>
+      <td>{{ (design.surface or '')|upper if design else '' }}</td>
+      <td>{{ item.design_name or '' }}</td>
+      <td>{{ num(item.pallets) }}</td>
+      <td>{{ num(item.quantity_boxes) }}</td>
+      <td>{{ num(item.pcs) }}</td>
+      <td>{{ num(item.quantity_value) }}</td>
+    </tr>
+    {% endfor %}
+
+    <tr>
+      <td class="pk-label" colspan="7">TOTAL</td>
+      <td class="pk-label">{{ num(packing_list.total_pallets) }}</td>
+      <td class="pk-label">{{ num(packing_list.total_boxes) }}</td>
+      <td class="pk-label">{{ num(packing_list.total_pcs) }}</td>
+      <td class="pk-label">{{ num(packing_list.total_quantity) }}</td>
+    </tr>
+    <tr>
+      <td class="pk-label pk-left" colspan="2">REMARKS :</td>
+      <td class="pk-left" colspan="9">{{ (packing_list.remarks or '')|upper }}</td>
+    </tr>
+    <tr>
+      <td class="pk-sign-cell" colspan="5">
+        <div class="pk-sign-flex">
+          <div class="pk-label">ACCEPTED BY BUYER</div>
+          <div class="pk-label">SEAL &amp; SIGNATURE</div>
+        </div>
+      </td>
+      <td class="pk-sign-cell" colspan="6">
+        <div class="pk-sign-flex pk-sign-right">
+          <div class="pk-label">FOR&nbsp; {{ company.company_name|upper if company else '' }}</div>
+          <div class="pk-label">AUTHORISED SIGNATORY</div>
+        </div>
+      </td>
+    </tr>
+  </table>
+</div>

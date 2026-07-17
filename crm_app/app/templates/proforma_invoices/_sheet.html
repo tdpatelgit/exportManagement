@@ -1,0 +1,345 @@
+{# The proforma invoice A4 sheet (replica of the AAYU EXIM Excel format).
+   Shared by print.html (standalone) and print_combined.html (invoice +
+   packing list in one printable document). Expects `invoice` and `company`
+   in context; brings its own scoped .pi-* styles along. #}
+{# Items beyond what fits on the invoice page spill onto the ANNEXURE sheet
+   (_annexure.html) - the invoice page then shows a "(CONTINUE TO
+   ANNEXURE----->)" marker, per-page totals and an ANNEXURE line in the
+   charges block, like the original Excel document. Keep PI_ANNEX_START in
+   sync with _annexure.html. #}
+{% import 'proforma_invoices/_goods_rows.html' as goods %}
+{% set PI_ANNEX_START = 6 %}
+{% set pi_mode = invoice.display_mode or 'index' %}
+{% set main_items = invoice.items[:PI_ANNEX_START] %}
+{% set annex_items = invoice.items[PI_ANNEX_START:] %}
+{% set extra_rows = goods.extra_row_count(main_items, pi_mode) | int %}
+{% set filler_px = [260 - (main_items|length * 16) - (extra_rows * 13) - (30 if annex_items else 0), 30] | max %}
+<style>
+  .pi-sheet {
+    background: #fff;
+    color: #000;
+    width: 205mm;
+    margin: 24px auto 48px;
+    padding: 6mm 6mm 8mm;
+    box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 10px;
+    line-height: 1.25;
+  }
+  .pi-title {
+    border: 1px solid #000;
+    text-align: center;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 3px 0;
+  }
+  .pi-sheet table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: -1px; }
+  .pi-sheet td { border: 1px solid #000; padding: 3px 5px; vertical-align: top; word-wrap: break-word; }
+  .pi-label { font-size: 9px; }
+  .pi-val { font-weight: bold; }
+  .pi-center { text-align: center; }
+  .pi-right { text-align: right; }
+  .pi-mid { vertical-align: middle !important; }
+  .pi-side {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    text-align: center;
+    font-size: 9px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    padding: 2px 1px;
+    vertical-align: middle;
+  }
+  .pi-email-bar { padding: 0; }
+  .pi-email-flex { display: flex; align-items: stretch; }
+  .pi-email-flex > div { padding: 3px 5px; }
+  .pi-email-flex > div + div { border-left: 1px solid #000; }
+  .pi-items thead td { text-align: center; vertical-align: middle; font-size: 9px; }
+  .pi-items tbody tr.pi-goods td, .pi-items tbody tr.pi-filler td { border-top: none; border-bottom: none; padding: 2px 5px; }
+  .pi-items tbody tr.pi-filler td { height: {{ filler_px }}px; }
+  .pi-items tbody tr.pi-group-gap td { height: 8px; padding: 0; }
+  .pi-charge-label { text-align: center; font-weight: bold; font-size: 9px; vertical-align: middle; }
+  .pi-sign-cell { height: 92px; padding: 4px 6px; }
+  .pi-sign-flex { display: flex; flex-direction: column; justify-content: space-between; height: 100%; }
+  .pi-stamp { text-align: right; }
+  @media print {
+    .pi-sheet { width: auto; margin: 0; padding: 0; box-shadow: none; }
+  }
+</style>
+
+{% macro dmy(val) -%}
+  {%- if val -%}
+    {%- set p = (val|string)[:10].split('-') -%}
+    {%- if p|length == 3 %}{{ p[2]|int }}/{{ p[1]|int }}/{{ p[0] }}{% else %}{{ val }}{% endif -%}
+  {%- else -%}-{%- endif -%}
+{%- endmacro %}
+{% macro usd(v) -%}
+  {%- if v %}$&nbsp;{{ '{:,.2f}'.format(v) }}{% else %}$&nbsp;-{% endif -%}
+{%- endmacro %}
+
+{% set phone = (company.contact_details | selectattr('type', 'equalto', 'phone') | list | first) if company else None %}
+{% set email = (company.contact_details | selectattr('type', 'equalto', 'email') | list | first) if company else None %}
+
+<div class="pi-sheet">
+  <div class="pi-title">PROFORMA INVOICE</div>
+
+  <!-- Exporter / invoice references -->
+  <table>
+    <colgroup>
+      <col style="width:20px"><col><col style="width:15%"><col style="width:20%"><col style="width:7%"><col style="width:12%">
+    </colgroup>
+    <tr>
+      <td class="pi-side" rowspan="4">EXPORTER</td>
+      <td rowspan="3" style="border-bottom:none;">
+        <span class="pi-val">{{ company.company_name|upper if company else '' }}</span><br>
+        <span class="pi-val">{{ (company.address or '')|upper|replace('\n', '<br>')|safe if company else '' }}</span>
+        {% if company and company.gstin %}<br><span class="pi-val">GSTIN : {{ company.gstin }}</span>{% endif %}
+        {% if company and company.iec %}<br><span class="pi-val">IEC : {{ company.iec }}</span>{% endif %}
+      </td>
+      <td class="pi-label">Invoice No</td>
+      <td class="pi-val">{{ invoice.invoice_number }}</td>
+      <td class="pi-label">DATE</td>
+      <td class="pi-val">{{ dmy(invoice.invoice_date) }}</td>
+    </tr>
+    <tr>
+      <td class="pi-label">Export Ref. No</td>
+      <td class="pi-val">{{ invoice.export_ref_no or '-' }}</td>
+      <td class="pi-label">DATE</td>
+      <td class="pi-val"></td>
+    </tr>
+    <tr>
+      <td class="pi-label">Buyer Order<br>No &amp; Date</td>
+      <td class="pi-val pi-mid" colspan="3">{{ invoice.buyer_order_no or '-' }}</td>
+    </tr>
+    <tr>
+      <td class="pi-email-bar">
+        <div class="pi-email-flex">
+          <div class="pi-label">EMAIL</div>
+          <div class="pi-label">:</div>
+          <div class="pi-val" style="flex:1;"><u>{{ email.value|upper if email else '-' }}</u></div>
+          <div class="pi-label">MOBILE</div>
+          <div class="pi-val">{{ phone.value if phone else '-' }}</div>
+        </div>
+      </td>
+      <td class="pi-label">Other<br>Reference(s)</td>
+      <td class="pi-val pi-mid" colspan="3">{{ invoice.other_reference or '-' }}</td>
+    </tr>
+    <tr>
+      <td class="pi-side">CONSIGNEE</td>
+      <td>
+        <span class="pi-val">{{ (invoice.consignee_name or '')|upper }}</span><br>
+        <span class="pi-val">{{ (invoice.consignee_address or '')|upper|replace('\n', '<br>')|safe }}</span>
+      </td>
+      <td class="pi-label pi-mid">Buyer If Other<br>Then<br>Consignee<br>[Notify]</td>
+      <td class="pi-mid" colspan="3">
+        {% if invoice.notify_name or invoice.notify_address %}
+          <span class="pi-val">{{ (invoice.notify_name or '')|upper }}</span><br>
+          <span class="pi-val">{{ (invoice.notify_address or '')|upper|replace('\n', '<br>')|safe }}</span>
+        {% else %}-{% endif %}
+      </td>
+    </tr>
+  </table>
+
+  <!-- Origin / shipping grid -->
+  <table>
+    <colgroup><col style="width:25%"><col style="width:25%"><col style="width:25%"><col style="width:25%"></colgroup>
+    <tr>
+      <td rowspan="2" colspan="2"></td>
+      <td class="pi-label pi-center">Country of Origin Of Goods</td>
+      <td class="pi-label pi-center">Country of Final Destination</td>
+    </tr>
+    <tr>
+      <td class="pi-val pi-center" style="letter-spacing:4px;">{{ (invoice.country_of_origin or 'INDIA')|upper }}</td>
+      <td class="pi-val pi-center">{{ (invoice.country_of_destination or '-')|upper }}</td>
+    </tr>
+    <tr>
+      <td class="pi-label pi-center">Vessel / Flight Name &amp; No</td>
+      <td class="pi-label pi-center">Port Of Loading</td>
+      <td class="pi-label pi-center">Transhipment</td>
+      <td class="pi-label pi-center">Partial Shipment</td>
+    </tr>
+    <tr>
+      <td class="pi-val pi-center">{{ (invoice.vessel_flight or 'N/A')|upper }}</td>
+      <td class="pi-val pi-center">{{ (invoice.port_of_loading or '-')|upper }}</td>
+      <td class="pi-val pi-center">{{ (invoice.transhipment or '-')|upper }}</td>
+      <td class="pi-val pi-center">{{ (invoice.partial_shipment or '-')|upper }}</td>
+    </tr>
+    <tr>
+      <td class="pi-label pi-center">Port Of Discharge</td>
+      <td class="pi-label pi-center">Final Destination</td>
+      <td class="pi-label pi-center">Variation in Quantity</td>
+      <td class="pi-label pi-center">Delivery Period</td>
+    </tr>
+    <tr>
+      <td class="pi-val pi-center">{{ (invoice.port_of_discharge or '-')|upper }}</td>
+      <td class="pi-val pi-center">{{ (invoice.final_destination or '-')|upper }}</td>
+      <td class="pi-val pi-center">{{ (invoice.variation_in_qty or '-')|upper }}</td>
+      <td class="pi-val pi-center">{{ (invoice.delivery_period or '')|upper }}</td>
+    </tr>
+    <tr>
+      <td class="pi-label pi-center">Container Details</td>
+      <td class="pi-label pi-center">Terms of Delivery</td>
+      <td class="pi-label pi-mid" rowspan="2">Payment<br>Terms</td>
+      <td class="pi-val pi-mid" rowspan="2">{{ invoice.payment_terms or '-' }}</td>
+    </tr>
+    <tr>
+      <td class="pi-val pi-center">{{ (invoice.container_details or '-')|upper }}</td>
+      <td class="pi-val pi-center">{{ (invoice.terms_of_delivery or '-')|upper }}</td>
+    </tr>
+  </table>
+
+  {# per-page totals: the invoice page's TOTAL row covers only the items
+     printed on it - the annexure items total appears as the ANNEXURE line
+     in the charges block and again on the annexure sheet's own TOTAL row #}
+  {% set ns = namespace(pallets=0, boxes=0, qty=0, amount=0) %}
+  {% for item in main_items %}
+    {% set ns.pallets = ns.pallets + (item.pallets or 0) %}
+    {% set ns.boxes = ns.boxes + (item.quantity_boxes or 0) %}
+    {% set ns.qty = ns.qty + (item.quantity_value or 0) %}
+    {% set ns.amount = ns.amount + (item.total_usd or 0) %}
+  {% endfor %}
+  {% set annex_total = annex_items | sum(attribute='total_usd') %}
+
+  <!-- Goods -->
+  <table class="pi-items">
+    <colgroup>
+      <col style="width:17%"><col style="width:36%"><col style="width:5.5%"><col style="width:7%">
+      <col style="width:9.5%"><col style="width:7.5%"><col style="width:5.5%"><col style="width:12%">
+    </colgroup>
+    <thead>
+      <tr>
+        <td rowspan="2">Marks &amp; Nos / Container No</td>
+        <td rowspan="2">Description Of Goods</td>
+        <td colspan="3">Quantity Details</td>
+        <td rowspan="2">Rate<br>In USD</td>
+        <td rowspan="2">Per</td>
+        <td rowspan="2">Total<br>Amount</td>
+      </tr>
+      <tr>
+        <td>Plts</td>
+        <td>Boxes</td>
+        <td>SQM /<br>LM</td>
+      </tr>
+    </thead>
+    <tbody>
+      {{ goods.rows(main_items, pi_mode, 0) }}
+      {% if annex_items %}
+      <tr class="pi-goods">
+        <td></td>
+        <td class="pi-val">(CONTINUE TO ANNEXURE-----&gt;)</td>
+        <td></td><td></td><td></td><td></td><td></td><td></td>
+      </tr>
+      {% endif %}
+      <tr class="pi-filler">
+        <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+      </tr>
+      <tr>
+        <td></td>
+        <td class="pi-val pi-center">TOTAL</td>
+        <td class="pi-val pi-center">{{ '{:,.0f}'.format(ns.pallets) if ns.pallets else '' }}</td>
+        <td class="pi-val pi-center">{{ '{:,.0f}'.format(ns.boxes) if ns.boxes else '' }}</td>
+        <td class="pi-val pi-right">{{ '{:,.2f}'.format(ns.qty) }}</td>
+        <td></td>
+        <td></td>
+        <td class="pi-val pi-right">{{ usd(ns.amount) }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Amount in words / charges -->
+  {% set charge_rows = (6 if invoice.other_charges else 5) + (1 if annex_items else 0) %}
+  <table>
+    <colgroup>
+      <col style="width:8%"><col style="width:45%"><col style="width:35%"><col style="width:12%">
+    </colgroup>
+    <tr>
+      <td class="pi-label pi-mid" rowspan="{{ charge_rows }}">Amount<br>In Word</td>
+      <td class="pi-val pi-mid" rowspan="{{ charge_rows }}">{{ invoice.invoice_value_usd | amount_in_words }}</td>
+      {% if annex_items %}
+      <td class="pi-charge-label">ANNEXURE</td>
+      <td class="pi-val pi-right">{{ usd(annex_total) }}</td>
+    </tr>
+    <tr>
+      {% endif %}
+      <td class="pi-charge-label">CERTIFICATION</td>
+      <td class="pi-val pi-right">{{ usd(invoice.certification) }}</td>
+    </tr>
+    <tr>
+      <td class="pi-charge-label">SEA FREIGHT</td>
+      <td class="pi-val pi-right">{{ usd(invoice.sea_freight) }}</td>
+    </tr>
+    <tr>
+      <td class="pi-charge-label">INSURANCE</td>
+      <td class="pi-val pi-right">{{ usd(invoice.insurance) }}</td>
+    </tr>
+    {% if invoice.other_charges %}
+    <tr>
+      <td class="pi-charge-label">OTHER CHARGES</td>
+      <td class="pi-val pi-right">{{ usd(invoice.other_charges) }}</td>
+    </tr>
+    {% endif %}
+    <tr>
+      <td class="pi-charge-label">DISCOUNT</td>
+      <td class="pi-val pi-right">{{ usd(invoice.discount_amount) }}</td>
+    </tr>
+    <tr>
+      <td class="pi-charge-label">TOTAL INVOICE VALUE</td>
+      <td class="pi-val pi-right">{{ usd(invoice.invoice_value_usd) }}</td>
+    </tr>
+  </table>
+
+  <!-- Beneficiary / bank -->
+  <table>
+    <colgroup>
+      <col style="width:20px"><col style="width:47%"><col>
+    </colgroup>
+    <tr>
+      <td class="pi-side">BANK DETAILS</td>
+      <td>
+        <span class="pi-val">BENEFICIARY</span><br><br>
+        <span class="pi-val">{{ company.company_name|upper if company else '' }}</span><br>
+        <span class="pi-val">{{ (company.address or '')|upper|replace('\n', '<br>')|safe if company else '' }}</span>
+      </td>
+      <td>
+        <span class="pi-val">BANK DETAILS</span><br><br>
+        <span class="pi-val">{{ (invoice.bank_name or '-')|upper }}</span><br>
+        <span class="pi-val">{{ (invoice.bank_address or '')|upper|replace('\n', '<br>')|safe }}</span>
+        {% if invoice.bank_account_number %}<br><span class="pi-val">ACCOUNT NO : {{ invoice.bank_account_number }}</span>{% endif %}
+        {% if invoice.bank_swift_code %}<br><span class="pi-val">BANK SWIFT CODE : {{ invoice.bank_swift_code|upper }}</span>{% endif %}
+        {% if invoice.bank_ifsc_code %}<br><span class="pi-val">BRANCH IFSC : {{ invoice.bank_ifsc_code|upper }}</span>{% endif %}
+      </td>
+    </tr>
+  </table>
+
+  <!-- Footnotes + signatures -->
+  <table>
+    <colgroup><col style="width:55%"><col></colgroup>
+    <tr>
+      <td colspan="2" style="border-bottom:none; height:26px;"></td>
+    </tr>
+    <tr>
+      <td colspan="2" style="border-top:none; border-bottom:none;">
+        ALL BANKING CHARGES OUTSIDE INDIA WILL BE IN ACCOUNT OF APPLICANT
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2" style="border-top:none;">
+        ABOVE OFFER IS VALID 10 DAYS OF ISSUE OF THIS PROFORMA INVOICE
+      </td>
+    </tr>
+    <tr>
+      <td class="pi-sign-cell">
+        <div class="pi-sign-flex">
+          <div class="pi-val">ACCEPTED BY BUYER</div>
+          <div class="pi-val">SEAL &amp; SIGNATURE</div>
+        </div>
+      </td>
+      <td class="pi-sign-cell">
+        <div class="pi-sign-flex pi-stamp">
+          <div class="pi-val">FOR&nbsp; {{ company.company_name|upper if company else '' }}</div>
+          <div class="pi-val">AUTHORISED SIGNATORY</div>
+        </div>
+      </td>
+    </tr>
+  </table>
+</div>

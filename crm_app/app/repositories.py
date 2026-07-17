@@ -817,11 +817,11 @@ class DesignRepository:
     def create(self, design: Design) -> Design:
         new_id = self.db.execute(
             """INSERT INTO designs
-               (company_id, product_id, folder_id, design_name, description,
+               (company_id, product_id, folder_id, design_name, description, surface,
                 price_usd, photo_path, dimension_photo_path, alt_text)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (design.company_id, design.product_id, design.folder_id, design.design_name,
-             design.description, design.price_usd, design.photo_path,
+             design.description, design.surface, design.price_usd, design.photo_path,
              design.dimension_photo_path, design.alt_text),
         )
         return self.get_by_id(new_id)
@@ -1037,8 +1037,8 @@ class ProformaInvoiceRepository:
                 variation_in_qty, delivery_period, container_details, terms_of_delivery, payment_terms,
                 remarks, sea_freight, insurance, certification, other_charges, discount_amount,
                 bank_name, bank_account_number, bank_ifsc_code, bank_swift_code, bank_branch,
-                bank_address, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                bank_address, display_mode, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (invoice.company_id, invoice.invoice_number, invoice.invoice_date, invoice.lead_id,
              invoice.quotation_id, invoice.export_ref_no, invoice.buyer_order_no, invoice.other_reference,
              invoice.consignee_name, invoice.consignee_address, invoice.notify_name, invoice.notify_address,
@@ -1049,7 +1049,7 @@ class ProformaInvoiceRepository:
              invoice.payment_terms, invoice.remarks, invoice.sea_freight, invoice.insurance,
              invoice.certification, invoice.other_charges, invoice.discount_amount, invoice.bank_name,
              invoice.bank_account_number, invoice.bank_ifsc_code, invoice.bank_swift_code,
-             invoice.bank_branch, invoice.bank_address, invoice.created_by),
+             invoice.bank_branch, invoice.bank_address, invoice.display_mode, invoice.created_by),
         )
         self._replace_items(new_id, invoice.items)
         return self.get_by_id(new_id)
@@ -1067,7 +1067,8 @@ class ProformaInvoiceRepository:
                                              sea_freight = ?, insurance = ?, certification = ?,
                                              other_charges = ?, discount_amount = ?, bank_name = ?,
                                              bank_account_number = ?, bank_ifsc_code = ?, bank_swift_code = ?,
-                                             bank_branch = ?, bank_address = ?, updated_at = datetime('now')
+                                             bank_branch = ?, bank_address = ?, display_mode = ?,
+                                             updated_at = datetime('now')
                WHERE id = ?""",
             (invoice.invoice_date, invoice.lead_id, invoice.quotation_id, invoice.export_ref_no,
              invoice.buyer_order_no, invoice.other_reference, invoice.consignee_name,
@@ -1079,7 +1080,7 @@ class ProformaInvoiceRepository:
              invoice.payment_terms, invoice.remarks, invoice.sea_freight, invoice.insurance,
              invoice.certification, invoice.other_charges, invoice.discount_amount, invoice.bank_name,
              invoice.bank_account_number, invoice.bank_ifsc_code, invoice.bank_swift_code,
-             invoice.bank_branch, invoice.bank_address, invoice_id),
+             invoice.bank_branch, invoice.bank_address, invoice.display_mode, invoice_id),
         )
         self._replace_items(invoice_id, invoice.items)
 
@@ -1090,11 +1091,11 @@ class ProformaInvoiceRepository:
                 conn.execute(
                     """INSERT INTO proforma_invoice_items
                        (proforma_invoice_id, sr_no, product_id, product_name, dimension_mm, hsn_code,
-                        pallets, quantity_boxes, quantity_value, unit, price_usd, total_usd)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        surface, pallets, quantity_boxes, quantity_value, unit, price_usd, total_usd)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (invoice_id, item.sr_no, item.product_id, item.product_name, item.dimension_mm,
-                     item.hsn_code, item.pallets, item.quantity_boxes, item.quantity_value, item.unit,
-                     item.price_usd, item.total_usd),
+                     item.hsn_code, item.surface, item.pallets, item.quantity_boxes, item.quantity_value,
+                     item.unit, item.price_usd, item.total_usd),
                 )
 
     def delete(self, invoice_id: int) -> None:
@@ -1156,6 +1157,15 @@ class PackingListRepository:
         rows = self.db.query(
             self._SELECT + " WHERE pl.lead_id = ? ORDER BY pl.packing_list_date DESC, pl.id DESC",
             (lead_id,),
+        )
+        return self._attach_items([PackingList.from_row(r) for r in rows])
+
+    def list_for_proforma(self, proforma_invoice_id: int) -> List[PackingList]:
+        """Every packing list generated from one proforma invoice - drives the
+        combined invoice + packing details print view."""
+        rows = self.db.query(
+            self._SELECT + " WHERE pl.proforma_invoice_id = ? ORDER BY pl.id",
+            (proforma_invoice_id,),
         )
         return self._attach_items([PackingList.from_row(r) for r in rows])
 

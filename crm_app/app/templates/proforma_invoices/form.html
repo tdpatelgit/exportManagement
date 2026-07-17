@@ -49,6 +49,18 @@
       <div class="field"><label for="buyer_order_no">Buyer order no.</label><input type="text" id="buyer_order_no" name="buyer_order_no" value="{{ data.buyer_order_no | default('', true) }}"></div>
       <div class="field"><label for="other_reference">Other reference(s)</label><input type="text" id="other_reference" name="other_reference" value="{{ data.other_reference | default('', true) }}"></div>
     </div>
+    {% set current_mode = data.display_mode | default('index', true) %}
+    <div class="field">
+      <label>Goods layout on the printed invoice</label>
+      <div class="radio-wrap">
+        <label for="dm-index">Indexing view — numbered lines grouped under their category / HSN heading</label>
+        <input type="radio" name="display_mode" value="index" id="dm-index" {{ 'checked' if current_mode != 'surface' }}>
+      </div>
+      <div class="radio-wrap">
+        <label for="dm-surface">Surface category view — grouped by category, then by surface (surface shown in the Marks column)</label>
+        <input type="radio" name="display_mode" value="surface" id="dm-surface" {{ 'checked' if current_mode == 'surface' }}>
+      </div>
+    </div>
   </div>
 
   <div class="card">
@@ -103,8 +115,9 @@
             <th>Sr</th>
             <th style="min-width:220px;">Product</th>
             <th>HSN code</th>
-            <th>Plts</th>
             <th>Boxes</th>
+            <th>Surface</th>
+            <th>Plts</th>
             <th>Qty (SQM/LM)</th>
             <th>Unit</th>
             <th>Price (USD)</th>
@@ -122,9 +135,10 @@
               <textarea name="item_product_name[]" class="js-product-name" rows="2" required>{{ row.product_name }}</textarea>
               <button type="button" class="btn btn-ghost btn-sm js-choose-product">📦 Choose product</button>
             </td>
-            <td><input type="text" name="item_hsn_code[]" class="js-hsn" value="{{ row.hsn_code or '' }}"></td>
-            <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets" value="{{ row.pallets or '' }}"></td>
+            <td><input type="text" name="item_hsn_code[]" class="js-hsn" value="{{ row.hsn_code or '' }}" readonly tabindex="-1"></td>
             <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" value="{{ row.quantity_boxes or '' }}"></td>
+            <td><input type="text" name="item_surface[]" class="js-surface" style="min-width:80px;" placeholder="GLOSSY / MATT" value="{{ row.surface or '' }}"></td>
+            <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets" value="{{ row.pallets or '' }}"></td>
             <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required value="{{ row.quantity_value or '' }}"></td>
             <td>
               <select name="item_unit[]" class="js-unit">
@@ -259,9 +273,10 @@
         <textarea name="item_product_name[]" class="js-product-name" rows="2" required></textarea>
         <button type="button" class="btn btn-ghost btn-sm js-choose-product">📦 Choose product</button>
       </td>
-      <td><input type="text" name="item_hsn_code[]" class="js-hsn"></td>
-      <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets"></td>
+      <td><input type="text" name="item_hsn_code[]" class="js-hsn" readonly tabindex="-1"></td>
       <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes"></td>
+      <td><input type="text" name="item_surface[]" class="js-surface" style="min-width:80px;" placeholder="GLOSSY / MATT"></td>
+      <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets"></td>
       <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required></td>
       <td>
         <select name="item_unit[]" class="js-unit">

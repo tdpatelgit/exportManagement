@@ -1,0 +1,70 @@
+{# The ANNEXURE page for a quotation: overflow product lines that didn't fit
+   on the main quotation sheet, with their own TOTAL row and signatory block -
+   same "not enough space" rule as proforma invoices (see
+   proforma_invoices/_annexure.html). Renders nothing when every item fits on
+   the main sheet. Self-contained (recomputes the split from
+   `quotation.items` rather than trusting caller-scoped variables) so it can
+   be included safely from anywhere. Keep QUOTE_ANNEX_START in sync with
+   quotations/print.html. #}
+{% set QUOTE_ANNEX_START = 2 %}
+{% set annex_items = quotation.items[QUOTE_ANNEX_START:] %}
+{% if annex_items %}
+
+{% set axns = namespace(total=0) %}
+{% for item in annex_items %}
+  {% set axns.total = axns.total + (item.total_usd or 0) %}
+{% endfor %}
+
+<style>
+  .quote-annex-page { break-before: page; page-break-before: always; }
+</style>
+
+<div class="quote-annex-page quote-sheet">
+  <div class="quote-banner">ANNEXURE</div>
+
+  <table class="quote-items-table">
+    <colgroup>
+      <col style="width:4%"><col style="width:19%"><col style="width:12%"><col style="width:8%">
+      <col style="width:10%"><col style="width:7%"><col style="width:19%"><col style="width:21%">
+    </colgroup>
+    <thead>
+      <tr>
+        <th>SR</th>
+        <th>PRODUCT</th>
+        <th>HSN CODE</th>
+        <th>BOXES</th>
+        <th>QTY</th>
+        <th>UNIT</th>
+        <th>PRICE (USD)</th>
+        <th>TOTAL (USD)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in annex_items %}
+      <tr>
+        <td class="num">{{ item.sr_no }}</td>
+        <td>{{ item.product_name|replace('\n', '<br>')|safe }}</td>
+        <td>{{ item.hsn_code or '—' }}</td>
+        <td class="num">{{ '{:,.0f}'.format(item.quantity_boxes) if item.quantity_boxes else '—' }}</td>
+        <td class="num">{{ '{:,.2f}'.format(item.quantity_value) }}</td>
+        <td>{{ item.unit }}</td>
+        <td class="num">$ {{ '{:,.2f}'.format(item.price_usd) }}</td>
+        <td class="num">$ {{ '{:,.2f}'.format(item.total_usd) }}</td>
+      </tr>
+      {% endfor %}
+      <tr class="quote-total-row">
+        <td colspan="7" class="num"><strong>TOTAL</strong></td>
+        <td class="num"><strong>$ {{ '{:,.2f}'.format(axns.total) }}</strong></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="quote-signature">
+    <div></div>
+    <div class="quote-signature-box">
+      <div>{{ company.company_name if company else '' }}</div>
+      <div class="text-sm text-soft">Authorised Signatory</div>
+    </div>
+  </div>
+</div>
+{% endif %}
