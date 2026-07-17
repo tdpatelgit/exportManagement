@@ -15,20 +15,32 @@
 </head>
 <body class="quote-print-body">
 
+  {% if historical_version %}
+  <div class="quote-toolbar no-print" style="background:#fff4d6;">
+    <div>Viewing <strong>version {{ historical_version.version_number }}</strong> of {{ invoice.invoice_number }} - saved {{ historical_version.created_at | friendly_date }} by {{ historical_version.changed_by_name }}. Read-only.</div>
+    <a href="{{ url_for('proforma_invoices.view_proforma_invoice', proforma_invoice_id=invoice.id) }}" class="btn btn-ghost btn-sm">View current version →</a>
+  </div>
+  {% endif %}
+
   <div class="quote-toolbar no-print">
     <a href="{{ url_for('proforma_invoices.list_proforma_invoices') }}" class="btn btn-ghost btn-sm">← All proforma invoices</a>
     <div class="flex gap-8">
+      {% if not historical_version %}
       {% if packing_lists %}
       <a href="{{ url_for('packing_lists.view_packing_list', packing_list_id=packing_lists[0].id) }}" class="btn btn-ghost btn-sm">📦 View packing list</a>
       {% else %}
       <a href="{{ url_for('packing_lists.new_packing_list', proforma_invoice_id=invoice.id) }}" class="btn btn-ghost btn-sm">📦 Create packing list</a>
       {% endif %}
       <a href="{{ url_for('proforma_invoices.edit_proforma_invoice', proforma_invoice_id=invoice.id) }}" class="btn btn-ghost btn-sm">Edit</a>
+      {% if current_user.is_admin %}
+      <a href="{{ url_for('proforma_invoices.proforma_invoice_versions', proforma_invoice_id=invoice.id) }}" class="btn btn-ghost btn-sm">Version history</a>
+      {% endif %}
       <form method="POST" action="{{ url_for('proforma_invoices.delete_proforma_invoice', proforma_invoice_id=invoice.id) }}" onsubmit="return confirm('Delete this proforma invoice?');">
         <button type="submit" class="btn btn-danger btn-sm">Delete</button>
       </form>
-      <button type="button" class="btn btn-primary btn-sm" onclick="window.print()">🖨 Generate invoice only</button>
       <a href="{{ url_for('proforma_invoices.combined_proforma_invoice', proforma_invoice_id=invoice.id) }}" class="btn btn-primary btn-sm">🖨 Generate combined document</a>
+      {% endif %}
+      <button type="button" class="btn btn-primary btn-sm" onclick="window.print()">🖨 Generate invoice only</button>
     </div>
   </div>
 

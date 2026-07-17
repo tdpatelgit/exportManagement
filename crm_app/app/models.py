@@ -12,6 +12,7 @@ small convenience, not a violation of Single Responsibility - it's still
 just "how do I represent myself", not "how do I persist myself".
 """
 
+import json
 from dataclasses import dataclass, field
 from typing import Optional, List
 
@@ -858,4 +859,37 @@ class ProformaInvoice:
     def invoice_value_usd(self) -> float:
         return (self.subtotal_usd + self.sea_freight + self.insurance
                 + self.certification + self.other_charges - self.discount_amount)
+
+
+@dataclass
+class DocumentVersion:
+    """One past-or-current snapshot of a Quotation/ProformaInvoice/PackingList,
+    taken on every create/update. `snapshot` is that document's full
+    dataclass state (header fields + items) serialized as JSON - admin-only,
+    read-only history, never itself editable."""
+    id: Optional[int]
+    company_id: int
+    document_type: str
+    document_id: int
+    version_number: int
+    document_number: str
+    snapshot: dict
+    changed_by: int
+    created_at: Optional[str] = None
+    changed_by_name: Optional[str] = None  # populated by joined queries only
+
+    @staticmethod
+    def from_row(row) -> "DocumentVersion":
+        return DocumentVersion(
+            id=row["id"],
+            company_id=row["company_id"],
+            document_type=row["document_type"],
+            document_id=row["document_id"],
+            version_number=row["version_number"],
+            document_number=row["document_number"],
+            snapshot=json.loads(row["snapshot"]),
+            changed_by=row["changed_by"],
+            created_at=row["created_at"],
+            changed_by_name=row["changed_by_name"] if "changed_by_name" in row.keys() else None,
+        )
 

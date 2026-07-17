@@ -14,7 +14,7 @@ from datetime import date
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
-from app.utils import login_required
+from app.utils import login_required, admin_required
 
 proforma_invoices_bp = Blueprint("proforma_invoices", __name__, url_prefix="/proforma-invoices")
 
@@ -230,3 +230,47 @@ def delete_proforma_invoice(proforma_invoice_id):
     except NotFoundError:
         abort(404)
     return redirect(url_for("proforma_invoices.list_proforma_invoices"))
+
+
+@proforma_invoices_bp.route("/<int:proforma_invoice_id>/versions")
+@admin_required
+def proforma_invoice_versions(proforma_invoice_id):
+    container = current_app.container
+    try:
+        invoice = container.proforma_invoice_service.get(proforma_invoice_id, g.user.company_id)
+    except NotFoundError:
+        abort(404)
+    versions = container.document_version_service.list_for_document("proforma_invoice", proforma_invoice_id)
+    rows = [
+        {
+            "version_number": v.version_number,
+            "created_at": v.created_at,
+            "changed_by_name": v.changed_by_name,
+            "url": url_for("proforma_invoices.view_proforma_invoice", proforma_invoice_id=proforma_invoice_id) if i == 0 else
+                   url_for("proforma_invoices.view_proforma_invoice_version",
+                           proforma_invoice_id=proforma_invoice_id, version_number=v.version_number),
+        }
+        for i, v in enumerate(versions)
+    ]
+    return render_template(
+        "document_versions/list.html", document_number=invoice.invoice_number, versions=rows,
+        back_url=url_for("proforma_invoices.view_proforma_invoice", proforma_invoice_id=proforma_invoice_id),
+    )
+
+
+@proforma_invoices_bp.route("/<int:proforma_invoice_id>/versions/<int:version_number>")
+@admin_required
+def view_proforma_invoice_version(proforma_invoice_id, version_number):
+    container = current_app.container
+    try:
+        container.proforma_invoice_service.get(proforma_invoice_id, g.user.company_id)  # tenant-scope check
+        historical_invoice, version = container.document_version_service.get_version(
+            "proforma_invoice", proforma_invoice_id, version_number
+        )
+    except NotFoundError:
+        abort(404)
+    company = container.company_service.get(g.user.company_id)
+    return render_template(
+        "proforma_invoices/print.html", invoice=historical_invoice, company=company,
+        packing_lists=[], historical_version=version,
+    )

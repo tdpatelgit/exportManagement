@@ -14,7 +14,7 @@ from datetime import date
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
-from app.utils import login_required
+from app.utils import login_required, admin_required
 
 packing_lists_bp = Blueprint("packing_lists", __name__, url_prefix="/packing-lists")
 
@@ -229,3 +229,48 @@ def delete_packing_list(packing_list_id):
     except NotFoundError:
         abort(404)
     return redirect(url_for("packing_lists.list_packing_lists"))
+
+
+@packing_lists_bp.route("/<int:packing_list_id>/versions")
+@admin_required
+def packing_list_versions(packing_list_id):
+    container = current_app.container
+    try:
+        packing_list = container.packing_list_service.get(packing_list_id, g.user.company_id)
+    except NotFoundError:
+        abort(404)
+    versions = container.document_version_service.list_for_document("packing_list", packing_list_id)
+    rows = [
+        {
+            "version_number": v.version_number,
+            "created_at": v.created_at,
+            "changed_by_name": v.changed_by_name,
+            "url": url_for("packing_lists.view_packing_list", packing_list_id=packing_list_id) if i == 0 else
+                   url_for("packing_lists.view_packing_list_version",
+                           packing_list_id=packing_list_id, version_number=v.version_number),
+        }
+        for i, v in enumerate(versions)
+    ]
+    return render_template(
+        "document_versions/list.html", document_number=packing_list.packing_list_number, versions=rows,
+        back_url=url_for("packing_lists.view_packing_list", packing_list_id=packing_list_id),
+    )
+
+
+@packing_lists_bp.route("/<int:packing_list_id>/versions/<int:version_number>")
+@admin_required
+def view_packing_list_version(packing_list_id, version_number):
+    container = current_app.container
+    try:
+        container.packing_list_service.get(packing_list_id, g.user.company_id)  # tenant-scope check
+        historical_packing_list, version = container.document_version_service.get_version(
+            "packing_list", packing_list_id, version_number
+        )
+    except NotFoundError:
+        abort(404)
+    company = container.company_service.get(g.user.company_id)
+    product_map, design_map = catalog_maps([historical_packing_list])
+    return render_template(
+        "packing_lists/print.html", packing_list=historical_packing_list, company=company,
+        product_map=product_map, design_map=design_map, historical_version=version,
+    )

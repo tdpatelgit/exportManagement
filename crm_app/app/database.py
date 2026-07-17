@@ -40,7 +40,7 @@ from datetime import datetime
 # Because `_migrate` is idempotent and runs on every startup AND on every
 # restore, any backup - however old - is carried forward through the whole
 # chain of steps, never discarded.
-SCHEMA_VERSION = 7  # v7: proforma invoices get a goods `display_mode` and per-line `surface` (category/surface-grouped print view)
+SCHEMA_VERSION = 8  # v8: added document_versions - append-only version history for quotations/proforma invoices/packing lists
 
 
 class Database:

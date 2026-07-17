@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Version history · {{ document_number }}{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Version history · admin only</div>
+    <h1>{{ document_number }}</h1>
+  </div>
+  <div class="topbar-actions">
+    <a href="{{ back_url }}" class="btn btn-ghost">← Back to document</a>
+  </div>
+</div>
+
+<div class="card">
+  {% if versions %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th>Version</th>
+          <th>Saved</th>
+          <th>Saved by</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for v in versions %}
+        <tr>
+          <td class="mono">v{{ v.version_number }}{% if loop.first %} (current){% endif %}</td>
+          <td class="text-sm">{{ v.created_at | friendly_date }}</td>
+          <td class="text-sm">{{ v.changed_by_name }}</td>
+          <td><a href="{{ v.url }}" class="text-sm">View →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No version history yet.</div>
+  {% endif %}
+</div>
+
+{% endblock %}

@@ -11,6 +11,7 @@ Each concrete repository is (Interface Segregation) - a UserRepository has
 no idea what a Lead is, a LeadRepository has no idea how payments work, etc.
 """
 
+import json
 from abc import ABC, abstractmethod
 from typing import Optional, List
 
@@ -19,7 +20,7 @@ from app.models import (
     Tenant, User, Lead, Client, ContactPerson, Communication,
     PaymentEntry, DocumentEntry, OurCompany, Category, Product, ProductFolder, Design,
     Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
-    PackingList, PackingListItem,
+    PackingList, PackingListItem, DocumentVersion,
 )
 
 
@@ -1254,3 +1255,57 @@ class PackingListRepository:
 
     def delete(self, packing_list_id: int) -> None:
         self.db.execute("DELETE FROM packing_lists WHERE id = ?", (packing_list_id,))
+
+
+# ============================================================
+# DOCUMENT VERSION REPOSITORY (append-only history for quotations/proforma
+# invoices/packing lists - see schema.sql's document_versions table)
+# ============================================================
+class DocumentVersionRepository:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def _next_version_number(self, document_type: str, document_id: int) -> int:
+        row = self.db.query_one(
+            "SELECT COALESCE(MAX(version_number), 0) AS mx FROM document_versions "
+            "WHERE document_type = ? AND document_id = ?",
+            (document_type, document_id),
+        )
+        return (row["mx"] if row else 0) + 1
+
+    def record(self, company_id: int, document_type: str, document_id: int,
+               document_number: str, snapshot: dict, changed_by: int) -> DocumentVersion:
+        version_number = self._next_version_number(document_type, document_id)
+        new_id = self.db.execute(
+            """INSERT INTO document_versions
+               (company_id, document_type, document_id, version_number, document_number, snapshot, changed_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (company_id, document_type, document_id, version_number, document_number,
+             json.dumps(snapshot), changed_by),
+        )
+        return self.get_by_id(new_id)
+
+    _SELECT = """
+        SELECT dv.*, u.full_name AS changed_by_name
+        FROM document_versions dv
+        JOIN users u ON u.id = dv.changed_by
+    """
+
+    def get_by_id(self, version_id: int) -> Optional[DocumentVersion]:
+        row = self.db.query_one(self._SELECT + " WHERE dv.id = ?", (version_id,))
+        return DocumentVersion.from_row(row) if row else None
+
+    def list_for_document(self, document_type: str, document_id: int) -> List[DocumentVersion]:
+        """Newest first - drives the admin-only version history panel."""
+        rows = self.db.query(
+            self._SELECT + " WHERE dv.document_type = ? AND dv.document_id = ? ORDER BY dv.version_number DESC",
+            (document_type, document_id),
+        )
+        return [DocumentVersion.from_row(r) for r in rows]
+
+    def get_version(self, document_type: str, document_id: int, version_number: int) -> Optional[DocumentVersion]:
+        row = self.db.query_one(
+            self._SELECT + " WHERE dv.document_type = ? AND dv.document_id = ? AND dv.version_number = ?",
+            (document_type, document_id, version_number),
+        )
+        return DocumentVersion.from_row(row) if row else None
