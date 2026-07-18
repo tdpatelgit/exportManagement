@@ -30,8 +30,8 @@ from werkzeug.utils import secure_filename
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
 from app.models import (
     User, Lead, Client, ContactPerson, Communication, PaymentEntry, DocumentEntry,
-    LEAD_STATUSES, CLIENT_STATUSES, PRODUCT_UNITS, Category, Product, ProductFolder, Design,
-    Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem, PackingList, PackingListItem,
+    LEAD_STATUSES, CLIENT_STATUSES, CLIENT_STATUS_ADVANCE_ON, PRODUCT_UNITS, Category, Product, ProductFolder,
+    Design, Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem, PackingList, PackingListItem,
     DocumentVersion,
 )
 from app.repositories import (
@@ -440,6 +440,37 @@ class ClientService:
                 })
         rows.sort(key=lambda r: r["date"], reverse=True)
         return rows
+
+
+def advance_client_status(client_repo: ClientRepositoryBase, lead_repo: LeadRepositoryBase,
+                           lead_id: Optional[int], document_type: str) -> None:
+    """Moves the client tied to `lead_id` forward to whatever CLIENT_STATUSES
+    stage becomes pending once `document_type` has just been generated - e.g.
+    generating a Proforma Invoice clears "proforma invoice submission
+    pending" and lands on "purchase order submission pending". Every
+    document service calls this same helper after create/update; adding a
+    new document type only means registering it in
+    models.CLIENT_STATUS_ADVANCE_ON, no other wiring needed. No-op for
+    document types that don't map to a stage (e.g. Packing List), leads that
+    haven't converted to a client yet, or when the client is already at or
+    past the target stage (regenerating/editing a document shouldn't walk
+    the client status backwards)."""
+    target_status = CLIENT_STATUS_ADVANCE_ON.get(document_type)
+    if not target_status or not lead_id:
+        return
+    lead = lead_repo.get_by_id(lead_id)
+    if not lead or not lead.is_converted or not lead.converted_client_id:
+        return
+    client = client_repo.get_by_id(lead.converted_client_id)
+    if not client:
+        return
+    order = [key for key, _ in CLIENT_STATUSES]
+    try:
+        if order.index(target_status) <= order.index(client.status):
+            return
+    except ValueError:
+        pass  # current status isn't a recognized stage - advance anyway
+    client_repo.update_status(client.id, target_status)
 
 
 # ============================================================
@@ -1163,6 +1194,19 @@ class QuotationService:
         )
         return quotation
 
+    def _advance_lead_to_in_client(self, lead_id: Optional[int]) -> None:
+        """A quotation being generated for a lead - or attached to one on
+        edit - means that lead has moved past pure follow-up into active
+        quotation/client territory, so its status jumps straight to the
+        final LEAD_STATUSES stage. Left alone once the lead has actually
+        converted to a client (its own status then lives on the Client
+        record, not the Lead)."""
+        if not lead_id:
+            return
+        lead = self.lead_repo.get_by_id(lead_id)
+        if lead and not lead.is_converted and lead.status != "in_client":
+            self.lead_repo.update_status(lead_id, "in_client")
+
     # ---- writes --------------------------------------------------
     def create(self, current_user: User, fields: dict, raw_items: list) -> Quotation:
         items = self._build_items(current_user.company_id, raw_items)
@@ -1170,6 +1214,7 @@ class QuotationService:
         quotation.quotation_number = self._generate_number(current_user.company_id, quotation.quotation_date)
         created = self.quotation_repo.create(quotation)
         self.version_service.record("quotation", created, current_user.id)
+        self._advance_lead_to_in_client(created.lead_id)
         return created
 
     def update(self, current_user: User, quotation_id: int, fields: dict, raw_items: list) -> Quotation:
@@ -1180,6 +1225,7 @@ class QuotationService:
         self.quotation_repo.update(quotation_id, quotation)
         updated = self.get(quotation_id, current_user.company_id)
         self.version_service.record("quotation", updated, current_user.id)
+        self._advance_lead_to_in_client(updated.lead_id)
         return updated
 
     def delete(self, current_user: User, quotation_id: int) -> None:
@@ -1200,12 +1246,13 @@ class ProformaInvoiceService:
 
     def __init__(self, invoice_repo: ProformaInvoiceRepository, product_repo: ProductRepository,
                  lead_repo: LeadRepositoryBase, quotation_repo: QuotationRepository,
-                 version_service: "DocumentVersionService"):
+                 version_service: "DocumentVersionService", client_repo: Optional[ClientRepositoryBase] = None):
         self.invoice_repo = invoice_repo
         self.product_repo = product_repo
         self.lead_repo = lead_repo
         self.quotation_repo = quotation_repo
         self.version_service = version_service
+        self.client_repo = client_repo
 
     # ---- reads --------------------------------------------------
     def get(self, invoice_id: int, company_id: int) -> ProformaInvoice:
@@ -1413,6 +1460,8 @@ class ProformaInvoiceService:
         invoice.invoice_number = self._generate_number(current_user.company_id, invoice.invoice_date)
         created = self.invoice_repo.create(invoice)
         self.version_service.record("proforma_invoice", created, current_user.id)
+        if self.client_repo:
+            advance_client_status(self.client_repo, self.lead_repo, created.lead_id, "proforma_invoice")
         return created
 
     def update(self, current_user: User, invoice_id: int, fields: dict, raw_items: list) -> ProformaInvoice:
@@ -1423,6 +1472,8 @@ class ProformaInvoiceService:
         self.invoice_repo.update(invoice_id, invoice)
         updated = self.get(invoice_id, current_user.company_id)
         self.version_service.record("proforma_invoice", updated, current_user.id)
+        if self.client_repo:
+            advance_client_status(self.client_repo, self.lead_repo, updated.lead_id, "proforma_invoice")
         return updated
 
     def delete(self, current_user: User, invoice_id: int) -> None:

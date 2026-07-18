@@ -136,6 +136,20 @@ CLIENT_STATUSES = [
     ("commercial_invoice_submission_pending", "Commercial Invoice Submission Pending"),
 ]
 
+# Maps a document type just generated for a client -> the CLIENT_STATUSES
+# stage that becomes pending once it's done (i.e. what's next). Document
+# services call services.advance_client_status(...) with their key after
+# create/update so client status auto-advances - adding a future document
+# type (Purchase Order, Purchase Invoice, Export Invoice, Commercial
+# Invoice) only requires registering it here, no other wiring. Packing List
+# is deliberately absent: it doesn't correspond to any CLIENT_STATUSES stage.
+CLIENT_STATUS_ADVANCE_ON = {
+    "proforma_invoice": "purchase_order_submission_pending",
+    "purchase_order": "purchase_invoice_submission_pending",
+    "purchase_invoice": "export_invoice_submission_pending",
+    "export_invoice": "commercial_invoice_submission_pending",
+}
+
 CLIENT_TYPES = ["Supplier", "Exporter", "Buyer"]
 
 COMMUNICATION_MODES = ["WhatsApp", "WeChat", "Call", "Email", "In Person", "Other"]
