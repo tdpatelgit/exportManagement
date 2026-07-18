@@ -69,7 +69,9 @@
       {% set pm = product_map.get(first.product_id | int) if first.product_id else None %}
       <div class="product-block" data-alt-qty="{{ (pm.alternate_quantity or '') if pm else '' }}" data-pcs-per-box="{{ (pm.quantity or '') if pm else '' }}"
            data-net-per-box="{{ pm.net_weight_kg if pm and pm.net_weight_kg is not none else '' }}"
-           data-gross-per-box="{{ pm.gross_weight_kg if pm and pm.gross_weight_kg is not none else '' }}">
+           data-gross-per-box="{{ pm.gross_weight_kg if pm and pm.gross_weight_kg is not none else '' }}"
+           data-pallet-types="{{ (pallet_types_map.get(first.product_id | int, []) if first.product_id else []) | tojson | forceescape }}"
+           data-box-per-pallet="{{ first.box_per_pallet or '' }}">
         <div class="product-block-header">
           <div class="field" style="flex:2; min-width:220px;">
             <label>Product</label>
@@ -81,9 +83,9 @@
             <label>HSN code</label>
             <input type="text" class="js-hsn" readonly tabindex="-1" value="{{ first.hsn_code or '' }}">
           </div>
-          <div class="field" style="max-width:100px;">
-            <label>Box / plt</label>
-            <input type="number" step="0.01" class="js-box-per-pallet" value="{{ first.box_per_pallet or '' }}">
+          <div class="field" style="max-width:240px;">
+            <label>Pallet type</label>
+            <select class="js-pallet-type"><option value="">Loose — no pallets</option></select>
           </div>
           <div class="field" style="max-width:100px;">
             <label>Unit</label>
@@ -150,7 +152,7 @@
       {% endfor %}
     </div>
     <button type="button" class="btn btn-ghost btn-sm" id="add-product-btn">+ Add product</button>
-    <p class="hint">Pick a product once, then use "Add design(s)" to tick as many designs as you need under it — they stay grouped in one product block here, but each still prints as its own numbered line on the packing list. Boxes is compulsory per design; Qty fills in automatically. Picking a product fills in Box/plt, Unit and the per-box figures from its packing spec (shared by every design under it). Fill in either Boxes or Plts on a design — the other one, plus Pcs and Qty, is worked out from Box/plt and the product's per-box figures (or a "2 PCS = 0.72 SQM" note in the product description). Every auto-filled value stays editable.</p>
+    <p class="hint">Pick a product once, then use "Add design(s)" to tick as many designs as you need under it — they stay grouped in one product block here, but each still prints as its own numbered line on the packing list. Boxes is compulsory per design; Qty fills in automatically. Picking a product fills in Unit, the per-box figures and the Pallet type options from its packing spec (shared by every design under it). Pallet type starts on "Loose" — no pallets; choosing one of the product's pallet types works out Plts from Boxes (or Boxes from Plts) using that pallet's box capacity, and the dropdown shows how much each pallet type stores. Pcs and Qty follow from Boxes (or a "2 PCS = 0.72 SQM" note in the product description). Every auto-filled value stays editable.</p>
     <div class="flex-between" style="margin-top:14px;">
       <div></div>
       <div class="text-sm">
@@ -231,9 +233,9 @@
           <label>HSN code</label>
           <input type="text" class="js-hsn" readonly tabindex="-1">
         </div>
-        <div class="field" style="max-width:100px;">
-          <label>Box / plt</label>
-          <input type="number" step="0.01" class="js-box-per-pallet">
+        <div class="field" style="max-width:240px;">
+          <label>Pallet type</label>
+          <select class="js-pallet-type"><option value="">Loose — no pallets</option></select>
         </div>
         <div class="field" style="max-width:100px;">
           <label>Unit</label>
@@ -322,13 +324,42 @@
   // Copies the product block's header fields into a single design row's
   // hidden mirrors - called when a design row is first added, and again on
   // every existing row whenever the header changes (product picked,
-  // box/plt or unit edited by hand).
+  // pallet type or unit changed). The pallet-type dropdown's value IS the
+  // selected pallet's box capacity (empty = Loose), so the backend still
+  // receives a plain box_per_pallet number and the printed PDF is
+  // unchanged - pallet type names never leave the edit form.
   function mirrorProductFields(block, row) {
     row.querySelector('.js-mirror-product-id').value = block.querySelector('.js-product-id').value;
     row.querySelector('.js-mirror-product-name').value = block.querySelector('.js-product-name').value;
     row.querySelector('.js-mirror-hsn').value = block.querySelector('.js-hsn').value;
-    row.querySelector('.js-mirror-box-per-pallet').value = block.querySelector('.js-box-per-pallet').value;
+    row.querySelector('.js-mirror-box-per-pallet').value = block.querySelector('.js-pallet-type').value;
     row.querySelector('.js-mirror-unit').value = block.querySelector('.js-unit').value;
+  }
+
+  // Rebuilds a block's Pallet type dropdown from its product's pallet
+  // types: always "Loose — no pallets" first (the default for every
+  // product), then one option per pallet type showing how many boxes (and
+  // how much quantity) that pallet stores. `selectedBoxes` re-selects the
+  // option matching a reopened row's stored box-per-pallet figure; a
+  // stored figure that matches none of the product's current types (a
+  // legacy document, or the type was edited since) keeps working via an
+  // extra "Custom" option so the document round-trips unchanged.
+  function populatePalletOptions(block, types, selectedBoxes) {
+    const sel = block.querySelector('.js-pallet-type');
+    const unit = block.querySelector('.js-unit').value || 'SQM';
+    sel.innerHTML = '';
+    sel.appendChild(new Option('Loose — no pallets', ''));
+    (types || []).forEach((t) => {
+      let label = `${t.name} — ${t.boxes_per_pallet} boxes/plt`;
+      if (t.alt_qty_per_pallet) label += ` (${t.alt_qty_per_pallet} ${unit})`;
+      sel.appendChild(new Option(label, String(t.boxes_per_pallet)));
+    });
+    const want = parseFloat(selectedBoxes) || 0;
+    if (want) {
+      const match = Array.from(sel.options).find((o) => parseFloat(o.value) === want);
+      if (match) match.selected = true;
+      else sel.appendChild(new Option(`Custom — ${want} boxes/plt`, String(want), true, true));
+    }
   }
 
   function mirrorProductFieldsToAllDesigns(block) {
@@ -358,17 +389,22 @@
     return Math.abs(q - Math.round(q)) < 1e-6;
   }
 
-  // Boxes is compulsory and the field everything else derives from. Pallets
-  // is only ever a derived field when Boxes divides evenly by Box-per-pallet
-  // (a whole number of full pallets) - it locks read-only in that case so it
-  // can't drift out of sync. When Boxes ISN'T a perfect multiple (a partial
-  // last pallet), there's no clean quotient to show, so Pallets unlocks for
-  // the user to type in by hand.
+  // Boxes is compulsory and the field everything else derives from. With
+  // "Loose" selected there are no pallets at all: Plts locks empty. With a
+  // pallet type selected, Pallets is a derived field when Boxes divides
+  // evenly by that pallet's box capacity (a whole number of full pallets) -
+  // it locks read-only in that case so it can't drift out of sync. When
+  // Boxes ISN'T a perfect multiple (a partial last pallet), there's no
+  // clean quotient to show, so Pallets unlocks for the user to type in by
+  // hand.
   function updatePallets(block, row) {
     const boxes = parseFloat(row.querySelector('.js-boxes').value) || 0;
-    const perPallet = parseFloat(block.querySelector('.js-box-per-pallet').value) || 0;
+    const perPallet = parseFloat(block.querySelector('.js-pallet-type').value) || 0;
     const palletsEl = row.querySelector('.js-pallets');
-    if (boxes && isPerfectMultiple(boxes, perPallet)) {
+    if (!perPallet) {
+      palletsEl.value = '';
+      palletsEl.readOnly = true;
+    } else if (boxes && isPerfectMultiple(boxes, perPallet)) {
       palletsEl.value = +(boxes / perPallet).toFixed(2);
       palletsEl.readOnly = true;
     } else {
@@ -386,16 +422,16 @@
   }
 
   // The row calculates from whichever of Boxes / Pallets was just filled
-  // in: editing Pallets back-fills Boxes (Pallets x Box-per-pallet) since
-  // Boxes can't be left blank; editing Boxes (or the block's Box-per-pallet,
-  // once Boxes is already known) instead re-derives Pallets. Either way
-  // Pcs/Qty follow from the resulting Boxes. Every auto-filled value stays
-  // editable - typing into it directly isn't overwritten until an upstream
-  // field changes again.
+  // in: editing Pallets back-fills Boxes (Pallets x the selected pallet
+  // type's box capacity) since Boxes can't be left blank; editing Boxes (or
+  // the block's Pallet type, once Boxes is already known) instead
+  // re-derives Pallets. Either way Pcs/Qty follow from the resulting Boxes.
+  // Every auto-filled value stays editable - typing into it directly isn't
+  // overwritten until an upstream field changes again.
   function recalcRow(row, source) {
     const block = row.closest('.product-block');
     const boxesEl = row.querySelector('.js-boxes');
-    const perPallet = parseFloat(block.querySelector('.js-box-per-pallet').value) || 0;
+    const perPallet = parseFloat(block.querySelector('.js-pallet-type').value) || 0;
     const pallets = parseFloat(row.querySelector('.js-pallets').value) || 0;
     if (source === 'pallets' || (!boxesEl.value && perPallet && pallets)) {
       if (perPallet && pallets) boxesEl.value = +(perPallet * pallets).toFixed(2);
@@ -454,7 +490,7 @@
     } else if (e.target.classList.contains('js-pallets')) {
       recalcRow(e.target.closest('.design-row'), 'pallets');
       recalcTotals();
-    } else if (e.target.classList.contains('js-box-per-pallet') || e.target.classList.contains('js-unit') || e.target.classList.contains('js-product-name')) {
+    } else if (e.target.classList.contains('js-product-name')) {
       // Header field edited by hand (not via the pickers) - keep every
       // design row's hidden mirrors and derived figures in sync.
       const block = e.target.closest('.product-block');
@@ -466,9 +502,10 @@
     }
   });
   productsContainer.addEventListener('change', (e) => {
-    if (e.target.classList.contains('js-unit')) {
+    if (e.target.classList.contains('js-unit') || e.target.classList.contains('js-pallet-type')) {
       const block = e.target.closest('.product-block');
       mirrorProductFieldsToAllDesigns(block);
+      block.querySelectorAll('.design-row').forEach((row) => recalcRow(row));
       recalcTotals();
     }
   });
@@ -525,18 +562,22 @@
     }
     const table = document.createElement('table');
     table.className = 'ledger';
-    table.innerHTML = '<thead><tr><th>Product</th><th>HSN code</th><th>Box/plt</th><th>Pcs/box</th><th>Alt qty / box</th><th></th></tr></thead>';
+    table.innerHTML = '<thead><tr><th>Product</th><th>HSN code</th><th>Pallet types</th><th>Pcs/box</th><th>Alt qty / box</th><th></th></tr></thead>';
     const tbody = document.createElement('tbody');
     filtered.forEach(p => {
+      const palletSummary = (p.pallet_types && p.pallet_types.length)
+        ? p.pallet_types.map(t => `${t.name} (${t.boxes_per_pallet})`).join(', ')
+        : 'loose only';
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td><strong></strong></td>
         <td class="text-sm">${p.hsn_code || '—'}</td>
-        <td class="text-sm">${p.packing || '—'}</td>
+        <td class="text-sm js-pallet-summary"></td>
         <td class="text-sm">${p.quantity || '—'}</td>
         <td class="text-sm">${p.alternate_quantity ? `${p.alternate_quantity} ${p.unit || ''}` : '—'}</td>
         <td><button type="button" class="btn btn-primary btn-sm">Select</button></td>`;
       tr.querySelector('strong').textContent = p.name;
+      tr.querySelector('.js-pallet-summary').textContent = palletSummary;
       tr.querySelector('button').addEventListener('click', () => selectProduct(p));
       tbody.appendChild(tr);
     });
@@ -557,15 +598,17 @@
       row.querySelector('.js-design-name').value = '';
     });
     // The product carries the packing spec shared by every design under it
-    // (Box/plt, per-box Pcs/Qty figures, Unit) - prefill the block from it
-    // the same way picking a product fills in the HSN code.
+    // (pallet types, per-box Pcs/Qty figures, Unit) - prefill the block
+    // from it the same way picking a product fills in the HSN code. The
+    // Pallet type dropdown starts on "Loose" (every product's default -
+    // goods sold unpalletised); the product's pallet types are offered as
+    // the other options.
     if (p.unit) activeBlock.querySelector('.js-unit').value = p.unit;
     activeBlock.dataset.altQty = parseFloat(p.alternate_quantity) || '';
     activeBlock.dataset.pcsPerBox = parseFloat(p.quantity) || '';
     activeBlock.dataset.netPerBox = p.net_weight_kg || '';
     activeBlock.dataset.grossPerBox = p.gross_weight_kg || '';
-    const boxPerPallet = parseFloat(p.packing) || null;
-    if (boxPerPallet) activeBlock.querySelector('.js-box-per-pallet').value = boxPerPallet;
+    populatePalletOptions(activeBlock, p.pallet_types || [], null);
     mirrorProductFieldsToAllDesigns(activeBlock);
     activeBlock.querySelectorAll('.design-row').forEach((row) => recalcRow(row));
     recalcTotals();
@@ -695,7 +738,14 @@
     designOverlay.hidden = true;
   });
 
+  // Server-rendered blocks: build each Pallet type dropdown from the
+  // product's pallet types (stashed as JSON on the block) and re-select
+  // the option matching the stored box-per-pallet figure, then let the
+  // usual per-row derivation run.
   productsContainer.querySelectorAll('.product-block').forEach((block) => {
+    let types = [];
+    try { types = JSON.parse(block.dataset.palletTypes || '[]'); } catch (e) {}
+    populatePalletOptions(block, types, block.dataset.boxPerPallet);
     block.querySelectorAll('.design-row').forEach((row) => updatePallets(block, row));
   });
   renumber();

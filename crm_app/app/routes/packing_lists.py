@@ -14,6 +14,7 @@ from datetime import date
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
+from app.services import pallet_alt_quantity
 from app.utils import login_required, admin_required
 
 packing_lists_bp = Blueprint("packing_lists", __name__, url_prefix="/packing-lists")
@@ -134,6 +135,22 @@ def _product_map(items) -> dict:
     return result
 
 
+def _pallet_types_map(product_map) -> dict:
+    """product_id -> plain dicts of that product's pallet types, ready for
+    |tojson on the form (fills each product block's Pallet type dropdown -
+    'loose', the built-in no-pallet default, is added by the form itself).
+    alt_qty_per_pallet is derived, never stored."""
+    container = current_app.container
+    result = {}
+    for product_id, product in product_map.items():
+        result[product_id] = [
+            {"name": pt.name, "boxes_per_pallet": pt.boxes_per_pallet,
+             "alt_qty_per_pallet": pallet_alt_quantity(pt, product)}
+            for pt in container.product_service.pallet_types_for_product(product_id)
+        ]
+    return result
+
+
 def catalog_maps(packing_lists) -> tuple:
     """(product_map, design_map) for every item across the given packing
     lists - the print sheet reads each product's shared per-box packing spec
@@ -178,10 +195,12 @@ def new_packing_list():
             flash(str(e), "error")
             leads, invoices, quotations = _form_context()
             items = _extract_items(request.form)
+            product_map = _product_map(items)
             return render_template(
                 "packing_lists/form.html", packing_list=None, leads=leads, invoices=invoices, quotations=quotations,
                 form_data=request.form, form_items=items, item_groups=_group_items_by_product(items),
-                product_map=_product_map(items), today=date.today().isoformat(),
+                product_map=product_map, pallet_types_map=_pallet_types_map(product_map),
+                today=date.today().isoformat(),
                 source_boxes_map=_source_boxes_map(
                     request.form.get("proforma_invoice_id"), request.form.get("quotation_id"), g.user.company_id,
                 ),
@@ -217,10 +236,12 @@ def new_packing_list():
             prefill = {"lead_id": lead.id, "packing_list_date": date.today().isoformat()}
         except (NotFoundError, ValueError):
             pass
+    product_map = _product_map(form_items) if form_items else {}
     return render_template(
         "packing_lists/form.html", packing_list=None, leads=leads, invoices=invoices, quotations=quotations,
         form_data=prefill, form_items=form_items, item_groups=_group_items_by_product(form_items or []),
-        product_map=_product_map(form_items) if form_items else {}, today=date.today().isoformat(),
+        product_map=product_map, pallet_types_map=_pallet_types_map(product_map),
+        today=date.today().isoformat(),
         source_boxes_map=_source_boxes_map(proforma_invoice_id, quotation_id, g.user.company_id),
     )
 
@@ -260,21 +281,25 @@ def edit_packing_list(packing_list_id):
             flash(str(e), "error")
             leads, invoices, quotations = _form_context()
             items = _extract_items(request.form)
+            product_map = _product_map(items)
             return render_template(
                 "packing_lists/form.html", packing_list=packing_list, leads=leads, invoices=invoices,
                 quotations=quotations,
                 form_data=request.form, form_items=items, item_groups=_group_items_by_product(items),
-                product_map=_product_map(items), today=date.today().isoformat(),
+                product_map=product_map, pallet_types_map=_pallet_types_map(product_map),
+                today=date.today().isoformat(),
                 source_boxes_map=_source_boxes_map(
                     request.form.get("proforma_invoice_id"), request.form.get("quotation_id"), g.user.company_id,
                 ),
             ), 400
 
     leads, invoices, quotations = _form_context()
+    product_map = _product_map(packing_list.items)
     return render_template(
         "packing_lists/form.html", packing_list=packing_list, leads=leads, invoices=invoices, quotations=quotations,
         form_data=None, form_items=None, item_groups=_group_items_by_product(packing_list.items),
-        product_map=_product_map(packing_list.items), today=date.today().isoformat(),
+        product_map=product_map, pallet_types_map=_pallet_types_map(product_map),
+        today=date.today().isoformat(),
         source_boxes_map=_source_boxes_map(packing_list.proforma_invoice_id, packing_list.quotation_id, g.user.company_id),
     )
 

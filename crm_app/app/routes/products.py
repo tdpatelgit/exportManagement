@@ -6,9 +6,11 @@ Product catalog: category / product / sub category / design.
     also sit directly at the root, uncategorised).
   - PRODUCT: the tax/HSN identity (name, description, HSN code, IGST - with
     SGST/CGST auto-calculated as half of IGST) AND the physical packing spec
-    (packing, quantity, alternate quantity, unit) that
+    (pallet types, quantity, alternate quantity, unit) that
     quotations, proforma invoices and packing lists all read from - every
-    design under a product shares the same packing spec.
+    design under a product shares the same packing spec. Pallet types are a
+    named list ("pine pallet" = 31 boxes, ...); every product also
+    implicitly offers "loose" (no pallets), which is never stored.
   - SUB CATEGORY: organises designs inside a product like a folder; sub
     categories nest to any depth but can only be created under a product.
   - DESIGN: the sellable leaf holding price and photos - what packing lists
@@ -19,6 +21,7 @@ Everyone signed in can browse; only admins can create/edit/delete.
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort, jsonify
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
+from app.services import pallet_alt_quantity
 from app.utils import login_required, admin_required
 
 products_bp = Blueprint("products", __name__, url_prefix="/products")
@@ -28,6 +31,19 @@ def _int_or_none(value):
     return int(value) if value not in (None, "", "None") else None
 
 
+def _pallet_type_rows(form) -> list:
+    """The product form's pallet-type list as raw {name, boxes_per_pallet}
+    dicts, one per submitted row (also used to re-render the rows after a
+    validation error). Forms without the list inputs (the quick-create
+    panels on the document forms) simply yield an empty list."""
+    names = form.getlist("pallet_type_name[]")
+    boxes = form.getlist("pallet_type_boxes[]")
+    return [
+        {"name": names[i], "boxes_per_pallet": boxes[i] if i < len(boxes) else ""}
+        for i in range(len(names))
+    ]
+
+
 def _product_form_fields(form) -> dict:
     return {
         "product_name": form.get("product_name", ""),
@@ -35,12 +51,12 @@ def _product_form_fields(form) -> dict:
         "description": form.get("description", ""),
         "hsn_code": form.get("hsn_code", ""),
         "igst_percent": form.get("igst_percent", ""),
-        "packing": form.get("packing", ""),
         "quantity": form.get("quantity", ""),
         "alternate_quantity": form.get("alternate_quantity", ""),
         "unit": form.get("unit", ""),
         "net_weight_kg": form.get("net_weight_kg", ""),
         "gross_weight_kg": form.get("gross_weight_kg", ""),
+        "pallet_types": _pallet_type_rows(form),
     }
 
 
@@ -156,8 +172,9 @@ def new_product():
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
             return render_template("products/product_form.html", product=None, form_data=request.form,
+                                    pallet_rows=_pallet_type_rows(request.form),
                                     categories_tree=categories_tree, preselected_category_id=preselected_category_id), 400
-    return render_template("products/product_form.html", product=None, form_data=None,
+    return render_template("products/product_form.html", product=None, form_data=None, pallet_rows=[],
                             categories_tree=categories_tree, preselected_category_id=preselected_category_id)
 
 
@@ -177,9 +194,10 @@ def view_product(product_id, folder_id=None):
     except NotFoundError:
         abort(404)
     breadcrumb = container.product_service.breadcrumb(g.user.company_id, folder_id)
+    pallet_types = container.product_service.pallet_types_for_product(product_id)
     return render_template(
         "products/detail.html", product=product, category=category, current_folder=current_folder,
-        breadcrumb=breadcrumb, subfolders=subfolders, designs=designs,
+        breadcrumb=breadcrumb, subfolders=subfolders, designs=designs, pallet_types=pallet_types,
     )
 
 
@@ -202,8 +220,15 @@ def edit_product(product_id):
             return redirect(url_for("products.view_product", product_id=product_id))
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
+            return render_template("products/product_form.html", product=product, form_data=request.form,
+                                    pallet_rows=_pallet_type_rows(request.form),
+                                    categories_tree=categories_tree, preselected_category_id=product.category_id), 400
 
-    return render_template("products/product_form.html", product=product, form_data=None,
+    pallet_rows = [
+        {"name": pt.name, "boxes_per_pallet": pt.boxes_per_pallet}
+        for pt in container.product_service.pallet_types_for_product(product_id)
+    ]
+    return render_template("products/product_form.html", product=product, form_data=None, pallet_rows=pallet_rows,
                             categories_tree=categories_tree, preselected_category_id=product.category_id)
 
 
@@ -335,7 +360,8 @@ def view_design(design_id):
     except NotFoundError:
         abort(404)
     breadcrumb = container.product_service.breadcrumb(g.user.company_id, design.folder_id)
-    return render_template("products/design_detail.html", design=design, product=product, breadcrumb=breadcrumb)
+    return render_template("products/design_detail.html", design=design, product=product, breadcrumb=breadcrumb,
+                            pallet_types=container.product_service.pallet_types_for_product(product.id))
 
 
 @products_bp.route("/design/<int:design_id>/edit", methods=["GET", "POST"])
@@ -387,15 +413,26 @@ def delete_design(design_id):
 # JSON APIs (power the pickers on the quotation / proforma /
 # packing list forms)
 # ============================================================
-def _product_json(p) -> dict:
+def _product_json(p, pallet_types=None) -> dict:
     return {
         "id": p.id, "name": p.product_name, "description": p.description,
         "hsn_code": p.hsn_code, "category_id": p.category_id,
         "igst_percent": p.igst_percent, "sgst_percent": p.sgst_percent,
         "cgst_percent": p.cgst_percent,
-        "packing": p.packing, "quantity": p.quantity, "alternate_quantity": p.alternate_quantity,
+        "quantity": p.quantity, "alternate_quantity": p.alternate_quantity,
         "unit": p.unit,
         "net_weight_kg": p.net_weight_kg, "gross_weight_kg": p.gross_weight_kg,
+        # The product's named pallet storage options ("loose" - no pallets -
+        # is implicit and always offered by the forms on top of these).
+        # alt_qty_per_pallet is derived, never stored: boxes on the pallet x
+        # the product's per-box alternate quantity.
+        "pallet_types": [
+            {
+                "id": pt.id, "name": pt.name, "boxes_per_pallet": pt.boxes_per_pallet,
+                "alt_qty_per_pallet": pallet_alt_quantity(pt, p),
+            }
+            for pt in (pallet_types or [])
+        ],
     }
 
 
@@ -405,8 +442,10 @@ def api_list_products():
     """Flat product list for the product picker on the quotation, proforma
     and packing list forms - a product is picked directly (no tree to walk),
     its name/HSN/packing-spec prefill the line item."""
-    products = current_app.container.product_service.list_products(g.user.company_id)
-    return jsonify({"products": [_product_json(p) for p in products]})
+    container = current_app.container
+    products = container.product_service.list_products(g.user.company_id)
+    pallet_map = container.product_service.pallet_types_by_product(g.user.company_id)
+    return jsonify({"products": [_product_json(p, pallet_map.get(p.id)) for p in products]})
 
 
 @products_bp.route("/api/quick-create", methods=["POST"])
@@ -423,7 +462,7 @@ def api_quick_create():
         )
     except ValidationError as e:
         return jsonify({"error": str(e)}), 400
-    return jsonify(_product_json(product))
+    return jsonify(_product_json(product, container.product_service.pallet_types_for_product(product.id)))
 
 
 @products_bp.route("/api/<int:product_id>/designs")
@@ -443,7 +482,7 @@ def api_browse_designs(product_id):
         return jsonify({"error": "not found"}), 404
     breadcrumb = container.product_service.breadcrumb(g.user.company_id, folder_id)
     return jsonify({
-        "product": _product_json(product),
+        "product": _product_json(product, container.product_service.pallet_types_for_product(product_id)),
         "breadcrumb": [{"id": f.id, "name": f.name} for f in breadcrumb],
         "subfolders": [{"id": f.id, "name": f.name} for f in subfolders],
         "designs": [

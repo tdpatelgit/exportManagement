@@ -14,6 +14,7 @@ from datetime import date
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
+from app.services import pallet_alt_quantity
 from app.utils import login_required, admin_required
 
 proforma_invoices_bp = Blueprint("proforma_invoices", __name__, url_prefix="/proforma-invoices")
@@ -93,6 +94,35 @@ def _alt_qty_map(items) -> dict:
     return result
 
 
+def _pallet_types_map(items) -> dict:
+    """product_id -> plain dicts of that product's pallet types, for rows
+    already tied to a catalog product - fills each row's Pallet type
+    dropdown ('loose', the built-in no-pallet default, is added by the form
+    itself). Same walk as _alt_qty_map above."""
+    container = current_app.container
+    result = {}
+    for item in items:
+        raw_id = item.get("product_id") if isinstance(item, dict) else item.product_id
+        if not raw_id:
+            continue
+        try:
+            product_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if product_id in result:
+            continue
+        try:
+            product = container.product_service.get_product(product_id, g.user.company_id)
+        except NotFoundError:
+            continue
+        result[product_id] = [
+            {"name": pt.name, "boxes_per_pallet": pt.boxes_per_pallet,
+             "alt_qty_per_pallet": pallet_alt_quantity(pt, product)}
+            for pt in container.product_service.pallet_types_for_product(product_id)
+        ]
+    return result
+
+
 @proforma_invoices_bp.route("/")
 @login_required
 def list_proforma_invoices():
@@ -118,7 +148,8 @@ def new_proforma_invoice():
             return render_template(
                 "proforma_invoices/form.html", invoice=None, leads=leads, quotations=quotations,
                 bank_options=bank_options, form_data=request.form, form_items=items,
-                alt_qty_map=_alt_qty_map(items), today=date.today().isoformat(),
+                alt_qty_map=_alt_qty_map(items), pallet_types_map=_pallet_types_map(items),
+                today=date.today().isoformat(),
             ), 400
 
     leads, quotations, bank_options = _form_context()
@@ -147,7 +178,9 @@ def new_proforma_invoice():
     return render_template(
         "proforma_invoices/form.html", invoice=None, leads=leads, quotations=quotations,
         bank_options=bank_options, form_data=prefill, form_items=form_items,
-        alt_qty_map=_alt_qty_map(form_items) if form_items else {}, today=date.today().isoformat(),
+        alt_qty_map=_alt_qty_map(form_items) if form_items else {},
+        pallet_types_map=_pallet_types_map(form_items) if form_items else {},
+        today=date.today().isoformat(),
     )
 
 
@@ -207,14 +240,16 @@ def edit_proforma_invoice(proforma_invoice_id):
             return render_template(
                 "proforma_invoices/form.html", invoice=invoice, leads=leads, quotations=quotations,
                 bank_options=bank_options, form_data=request.form, form_items=items,
-                alt_qty_map=_alt_qty_map(items), today=date.today().isoformat(),
+                alt_qty_map=_alt_qty_map(items), pallet_types_map=_pallet_types_map(items),
+                today=date.today().isoformat(),
             ), 400
 
     leads, quotations, bank_options = _form_context()
     return render_template(
         "proforma_invoices/form.html", invoice=invoice, leads=leads, quotations=quotations,
         bank_options=bank_options, form_data=None, form_items=None,
-        alt_qty_map=_alt_qty_map(invoice.items), today=date.today().isoformat(),
+        alt_qty_map=_alt_qty_map(invoice.items), pallet_types_map=_pallet_types_map(invoice.items),
+        today=date.today().isoformat(),
     )
 
 

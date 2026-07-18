@@ -367,7 +367,7 @@ class Category:
 class Product:
     """Second level of the catalog (inside a category, or at the root when
     category_id is None): the tax/HSN identity AND the physical packing spec
-    (packing, quantity, alternate quantity, unit) that
+    (pallet types, quantity, alternate quantity, unit) that
     quotations, proforma invoices and packing lists all read from - every
     design under a product shares the same packing spec. Sub categories and
     designs live underneath it; price and photos belong to the Design.
@@ -382,7 +382,6 @@ class Product:
     igst_percent: Optional[float] = None
     sgst_percent: Optional[float] = None
     cgst_percent: Optional[float] = None
-    packing: Optional[str] = None
     quantity: Optional[str] = None
     alternate_quantity: Optional[str] = None  # per-box quantity, drives the Boxes x AltQty auto-calc
     unit: str = "SQM"  # what the quantity is measured in; prefills document lines
@@ -403,7 +402,6 @@ class Product:
             igst_percent=row["igst_percent"],
             sgst_percent=row["sgst_percent"],
             cgst_percent=row["cgst_percent"],
-            packing=row["packing"] if "packing" in row.keys() else None,
             quantity=row["quantity"] if "quantity" in row.keys() else None,
             alternate_quantity=row["alternate_quantity"] if "alternate_quantity" in row.keys() else None,
             unit=row["unit"] if "unit" in row.keys() else "SQM",
@@ -411,6 +409,35 @@ class Product:
             gross_weight_kg=row["gross_weight_kg"] if "gross_weight_kg" in row.keys() else None,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+        )
+
+
+@dataclass
+class ProductPalletType:
+    """One named pallet storage option of a product (e.g. "pine pallet"
+    holding 31 boxes). A product can carry any number of these; every
+    product ALSO implicitly offers "loose" (goods sold unpalletised, zero
+    pallets), which is never stored. The alternate quantity one pallet
+    holds is always derived - boxes_per_pallet x the product's per-box
+    alternate_quantity - so it can't drift when the product spec changes."""
+    id: Optional[int]
+    company_id: int
+    product_id: int
+    name: str
+    boxes_per_pallet: float
+    sort_order: int = 0
+    created_at: Optional[str] = None
+
+    @staticmethod
+    def from_row(row) -> "ProductPalletType":
+        return ProductPalletType(
+            id=row["id"],
+            company_id=row["company_id"],
+            product_id=row["product_id"],
+            name=row["name"],
+            boxes_per_pallet=row["boxes_per_pallet"],
+            sort_order=row["sort_order"],
+            created_at=row["created_at"],
         )
 
 

@@ -18,7 +18,7 @@ from typing import Optional, List
 from app.database import Database
 from app.models import (
     Tenant, User, Lead, Client, ContactPerson, Communication,
-    PaymentEntry, DocumentEntry, OurCompany, Category, Product, ProductFolder, Design,
+    PaymentEntry, DocumentEntry, OurCompany, Category, Product, ProductPalletType, ProductFolder, Design,
     Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
     PackingList, PackingListItem, DocumentVersion,
 )
@@ -692,12 +692,12 @@ class ProductRepository:
             """INSERT INTO products
                (company_id, category_id, product_name, description, hsn_code,
                 igst_percent, sgst_percent, cgst_percent,
-                packing, quantity, alternate_quantity, unit,
+                quantity, alternate_quantity, unit,
                 net_weight_kg, gross_weight_kg)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (product.company_id, product.category_id, product.product_name, product.description,
              product.hsn_code, product.igst_percent, product.sgst_percent, product.cgst_percent,
-             product.packing, product.quantity, product.alternate_quantity, product.unit,
+             product.quantity, product.alternate_quantity, product.unit,
              product.net_weight_kg, product.gross_weight_kg),
         )
         return self.get_by_id(new_id)
@@ -726,6 +726,44 @@ class ProductRepository:
                 (product_id,),
             )
             conn.execute("DELETE FROM products WHERE id = ?", (product_id,))
+
+
+class ProductPalletTypeRepository:
+    """The named pallet storage options of each product (the implicit
+    "loose" option is never stored). The whole list is replaced in one shot
+    on every product save - the rows have no children, so delete + reinsert
+    is simpler and safer than diffing."""
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    def list_for_product(self, product_id: int) -> List[ProductPalletType]:
+        rows = self.db.query(
+            "SELECT * FROM product_pallet_types WHERE product_id = ? ORDER BY sort_order, id",
+            (product_id,),
+        )
+        return [ProductPalletType.from_row(r) for r in rows]
+
+    def list_all(self, company_id: int) -> List[ProductPalletType]:
+        """Every pallet type of every product in one company - lets the
+        product-picker JSON API attach each product's list without one
+        query per product."""
+        rows = self.db.query(
+            "SELECT * FROM product_pallet_types WHERE company_id = ? ORDER BY product_id, sort_order, id",
+            (company_id,),
+        )
+        return [ProductPalletType.from_row(r) for r in rows]
+
+    def replace_for_product(self, company_id: int, product_id: int,
+                             pallet_types: List[ProductPalletType]) -> None:
+        with self.db.get_connection() as conn:
+            conn.execute("DELETE FROM product_pallet_types WHERE product_id = ?", (product_id,))
+            for order, pt in enumerate(pallet_types):
+                conn.execute(
+                    "INSERT INTO product_pallet_types (company_id, product_id, name, boxes_per_pallet, sort_order) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (company_id, product_id, pt.name, pt.boxes_per_pallet, order),
+                )
 
 
 class ProductFolderRepository:

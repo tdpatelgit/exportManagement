@@ -11,6 +11,7 @@ separately on a separate database") by rewriting this one file only -
 every Repository, Service and Route stays untouched (Dependency Inversion).
 """
 
+import re
 import sqlite3
 import os
 import shutil
@@ -40,7 +41,7 @@ from datetime import datetime
 # Because `_migrate` is idempotent and runs on every startup AND on every
 # restore, any backup - however old - is carried forward through the whole
 # chain of steps, never discarded.
-SCHEMA_VERSION = 9  # v9: product net/gross weight per box (drives packing list auto-calc) + packing_lists.quotation_id (packing list can be generated directly from a quotation)
+SCHEMA_VERSION = 10  # v10: products.packing (single boxes-per-pallet figure) becomes the product_pallet_types table - a named LIST of pallet storage options per product; existing values migrate to one type named 'pallet'
 
 
 class Database:
@@ -580,6 +581,36 @@ class Database:
             # legacy-upgrade block above). Safe to run unconditionally.
             for table in ("users", "leads", "clients", "categories", "products", "product_folders", "designs", "quotations"):
                 conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_company ON {table}(company_id)")
+
+            # ---- v10: PALLET PACKING BECOMES A LIST OF PALLET TYPES ----
+            # products.packing used to hold one boxes-per-pallet figure; a
+            # product now carries any number of NAMED pallet storage options
+            # in product_pallet_types (plus an implicit, unstored "loose"
+            # option = no pallets). Each existing packing value becomes one
+            # pallet type named 'pallet' (its leading number as the
+            # boxes-per-pallet count), then the column is dropped - which is
+            # also the guard that makes this one-shot. Runs after the
+            # multi-tenancy block so products.company_id is guaranteed to
+            # exist even on legacy databases.
+            products_existing = {r["name"] for r in conn.execute("PRAGMA table_info(products)")}
+            if products_existing and "packing" in products_existing:
+                rows = conn.execute(
+                    "SELECT id, company_id, packing FROM products "
+                    "WHERE packing IS NOT NULL AND TRIM(packing) != ''"
+                ).fetchall()
+                for row in rows:
+                    m = re.match(r"\s*([\d.]+)", str(row["packing"]))
+                    try:
+                        boxes = float(m.group(1)) if m else 0.0
+                    except ValueError:
+                        boxes = 0.0
+                    if boxes > 0:
+                        conn.execute(
+                            "INSERT INTO product_pallet_types (company_id, product_id, name, boxes_per_pallet) "
+                            "VALUES (?, ?, 'pallet', ?)",
+                            (row["company_id"], row["id"], boxes),
+                        )
+                conn.execute("ALTER TABLE products DROP COLUMN packing")
 
     def _backup_db_file(self, tag: str) -> None:
         """Copies the live DB file into instance/backups/ before a
