@@ -1537,9 +1537,10 @@ class PackingListService:
         """Caller must have already loaded `invoice` via
         ProformaInvoiceService.get(invoice_id, current_user.company_id) so
         cross-company ownership is already verified. Each proforma product
-        line becomes one starting row; quantities are left blank on purpose -
-        they get filled in per design, in smaller amounts, and rows can be
-        duplicated for more designs of the same product."""
+        line becomes one empty product block (header only, marked
+        is_placeholder so the form doesn't render a blank design row) - the
+        user picks designs and fills in per-design box counts themselves,
+        with as many design rows per product as they need."""
         fields = {
             "proforma_invoice_id": invoice.id,
             "lead_id": invoice.lead_id,
@@ -1556,6 +1557,7 @@ class PackingListService:
                 "quantity_boxes": "", "pcs": "",
                 "quantity_value": "", "unit": item.unit,
                 "net_weight_kg": "", "gross_weight_kg": "",
+                "is_placeholder": True,
             }
             for item in invoice.items
         ]
@@ -1582,6 +1584,7 @@ class PackingListService:
                 "quantity_boxes": "", "pcs": "",
                 "quantity_value": "", "unit": item.unit,
                 "net_weight_kg": "", "gross_weight_kg": "",
+                "is_placeholder": True,
             }
             for item in quotation.items
         ]

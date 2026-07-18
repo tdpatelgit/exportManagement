@@ -117,6 +117,7 @@
             </thead>
             <tbody class="js-designs-body">
               {% for item in group %}
+              {% if not (item is mapping and item.get('is_placeholder')) %}
               <tr class="design-row">
                 <td class="js-sr"></td>
                 <td>
@@ -136,6 +137,7 @@
                 <td><input type="number" step="0.01" name="item_gross_weight_kg[]" class="js-gross" value="{{ item.gross_weight_kg or '' }}"></td>
                 <td><button type="button" class="btn-link-danger js-remove-design">Remove</button></td>
               </tr>
+              {% endif %}
               {% endfor %}
             </tbody>
           </table>
