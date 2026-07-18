@@ -382,9 +382,10 @@ class Product:
     igst_percent: Optional[float] = None
     sgst_percent: Optional[float] = None
     cgst_percent: Optional[float] = None
-    quantity: Optional[str] = None
+    quantity_unit: str = "PCS"  # what `quantity` is measured in
+    quantity: Optional[str] = None  # per-box quantity (e.g. pcs per box)
+    alternate_quantity_unit: str = "SQM"  # what `alternate_quantity` is measured in; prefills document lines' Unit column
     alternate_quantity: Optional[str] = None  # per-box quantity, drives the Boxes x AltQty auto-calc
-    unit: str = "SQM"  # what the quantity is measured in; prefills document lines
     net_weight_kg: Optional[float] = None    # net weight per box (KG) - drives the packing list's Boxes x weight auto-calc
     gross_weight_kg: Optional[float] = None  # gross weight per box (KG) - same auto-calc as net_weight_kg
     created_at: Optional[str] = None
@@ -402,9 +403,10 @@ class Product:
             igst_percent=row["igst_percent"],
             sgst_percent=row["sgst_percent"],
             cgst_percent=row["cgst_percent"],
+            quantity_unit=row["quantity_unit"] if "quantity_unit" in row.keys() else "PCS",
             quantity=row["quantity"] if "quantity" in row.keys() else None,
+            alternate_quantity_unit=row["alternate_quantity_unit"] if "alternate_quantity_unit" in row.keys() else "SQM",
             alternate_quantity=row["alternate_quantity"] if "alternate_quantity" in row.keys() else None,
-            unit=row["unit"] if "unit" in row.keys() else "SQM",
             net_weight_kg=row["net_weight_kg"] if "net_weight_kg" in row.keys() else None,
             gross_weight_kg=row["gross_weight_kg"] if "gross_weight_kg" in row.keys() else None,
             created_at=row["created_at"],

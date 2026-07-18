@@ -90,6 +90,7 @@
                 {% for u in PRODUCT_UNITS %}
                   <option value="{{ u }}" {{ 'selected' if row.unit == u }}>{{ u }}</option>
                 {% endfor %}
+                {% if row.unit and row.unit not in PRODUCT_UNITS %}<option value="{{ row.unit }}" selected>{{ row.unit }}</option>{% endif %}
               </select>
             </td>
             <td><input type="number" step="0.01" name="item_price_usd[]" class="js-price" required value="{{ row.price_usd or '' }}"></td>
@@ -182,12 +183,18 @@
         </div>
         <div class="hint">SGST and CGST are calculated automatically as half of IGST.</div>
         <div class="form-row">
-          <div class="field"><label>Quantity</label><input type="text" name="quantity"></div>
-          <div class="field"><label>Alternate quantity (per box)</label><input type="text" name="alternate_quantity"></div>
           <div class="field" style="max-width:120px;">
-            <label>Unit</label>
-            <select name="unit">{% for u in PRODUCT_UNITS %}<option value="{{ u }}">{{ u }}</option>{% endfor %}</select>
+            <label>Quantity unit</label>
+            <input type="text" name="quantity_unit" value="PCS">
           </div>
+          <div class="field"><label>Quantity (per box)</label><input type="text" name="quantity"></div>
+        </div>
+        <div class="form-row">
+          <div class="field" style="max-width:120px;">
+            <label>Alt quantity unit</label>
+            <input type="text" name="alternate_quantity_unit" value="SQM">
+          </div>
+          <div class="field"><label>Alt quantity (per box)</label><input type="text" name="alternate_quantity"></div>
         </div>
         <div class="hint">Folders and designs can be added later from the product's page in the catalog.</div>
         <button type="submit" class="btn btn-primary btn-sm">Save &amp; select</button>
@@ -205,6 +212,15 @@
 
 <script>
 (function () {
+  // Units are free text on the product, so a prefilled/stored unit may not
+  // be one of the standard dropdown choices - add it as an option on the
+  // fly instead of silently ignoring it.
+  function setUnitValue(sel, u) {
+    if (!u) return;
+    if (!Array.from(sel.options).some((o) => o.value === u)) sel.appendChild(new Option(u, u));
+    sel.value = u;
+  }
+
   const itemsBody = document.getElementById('items-body');
   const addRowBtn = document.getElementById('add-row-btn');
 
@@ -387,7 +403,7 @@
         <td><strong></strong></td>
         <td class="text-sm">${p.hsn_code || '—'}</td>
         <td class="text-sm">${p.igst_percent ?? '—'}</td>
-        <td class="text-sm">${p.alternate_quantity ? `${p.alternate_quantity} ${p.unit || ''}` : '—'}</td>
+        <td class="text-sm">${p.alternate_quantity ? `${p.alternate_quantity} ${p.alt_quantity_unit || ''}` : '—'}</td>
         <td><button type="button" class="btn btn-primary btn-sm">Select</button></td>`;
       tr.querySelector('strong').textContent = p.name;
       tr.querySelector('button').addEventListener('click', () => selectProduct(p));
@@ -403,7 +419,7 @@
     activeRow.querySelector('.js-product-id').value = p.id;
     activeRow.querySelector('.js-product-name').value = p.name;
     activeRow.querySelector('.js-hsn').value = p.hsn_code || '';
-    if (p.unit) activeRow.querySelector('.js-unit').value = p.unit;
+    setUnitValue(activeRow.querySelector('.js-unit'), p.alt_quantity_unit);
     activeRow.dataset.altQty = parseFloat(p.alternate_quantity) || '';
     recalcRowQty(activeRow);
     recalcTotals();

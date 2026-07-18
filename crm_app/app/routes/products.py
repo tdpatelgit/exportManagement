@@ -51,9 +51,10 @@ def _product_form_fields(form) -> dict:
         "description": form.get("description", ""),
         "hsn_code": form.get("hsn_code", ""),
         "igst_percent": form.get("igst_percent", ""),
+        "quantity_unit": form.get("quantity_unit", ""),
         "quantity": form.get("quantity", ""),
+        "alternate_quantity_unit": form.get("alternate_quantity_unit", form.get("unit", "")),
         "alternate_quantity": form.get("alternate_quantity", ""),
-        "unit": form.get("unit", ""),
         "net_weight_kg": form.get("net_weight_kg", ""),
         "gross_weight_kg": form.get("gross_weight_kg", ""),
         "pallet_types": _pallet_type_rows(form),
@@ -419,8 +420,8 @@ def _product_json(p, pallet_types=None) -> dict:
         "hsn_code": p.hsn_code, "category_id": p.category_id,
         "igst_percent": p.igst_percent, "sgst_percent": p.sgst_percent,
         "cgst_percent": p.cgst_percent,
-        "quantity": p.quantity, "alternate_quantity": p.alternate_quantity,
-        "unit": p.unit,
+        "quantity_unit": p.quantity_unit, "quantity": p.quantity,
+        "alt_quantity_unit": p.alternate_quantity_unit, "alternate_quantity": p.alternate_quantity,
         "net_weight_kg": p.net_weight_kg, "gross_weight_kg": p.gross_weight_kg,
         # The product's named pallet storage options ("loose" - no pallets -
         # is implicit and always offered by the forms on top of these).

@@ -692,12 +692,12 @@ class ProductRepository:
             """INSERT INTO products
                (company_id, category_id, product_name, description, hsn_code,
                 igst_percent, sgst_percent, cgst_percent,
-                quantity, alternate_quantity, unit,
+                quantity_unit, quantity, alternate_quantity_unit, alternate_quantity,
                 net_weight_kg, gross_weight_kg)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (product.company_id, product.category_id, product.product_name, product.description,
              product.hsn_code, product.igst_percent, product.sgst_percent, product.cgst_percent,
-             product.quantity, product.alternate_quantity, product.unit,
+             product.quantity_unit, product.quantity, product.alternate_quantity_unit, product.alternate_quantity,
              product.net_weight_kg, product.gross_weight_kg),
         )
         return self.get_by_id(new_id)

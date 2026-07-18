@@ -46,22 +46,27 @@
     <div class="hint">IGST is a percentage (0–100); leave it blank if it doesn't apply. SGST and CGST are calculated automatically as half of IGST.</div>
 
     <div class="form-row">
-      <div class="field"><label for="quantity">Quantity (pcs per box)</label><input type="text" id="quantity" name="quantity" value="{{ data.quantity | default('', true) }}"></div>
+      <div class="field" style="max-width:160px;">
+        <label for="quantity_unit">Quantity unit</label>
+        <input type="text" id="quantity_unit" name="quantity_unit" placeholder="e.g. PCS"
+               value="{{ data.quantity_unit | default('PCS', true) }}">
+      </div>
+      <div class="field">
+        <label for="quantity">Quantity (per box)</label>
+        <input type="text" id="quantity" name="quantity" value="{{ data.quantity | default('', true) }}">
+      </div>
     </div>
     <div class="form-row">
-      <div class="field">
-        <label for="alternate_quantity">Alternate quantity (per box)</label>
-        <input type="text" id="alternate_quantity" name="alternate_quantity" value="{{ data.alternate_quantity | default('', true) }}">
-        <div class="hint">Drives the Boxes × Alternate Quantity auto-calc on quotations, proforma invoices and packing lists.</div>
-      </div>
       <div class="field" style="max-width:160px;">
-        <label for="unit">Quantity unit</label>
-        <select id="unit" name="unit">
-          {% for u in PRODUCT_UNITS %}
-            <option value="{{ u }}" {{ 'selected' if (data.unit | default('SQM', true)) == u }}>{{ u }}</option>
-          {% endfor %}
-        </select>
+        <label for="alternate_quantity_unit">Alt quantity unit</label>
+        <input type="text" id="alternate_quantity_unit" name="alternate_quantity_unit" placeholder="e.g. SQM"
+               value="{{ data.alternate_quantity_unit | default('SQM', true) }}">
         <div class="hint">Prefills the Unit column on every document.</div>
+      </div>
+      <div class="field">
+        <label for="alternate_quantity">Alt quantity (per box)</label>
+        <input type="text" id="alternate_quantity" name="alternate_quantity" value="{{ data.alternate_quantity | default('', true) }}">
+        <div class="hint">Drives the Boxes × Alt Quantity auto-calc on quotations, proforma invoices and packing lists.</div>
       </div>
     </div>
     <div class="field">
@@ -136,7 +141,7 @@
   // only, never stored.
   const palletBody = document.getElementById('pallet-types-body');
   const altQtyInput = document.getElementById('alternate_quantity');
-  const unitSelect = document.getElementById('unit');
+  const unitSelect = document.getElementById('alternate_quantity_unit');
 
   function palletRowTemplate() {
     const tr = document.createElement('tr');
@@ -170,7 +175,7 @@
     if (e.target.classList.contains('js-pallet-boxes')) recalcPalletAltQty();
   });
   altQtyInput.addEventListener('input', recalcPalletAltQty);
-  unitSelect.addEventListener('change', recalcPalletAltQty);
+  unitSelect.addEventListener('input', recalcPalletAltQty);
   recalcPalletAltQty();
 })();
 </script>

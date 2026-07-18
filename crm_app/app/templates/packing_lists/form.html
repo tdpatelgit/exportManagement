@@ -93,6 +93,7 @@
               {% for u in PRODUCT_UNITS %}
                 <option value="{{ u }}" {{ 'selected' if first.unit == u }}>{{ u }}</option>
               {% endfor %}
+              {% if first.unit and first.unit not in PRODUCT_UNITS %}<option value="{{ first.unit }}" selected>{{ first.unit }}</option>{% endif %}
             </select>
           </div>
           <button type="button" class="btn-link-danger js-remove-product">Remove product</button>
@@ -213,6 +214,15 @@
 
 <script>
 (function () {
+  // Units are free text on the product, so a prefilled/stored unit may not
+  // be one of the standard dropdown choices - add it as an option on the
+  // fly instead of silently ignoring it.
+  function setUnitValue(sel, u) {
+    if (!u) return;
+    if (!Array.from(sel.options).some((o) => o.value === u)) sel.appendChild(new Option(u, u));
+    sel.value = u;
+  }
+
   const productsContainer = document.getElementById('products-container');
   const addProductBtn = document.getElementById('add-product-btn');
 
@@ -562,7 +572,7 @@
     }
     const table = document.createElement('table');
     table.className = 'ledger';
-    table.innerHTML = '<thead><tr><th>Product</th><th>HSN code</th><th>Pallet types</th><th>Pcs/box</th><th>Alt qty / box</th><th></th></tr></thead>';
+    table.innerHTML = '<thead><tr><th>Product</th><th>HSN code</th><th>Pallet types</th><th>Qty/box</th><th>Alt qty / box</th><th></th></tr></thead>';
     const tbody = document.createElement('tbody');
     filtered.forEach(p => {
       const palletSummary = (p.pallet_types && p.pallet_types.length)
@@ -573,8 +583,8 @@
         <td><strong></strong></td>
         <td class="text-sm">${p.hsn_code || '—'}</td>
         <td class="text-sm js-pallet-summary"></td>
-        <td class="text-sm">${p.quantity || '—'}</td>
-        <td class="text-sm">${p.alternate_quantity ? `${p.alternate_quantity} ${p.unit || ''}` : '—'}</td>
+        <td class="text-sm">${p.quantity ? `${p.quantity} ${p.quantity_unit || ''}` : '—'}</td>
+        <td class="text-sm">${p.alternate_quantity ? `${p.alternate_quantity} ${p.alt_quantity_unit || ''}` : '—'}</td>
         <td><button type="button" class="btn btn-primary btn-sm">Select</button></td>`;
       tr.querySelector('strong').textContent = p.name;
       tr.querySelector('.js-pallet-summary').textContent = palletSummary;
@@ -603,7 +613,7 @@
     // Pallet type dropdown starts on "Loose" (every product's default -
     // goods sold unpalletised); the product's pallet types are offered as
     // the other options.
-    if (p.unit) activeBlock.querySelector('.js-unit').value = p.unit;
+    setUnitValue(activeBlock.querySelector('.js-unit'), p.alt_quantity_unit);
     activeBlock.dataset.altQty = parseFloat(p.alternate_quantity) || '';
     activeBlock.dataset.pcsPerBox = parseFloat(p.quantity) || '';
     activeBlock.dataset.netPerBox = p.net_weight_kg || '';
