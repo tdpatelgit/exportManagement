@@ -1212,12 +1212,35 @@ class PackingListRepository:
             packing_list.items = [PackingListItem.from_row(r) for r in item_rows]
         return packing_lists
 
-    def list_all(self, company_id: int) -> List[PackingList]:
+    def list_all(
+        self, company_id: int, doc_type: Optional[str] = None, client_name: Optional[str] = None
+    ) -> List[PackingList]:
+        query = self._SELECT + " WHERE pl.company_id = ?"
+        params: list = [company_id]
+        if doc_type == "proforma_invoice":
+            query += " AND pl.proforma_invoice_id IS NOT NULL"
+        elif doc_type == "quotation":
+            query += " AND pl.quotation_id IS NOT NULL"
+        elif doc_type == "purchase_order":
+            query += " AND pl.purchase_order_id IS NOT NULL"
+        if client_name:
+            query += " AND pl.consignee_name = ?"
+            params.append(client_name)
+        query += " ORDER BY pl.packing_list_date DESC, pl.id DESC"
+        rows = self.db.query(query, tuple(params))
+        return self._attach_items([PackingList.from_row(r) for r in rows])
+
+    def list_distinct_consignees(self, company_id: int) -> List[str]:
+        """Populates the client filter dropdown on the packing lists list
+        page - consignee_name is denormalized onto each packing list, same
+        pattern as buyer_name/consignee_name on quotations/proforma invoices."""
         rows = self.db.query(
-            self._SELECT + " WHERE pl.company_id = ? ORDER BY pl.packing_list_date DESC, pl.id DESC",
+            """SELECT DISTINCT consignee_name FROM packing_lists
+               WHERE company_id = ? AND consignee_name IS NOT NULL AND consignee_name != ''
+               ORDER BY consignee_name""",
             (company_id,),
         )
-        return self._attach_items([PackingList.from_row(r) for r in rows])
+        return [r["consignee_name"] for r in rows]
 
     def list_for_lead(self, lead_id: int) -> List[PackingList]:
         """Same 'reference-only' join pattern as QuotationRepository.list_for_lead -

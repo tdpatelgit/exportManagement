@@ -12,6 +12,26 @@
   </div>
 </div>
 
+{% set doc_types = [('purchase_order', 'Purchase Order'), ('quotation', 'Quotation'), ('proforma_invoice', 'Proforma Invoice')] %}
+<div class="subnav">
+  <a href="{{ url_for('packing_lists.list_packing_lists', client=client_filter) }}" class="{{ 'active' if not doc_type_filter }}">All</a>
+  {% for key, label in doc_types %}
+    <a href="{{ url_for('packing_lists.list_packing_lists', doc_type=key, client=client_filter) }}" class="{{ 'active' if doc_type_filter == key }}">{{ label }}</a>
+  {% endfor %}
+</div>
+
+{% if consignee_options %}
+<form method="get" action="{{ url_for('packing_lists.list_packing_lists') }}" style="margin:0 0 16px;">
+  {% if doc_type_filter %}<input type="hidden" name="doc_type" value="{{ doc_type_filter }}">{% endif %}
+  <select name="client" onchange="this.form.submit()" style="width:auto;">
+    <option value="">All clients</option>
+    {% for name in consignee_options %}
+      <option value="{{ name }}" {{ 'selected' if client_filter == name }}>{{ name }}</option>
+    {% endfor %}
+  </select>
+</form>
+{% endif %}
+
 <div class="card">
   {% if packing_lists %}
   <div class="table-wrap">
@@ -21,7 +41,7 @@
           <th>Packing list no.</th>
           <th>Date</th>
           <th>Total qty</th>
-          <th>From proforma</th>
+          <th>Linked document</th>
           <th>Created by</th>
           <th></th>
         </tr>
@@ -33,8 +53,12 @@
           <td class="text-sm">{{ pl.packing_list_date }}</td>
           <td class="text-sm">{{ '{:,.2f}'.format(pl.total_quantity) }}</td>
           <td class="text-sm">
-            {% if pl.proforma_invoice_id %}
-              <a href="{{ url_for('proforma_invoices.view_proforma_invoice', proforma_invoice_id=pl.proforma_invoice_id) }}">{{ pl.proforma_invoice_number or ('#' ~ pl.proforma_invoice_id) }}</a>
+            {% if pl.purchase_order_id %}
+              <span class="pill">PO</span> <a href="{{ url_for('purchase_orders.view_purchase_order', purchase_order_id=pl.purchase_order_id) }}">{{ pl.purchase_order_number or ('#' ~ pl.purchase_order_id) }}</a>
+            {% elif pl.quotation_id and not pl.proforma_invoice_id %}
+              <span class="pill">Quotation</span> <a href="{{ url_for('quotations.view_quotation', quotation_id=pl.quotation_id) }}">{{ pl.quotation_number or ('#' ~ pl.quotation_id) }}</a>
+            {% elif pl.proforma_invoice_id %}
+              <span class="pill">Proforma</span> <a href="{{ url_for('proforma_invoices.view_proforma_invoice', proforma_invoice_id=pl.proforma_invoice_id) }}">{{ pl.proforma_invoice_number or ('#' ~ pl.proforma_invoice_id) }}</a>
             {% else %}—{% endif %}
           </td>
           <td class="text-sm">{{ pl.created_by_name }}</td>
@@ -45,7 +69,7 @@
     </table>
   </div>
   {% else %}
-  <div class="empty-state">No packing lists yet. <a href="{{ url_for('packing_lists.new_packing_list') }}">Create one →</a> (usually started from a proforma invoice)</div>
+  <div class="empty-state">No packing lists match this filter. <a href="{{ url_for('packing_lists.new_packing_list') }}">Create one →</a></div>
   {% endif %}
 </div>
 
