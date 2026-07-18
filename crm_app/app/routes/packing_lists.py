@@ -183,8 +183,15 @@ def catalog_maps(packing_lists) -> tuple:
 @packing_lists_bp.route("/")
 @login_required
 def list_packing_lists():
-    packing_lists = current_app.container.packing_list_service.list_all(g.user.company_id)
-    return render_template("packing_lists/list.html", packing_lists=packing_lists)
+    doc_type = request.args.get("doc_type") or None
+    client = request.args.get("client") or None
+    container = current_app.container
+    packing_lists = container.packing_list_service.list_all(g.user.company_id, doc_type=doc_type, client_name=client)
+    consignee_options = container.packing_list_service.list_consignees(g.user.company_id)
+    return render_template(
+        "packing_lists/list.html", packing_lists=packing_lists,
+        doc_type_filter=doc_type, client_filter=client, consignee_options=consignee_options,
+    )
 
 
 @packing_lists_bp.route("/new", methods=["GET", "POST"])

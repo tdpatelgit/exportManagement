@@ -1907,8 +1907,13 @@ class PackingListService:
             raise NotFoundError(f"Packing list #{packing_list_id} not found.")
         return packing_list
 
-    def list_all(self, company_id: int) -> List[PackingList]:
-        return self.packing_list_repo.list_all(company_id)
+    def list_all(
+        self, company_id: int, doc_type: Optional[str] = None, client_name: Optional[str] = None
+    ) -> List[PackingList]:
+        return self.packing_list_repo.list_all(company_id, doc_type=doc_type, client_name=client_name)
+
+    def list_consignees(self, company_id: int) -> List[str]:
+        return self.packing_list_repo.list_distinct_consignees(company_id)
 
     def list_for_lead(self, lead_id: Optional[int]) -> List[PackingList]:
         """Same shape as QuotationService.list_for_lead - unscoped by
