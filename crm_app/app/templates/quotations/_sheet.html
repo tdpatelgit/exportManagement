@@ -12,13 +12,19 @@
 {% set main_total = main_items | sum(attribute='total_usd') %}
 {% set annex_total = annex_items | sum(attribute='total_usd') %}
 {% set charge_rows = 7 + (1 if annex_items else 0) %}
+{# When printing, .quote-fill-sheet stretches the sheet to a full A4 page and
+   the item rows share this percentage of the items table's height between
+   them, so fewer products = thicker rows (screen rendering ignores tr
+   percentage heights because the table height is auto there). #}
+{% set fill_row_count = main_items|length + (1 if annex_items else 0) %}
+{% set row_pct = '%.2f'|format(58 / fill_row_count) if fill_row_count else '0' %}
 
-<div class="quote-sheet">
+<div class="quote-sheet quote-fill-sheet">
   <div class="quote-banner">&lt; &lt; &lt; &lt; &lt; QUOTATION &gt; &gt; &gt; &gt; &gt;</div>
 
   <table class="quote-meta-table">
     <tr>
-      <td class="quote-side-label" rowspan="5">EXPORTER</td>
+      <td class="quote-side-label" rowspan="5"><span>EXPORTER</span></td>
       <td class="quote-block" rowspan="5">
         <strong>{{ company.company_name if company else '' }}</strong><br>
         {{ (company.address or '')|replace('\n', '<br>')|safe if company else '' }}
@@ -46,7 +52,7 @@
     </tr>
 
     <tr>
-      <td class="quote-side-label" rowspan="4">IMPORTER</td>
+      <td class="quote-side-label" rowspan="4"><span>IMPORTER</span></td>
       <td class="quote-block" rowspan="4">
         <strong>{{ quotation.buyer_name }}</strong><br>
         {{ (quotation.buyer_address or '')|replace('\n', '<br>')|safe }}
@@ -94,7 +100,7 @@
     </thead>
     <tbody>
       {% for item in main_items %}
-      <tr>
+      <tr style="height: {{ row_pct }}%">
         <td class="num">{{ item.sr_no }}</td>
         <td>{{ item.product_name|replace('\n', '<br>')|safe }}</td>
         <td>{{ item.hsn_code or '—' }}</td>
@@ -106,7 +112,7 @@
       </tr>
       {% endfor %}
       {% if annex_items %}
-      <tr>
+      <tr style="height: {{ row_pct }}%">
         <td></td>
         <td colspan="7"><strong>(CONTINUE TO ANNEXURE-----&gt;)</strong></td>
       </tr>
