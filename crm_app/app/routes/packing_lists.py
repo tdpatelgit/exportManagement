@@ -82,6 +82,28 @@ def _group_items_by_product(items) -> list:
     return groups
 
 
+def _source_boxes_map(proforma_invoice_id, quotation_id, company_id) -> dict:
+    """product_id -> boxes for that product on the linked quotation/proforma
+    invoice, so the packing list form can remind the user how many boxes
+    they're meant to split across design rows - even when reopening a
+    packing list that was created a while ago."""
+    container = current_app.container
+    source_items = []
+    if proforma_invoice_id:
+        try:
+            invoice = container.proforma_invoice_service.get(int(proforma_invoice_id), company_id)
+            source_items = invoice.items
+        except (NotFoundError, ValueError, TypeError):
+            pass
+    elif quotation_id:
+        try:
+            quotation = container.quotation_service.get(int(quotation_id), company_id)
+            source_items = quotation.items
+        except (NotFoundError, ValueError, TypeError):
+            pass
+    return {item.product_id: item.quantity_boxes for item in source_items if item.product_id}
+
+
 def _form_context():
     container = current_app.container
     leads = container.lead_service.list_for_dashboard(g.user)
@@ -160,6 +182,9 @@ def new_packing_list():
                 "packing_lists/form.html", packing_list=None, leads=leads, invoices=invoices, quotations=quotations,
                 form_data=request.form, form_items=items, item_groups=_group_items_by_product(items),
                 product_map=_product_map(items), today=date.today().isoformat(),
+                source_boxes_map=_source_boxes_map(
+                    request.form.get("proforma_invoice_id"), request.form.get("quotation_id"), g.user.company_id,
+                ),
             ), 400
 
     leads, invoices, quotations = _form_context()
@@ -196,6 +221,7 @@ def new_packing_list():
         "packing_lists/form.html", packing_list=None, leads=leads, invoices=invoices, quotations=quotations,
         form_data=prefill, form_items=form_items, item_groups=_group_items_by_product(form_items or []),
         product_map=_product_map(form_items) if form_items else {}, today=date.today().isoformat(),
+        source_boxes_map=_source_boxes_map(proforma_invoice_id, quotation_id, g.user.company_id),
     )
 
 
@@ -239,6 +265,9 @@ def edit_packing_list(packing_list_id):
                 quotations=quotations,
                 form_data=request.form, form_items=items, item_groups=_group_items_by_product(items),
                 product_map=_product_map(items), today=date.today().isoformat(),
+                source_boxes_map=_source_boxes_map(
+                    request.form.get("proforma_invoice_id"), request.form.get("quotation_id"), g.user.company_id,
+                ),
             ), 400
 
     leads, invoices, quotations = _form_context()
@@ -246,6 +275,7 @@ def edit_packing_list(packing_list_id):
         "packing_lists/form.html", packing_list=packing_list, leads=leads, invoices=invoices, quotations=quotations,
         form_data=None, form_items=None, item_groups=_group_items_by_product(packing_list.items),
         product_map=_product_map(packing_list.items), today=date.today().isoformat(),
+        source_boxes_map=_source_boxes_map(packing_list.proforma_invoice_id, packing_list.quotation_id, g.user.company_id),
     )
 
 
