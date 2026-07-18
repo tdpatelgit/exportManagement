@@ -353,7 +353,7 @@ class Category:
 class Product:
     """Second level of the catalog (inside a category, or at the root when
     category_id is None): the tax/HSN identity AND the physical packing spec
-    (packing, quantity, alternate quantity, unit, weight class) that
+    (packing, quantity, alternate quantity, unit) that
     quotations, proforma invoices and packing lists all read from - every
     design under a product shares the same packing spec. Sub categories and
     designs live underneath it; price and photos belong to the Design.
@@ -372,7 +372,6 @@ class Product:
     quantity: Optional[str] = None
     alternate_quantity: Optional[str] = None  # per-box quantity, drives the Boxes x AltQty auto-calc
     unit: str = "SQM"  # what the quantity is measured in; prefills document lines
-    weight_class: Optional[str] = None
     net_weight_kg: Optional[float] = None    # net weight per box (KG) - drives the packing list's Boxes x weight auto-calc
     gross_weight_kg: Optional[float] = None  # gross weight per box (KG) - same auto-calc as net_weight_kg
     created_at: Optional[str] = None
@@ -394,7 +393,6 @@ class Product:
             quantity=row["quantity"] if "quantity" in row.keys() else None,
             alternate_quantity=row["alternate_quantity"] if "alternate_quantity" in row.keys() else None,
             unit=row["unit"] if "unit" in row.keys() else "SQM",
-            weight_class=row["weight_class"] if "weight_class" in row.keys() else None,
             net_weight_kg=row["net_weight_kg"] if "net_weight_kg" in row.keys() else None,
             gross_weight_kg=row["gross_weight_kg"] if "gross_weight_kg" in row.keys() else None,
             created_at=row["created_at"],
@@ -778,7 +776,6 @@ class ProformaInvoice:
     notify_address: Optional[str] = None
     country_of_origin: Optional[str] = "INDIA"
     country_of_destination: Optional[str] = None
-    vessel_flight: Optional[str] = None
     port_of_loading: Optional[str] = None
     port_of_discharge: Optional[str] = None
     final_destination: Optional[str] = None
@@ -826,7 +823,6 @@ class ProformaInvoice:
             notify_address=row["notify_address"],
             country_of_origin=row["country_of_origin"],
             country_of_destination=row["country_of_destination"],
-            vessel_flight=row["vessel_flight"],
             port_of_loading=row["port_of_loading"],
             port_of_discharge=row["port_of_discharge"],
             final_destination=row["final_destination"],
