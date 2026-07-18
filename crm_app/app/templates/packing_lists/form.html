@@ -95,8 +95,9 @@
           </div>
           <button type="button" class="btn-link-danger js-remove-product">Remove product</button>
         </div>
-        {% if first.source_boxes %}
-        <p class="hint">Boxes selected in {{ 'proforma invoice' if data and data.proforma_invoice_id else 'quotation' }}: <strong>{{ first.source_boxes | int }}</strong> — split this across the design rows below.</p>
+        {% set src_boxes = source_boxes_map.get(first.product_id | int) if source_boxes_map and first.product_id else None %}
+        {% if src_boxes %}
+        <p class="hint">Boxes selected in {{ 'proforma invoice' if data and data.proforma_invoice_id else 'quotation' }}: <strong>{{ src_boxes | int }}</strong> — split this across the design rows below.</p>
         {% endif %}
 
         <div class="table-wrap">
