@@ -19,12 +19,13 @@ from app.repositories import (
     TenantRepository, SqliteUserRepository, SqliteLeadRepository, SqliteClientRepository,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
     CategoryRepository, ProductRepository, ProductPalletTypeRepository, ProductFolderRepository, DesignRepository,
-    QuotationRepository, ProformaInvoiceRepository, PackingListRepository, DocumentVersionRepository,
+    QuotationRepository, ProformaInvoiceRepository, PurchaseOrderRepository, PackingListRepository,
+    DocumentVersionRepository,
 )
 from app.services import (
     AuthService, LeadService, ClientService, CurrencyService,
     CommunicationService, StatsService, CompanyService, ReportService, ProductService,
-    QuotationService, ProformaInvoiceService, PackingListService, BackupService,
+    QuotationService, ProformaInvoiceService, PurchaseOrderService, PackingListService, BackupService,
     DocumentVersionService,
 )
 from app.utils import register_template_helpers
@@ -55,6 +56,7 @@ class ServiceContainer:
         self.design_repo = DesignRepository(db)
         self.quotation_repo = QuotationRepository(db)
         self.proforma_invoice_repo = ProformaInvoiceRepository(db)
+        self.purchase_order_repo = PurchaseOrderRepository(db)
         self.packing_list_repo = PackingListRepository(db)
         self.document_version_repo = DocumentVersionRepository(db)
 
@@ -67,9 +69,12 @@ class ServiceContainer:
             self.client_repo, self.lead_repo, self.communication_service,
             self.payment_repo, self.document_repo, self.currency_service,
             self.quotation_repo, self.proforma_invoice_repo, self.packing_list_repo,
+            self.purchase_order_repo,
         )
         self.stats_service = StatsService(self.user_repo, self.lead_repo, self.comm_repo, self.client_repo)
-        self.company_service = CompanyService(self.company_repo)
+        self.company_service = CompanyService(
+            self.company_repo, Config.PRODUCT_UPLOAD_FOLDER, Config.ALLOWED_IMAGE_EXTENSIONS,
+        )
         self.report_service = ReportService(db)
         self.product_service = ProductService(
             self.category_repo, self.product_repo, self.product_folder_repo, self.design_repo,
@@ -84,10 +89,14 @@ class ServiceContainer:
             self.proforma_invoice_repo, self.product_repo, self.lead_repo, self.quotation_repo,
             self.document_version_service, self.client_repo,
         )
+        self.purchase_order_service = PurchaseOrderService(
+            self.purchase_order_repo, self.product_repo, self.lead_repo, self.proforma_invoice_repo,
+            self.document_version_service, self.client_repo,
+        )
         self.packing_list_service = PackingListService(
             self.packing_list_repo, self.product_repo, self.design_repo,
             self.lead_repo, self.proforma_invoice_repo, self.document_version_service,
-            self.quotation_repo,
+            self.quotation_repo, self.purchase_order_repo,
         )
         self.backup_service = BackupService(
             db, Config.DATABASE_PATH, Config.PRODUCT_UPLOAD_FOLDER, Config.SCHEMA_PATH,
@@ -120,8 +129,13 @@ def create_app(config_class=Config) -> Flask:
     @app.context_processor
     def inject_globals():
         from app.models import LEAD_STATUSES, CLIENT_STATUSES, CLIENT_TYPES, COMMUNICATION_MODES, PRODUCT_UNITS
+        # The logged-in tenant's own company profile (for the sidebar logo) -
+        # one small query per request, only when someone is signed in.
+        user = g.get("user")
+        our_company = app.container.company_service.get(user.company_id) if user else None
         return dict(
             current_user=g.get("user"),
+            our_company=our_company,
             LEAD_STATUSES=LEAD_STATUSES,
             CLIENT_STATUSES=CLIENT_STATUSES,
             CLIENT_TYPES=CLIENT_TYPES,
@@ -142,6 +156,7 @@ def create_app(config_class=Config) -> Flask:
     from app.routes.products import products_bp
     from app.routes.quotations import quotations_bp
     from app.routes.proforma_invoices import proforma_invoices_bp
+    from app.routes.purchase_orders import purchase_orders_bp
     from app.routes.packing_lists import packing_lists_bp
     from app.routes.profile import profile_bp
     from app.routes.backup import backup_bp
@@ -156,6 +171,7 @@ def create_app(config_class=Config) -> Flask:
     app.register_blueprint(products_bp)
     app.register_blueprint(quotations_bp)
     app.register_blueprint(proforma_invoices_bp)
+    app.register_blueprint(purchase_orders_bp)
     app.register_blueprint(packing_lists_bp)
     app.register_blueprint(profile_bp)
     app.register_blueprint(backup_bp)

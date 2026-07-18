@@ -26,6 +26,10 @@
     <tr>
       <td class="quote-side-label" rowspan="5"><span>EXPORTER</span></td>
       <td class="quote-block" rowspan="5">
+        {% if company and company.logo_path %}
+        <img src="{{ url_for('static', filename=company.logo_path) }}" alt="{{ company.company_name }} logo"
+             style="float:right; max-width:90px; max-height:48px; object-fit:contain; margin-left:6px;">
+        {% endif %}
         <strong>{{ company.company_name if company else '' }}</strong><br>
         {{ (company.address or '')|replace('\n', '<br>')|safe if company else '' }}
         {% if phone %}<br>Tel: {{ phone.value }}{% endif %}

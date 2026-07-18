@@ -1,0 +1,302 @@
+{# The purchase order A4 sheet (replica of the AAYU EXIM Excel PO format:
+   OUR company prints as the BUYER, the supplier as the SELLER, amounts in
+   INR). Shared by print.html (standalone) and print_combined.html (PO +
+   packing details in one printable document). Expects `purchase_order`,
+   `company` and (optionally) `packing_lists` in context; brings its own
+   scoped .po-* styles along. #}
+<style>
+  .po-sheet {
+    background: #fff;
+    color: #000;
+    width: 205mm;
+    margin: 24px auto 48px;
+    padding: 6mm 6mm 8mm;
+    box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 10px;
+    line-height: 1.25;
+  }
+  .po-title {
+    border: 1px solid #000;
+    text-align: center;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 3px 0;
+  }
+  .po-sheet table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: -1px; }
+  .po-sheet td { border: 1px solid #000; padding: 3px 5px; vertical-align: top; word-wrap: break-word; }
+  .po-label { font-size: 9px; }
+  .po-val { font-weight: bold; }
+  .po-center { text-align: center; }
+  .po-right { text-align: right; }
+  .po-mid { vertical-align: middle !important; }
+  .po-side {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    text-align: center;
+    font-size: 9px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    padding: 2px 1px;
+    vertical-align: middle;
+  }
+  /* Buyer cell: text on the left, logo pinned to the right edge and
+     stretching the full height of the cell with minimal padding (as on the
+     original Excel PO). Absolutely positioned because a percentage height
+     doesn't resolve reliably inside a rowspanned td. */
+  .po-buyer-cell { position: relative; }
+  .po-buyer-text { padding-right: 115px; }
+  .po-buyer-logo { position: absolute; top: 1px; right: 6px; bottom: 1px; display: flex; align-items: center; }
+  .po-buyer-logo img { max-height: 100%; width: auto; max-width: 110px; object-fit: contain; }
+  .po-items thead td { text-align: center; vertical-align: middle; font-size: 9px; font-weight: bold; }
+  .po-items tbody tr.po-goods td { border-top: none; border-bottom: none; padding: 2px 5px; }
+  .po-items tbody tr.po-filler td { height: 120px; }
+  .po-charge-label { text-align: center; font-weight: bold; font-size: 9px; vertical-align: middle; }
+  .po-sign-cell { height: 92px; padding: 4px 6px; }
+  .po-sign-flex { display: flex; flex-direction: column; justify-content: space-between; height: 100%; }
+  .po-stamp { text-align: right; }
+  @media print {
+    .po-sheet { width: auto; margin: 0; padding: 0; box-shadow: none; }
+  }
+</style>
+
+{% macro dmy(val) -%}
+  {%- if val -%}
+    {%- set p = (val|string)[:10].split('-') -%}
+    {%- if p|length == 3 %}{{ p[2]|int }}/{{ p[1]|int }}/{{ p[0] }}{% else %}{{ val }}{% endif -%}
+  {%- else -%}-{%- endif -%}
+{%- endmacro %}
+{% macro inr(v) -%}
+  {%- if v %}&#8377;&nbsp;{{ '{:,.2f}'.format(v) }}{% else %}&#8377;&nbsp;-{% endif -%}
+{%- endmacro %}
+{% macro num(v) -%}
+  {%- if v is not none and v != '' and v != 0 %}{{ '{:g}'.format(v | round(2)) }}{% endif -%}
+{%- endmacro %}
+
+<div class="po-sheet">
+  <div class="po-title">PURCHASE ORDER</div>
+
+  <!-- Buyer (our company) / order references -->
+  <table>
+    <colgroup>
+      <col style="width:20px"><col style="width:36%"><col style="width:14%"><col style="width:19%"><col><col>
+    </colgroup>
+    <tr>
+      <td class="po-side" rowspan="6">BUYER</td>
+      <td rowspan="6" class="po-buyer-cell" style="border-bottom:none;">
+        <div class="po-buyer-text {{ '' if company and company.logo_path else 'no-logo' }}"
+             {% if not (company and company.logo_path) %}style="padding-right:0;"{% endif %}>
+          <span class="po-val">{{ company.company_name|upper if company else '' }}</span><br>
+          <span class="po-val">{{ (company.address or '')|upper|replace('\n', '<br>')|safe if company else '' }}</span>
+          {% if company and company.pan_no %}<br><span class="po-val">PAN NO : {{ company.pan_no }}</span>{% endif %}
+          {% if company and company.gstin %}<br><span class="po-val">GSTIN : {{ company.gstin }}</span>{% endif %}
+        </div>
+        {% if company and company.logo_path %}
+        <div class="po-buyer-logo">
+          <img src="{{ url_for('static', filename=company.logo_path) }}" alt="{{ company.company_name }} logo">
+        </div>
+        {% endif %}
+      </td>
+      <td class="po-label po-mid">PURCHASE ORDER NO</td>
+      <td class="po-val po-mid" colspan="3">{{ purchase_order.po_number }}</td>
+    </tr>
+    <tr>
+      <td class="po-label">DATE</td>
+      <td class="po-val" colspan="3">{{ purchase_order.po_date | long_date }}</td>
+    </tr>
+    <tr>
+      <td class="po-label">SELLER REF NO</td>
+      <td class="po-val" colspan="3">{{ purchase_order.seller_ref_no or '' }}</td>
+    </tr>
+    <tr>
+      <td class="po-label">PORT OF LOADING</td>
+      <td class="po-val" colspan="3">{{ (purchase_order.port_of_loading or '-')|upper }}</td>
+    </tr>
+    <tr>
+      <td class="po-label">PORT OF DISCHARGE</td>
+      <td class="po-val" colspan="3">{{ (purchase_order.port_of_discharge or '-')|upper }}</td>
+    </tr>
+    <tr>
+      <td class="po-label">CONTAINER DETAILS</td>
+      <td class="po-val" colspan="3">{{ (purchase_order.container_details or '-')|upper }}</td>
+    </tr>
+    <tr>
+      <td class="po-side" rowspan="3">SELLER</td>
+      <td rowspan="3">
+        <span class="po-val">{{ (purchase_order.seller_name or '')|upper }}</span><br>
+        <span class="po-val">{{ (purchase_order.seller_address or '')|upper|replace('\n', '<br>')|safe }}</span>
+        {% if purchase_order.seller_pan %}<br><span class="po-val">PAN NO : {{ purchase_order.seller_pan|upper }}</span>{% endif %}
+        {% if purchase_order.seller_gstin %}<br><span class="po-val">GSTIN : {{ purchase_order.seller_gstin|upper }}</span>{% endif %}
+      </td>
+      <td class="po-label">DELIVERY TIME</td>
+      <td class="po-val" colspan="3">{{ (purchase_order.delivery_time or '-')|upper }}</td>
+    </tr>
+    <tr>
+      <td class="po-label po-mid" rowspan="2">PAYMENT TERMS</td>
+      <td class="po-label po-mid">ADVANCE</td>
+      <td class="po-val po-mid" colspan="2">{{ purchase_order.advance_percent or '-' }}</td>
+    </tr>
+    <tr>
+      <td class="po-val po-mid" colspan="3">{{ purchase_order.payment_terms or '-' }}</td>
+    </tr>
+    <tr>
+      <td colspan="2" style="border-top:none;"></td>
+      <td class="po-label">REMARKS :</td>
+      <td class="po-val" colspan="3">{{ (purchase_order.remarks or '')|upper|replace('\n', '<br>')|safe }}</td>
+    </tr>
+  </table>
+
+  <!-- Goods -->
+  <table class="po-items">
+    <colgroup>
+      <col style="width:5%"><col style="width:41%"><col style="width:9%"><col style="width:10%">
+      <col style="width:11%"><col style="width:7%"><col style="width:17%">
+    </colgroup>
+    <thead>
+      <tr>
+        <td rowspan="2">SR<br>NO</td>
+        <td rowspan="2">DESCRIPTION OF GOODS</td>
+        <td colspan="2">QUANTITY</td>
+        <td colspan="2">EX-FACTORY PRICE</td>
+        <td rowspan="2">TOTAL (INR)</td>
+      </tr>
+      <tr>
+        <td>BOXES</td>
+        <td>QTY</td>
+        <td>RATE</td>
+        <td>PER</td>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in purchase_order.items %}
+      <tr class="po-goods">
+        <td class="po-center">{{ item.sr_no }}</td>
+        <td>{{ item.product_name }}{% if item.hsn_code %} &nbsp;HSNC : {{ item.hsn_code }}{% endif %}</td>
+        <td class="po-center">{{ num(item.quantity_boxes) }}</td>
+        <td class="po-right">{{ '{:,.2f}'.format(item.quantity_value) }} {{ item.unit }}</td>
+        <td class="po-right">{{ inr(item.price_inr) }}</td>
+        <td class="po-center">{{ item.price_per }}</td>
+        <td class="po-right">{{ inr(item.total_inr) }}</td>
+      </tr>
+      {% endfor %}
+      <tr class="po-filler">
+        <td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+      </tr>
+      <tr>
+        <td></td>
+        <td class="po-val po-center">TOTAL QUANTITY</td>
+        <td class="po-val po-center">{{ num(purchase_order.total_boxes) }}</td>
+        <td class="po-val po-right">{{ '{:,.2f}'.format(purchase_order.total_quantity) }}</td>
+        <td class="po-val po-center" colspan="2">TOTAL AMOUNT</td>
+        <td class="po-val po-right">{{ inr(purchase_order.subtotal_inr) }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Order value in words / taxes -->
+  <table>
+    <colgroup>
+      <col style="width:53%"><col style="width:15%"><col style="width:12%"><col style="width:20%">
+    </colgroup>
+    <tr>
+      <td class="po-val po-mid" rowspan="5">ORDER VALUE SAY IN WORD :<br>{{ purchase_order.order_value_inr | inr_in_words }}</td>
+      <td class="po-charge-label">IGST</td>
+      <td class="po-val po-right">{{ '{:.2f}'.format(purchase_order.igst_percent) }}%</td>
+      <td class="po-val po-right">{{ inr(purchase_order.igst_amount) }}</td>
+    </tr>
+    <tr>
+      <td class="po-charge-label">CGST</td>
+      <td class="po-val po-right">{{ '{:.2f}'.format(purchase_order.cgst_percent) }}%</td>
+      <td class="po-val po-right">{{ inr(purchase_order.cgst_amount) }}</td>
+    </tr>
+    <tr>
+      <td class="po-charge-label">SGST</td>
+      <td class="po-val po-right">{{ '{:.2f}'.format(purchase_order.sgst_percent) }}%</td>
+      <td class="po-val po-right">{{ inr(purchase_order.sgst_amount) }}</td>
+    </tr>
+    <tr>
+      <td class="po-charge-label" colspan="2">ROUND OFF</td>
+      <td class="po-val po-right">&#8377;&nbsp;{{ '{:,.2f}'.format(purchase_order.round_off_inr) }}</td>
+    </tr>
+    <tr>
+      <td class="po-charge-label" colspan="2">ORDER VALUE</td>
+      <td class="po-val po-right">{{ inr(purchase_order.order_value_inr) }}</td>
+    </tr>
+  </table>
+
+  <!-- Packing details (from the PO's own packing list when one exists) -->
+  {% if packing_lists %}
+  <table class="po-items">
+    <colgroup>
+      <col style="width:5%"><col style="width:38%"><col style="width:19%"><col style="width:9%">
+      <col style="width:10%"><col style="width:9%"><col style="width:10%">
+    </colgroup>
+    <thead>
+      <tr><td colspan="7" style="font-size:10px;">PACKING DETAILS</td></tr>
+      <tr>
+        <td>SR<br>NO</td>
+        <td>DESCRIPTION OF GOODS</td>
+        <td>DESIGN NO OR NAME</td>
+        <td>BOXES</td>
+        <td>QTY</td>
+        <td>NO OF<br>PLTS</td>
+        <td>BOXES PER<br>PALLET</td>
+      </tr>
+    </thead>
+    <tbody>
+      {% set pk = namespace(sr=0, boxes=0, qty=0, pallets=0) %}
+      {% for packing_list in packing_lists %}
+        {% for item in packing_list.items %}
+        {% set pk.sr = pk.sr + 1 %}
+        {% set pk.boxes = pk.boxes + (item.quantity_boxes or 0) %}
+        {% set pk.qty = pk.qty + (item.quantity_value or 0) %}
+        {% set pk.pallets = pk.pallets + (item.pallets or 0) %}
+        <tr>
+          <td class="po-center">{{ pk.sr }}</td>
+          <td>{{ item.product_name }}{% if item.hsn_code %} &nbsp;HSNC : {{ item.hsn_code }}{% endif %}</td>
+          <td class="po-center">{{ (item.design_name or '')|upper }}</td>
+          <td class="po-center">{{ num(item.quantity_boxes) }}</td>
+          <td class="po-right">{{ '{:,.2f}'.format(item.quantity_value) }}</td>
+          <td class="po-center">{{ num(item.pallets) }}</td>
+          <td class="po-center">{{ num(item.box_per_pallet) }}</td>
+        </tr>
+        {% endfor %}
+      {% endfor %}
+      <tr>
+        <td></td>
+        <td class="po-val po-center">TOTAL</td>
+        <td></td>
+        <td class="po-val po-center">{{ num(pk.boxes) }}</td>
+        <td class="po-val po-right">{{ '{:,.2f}'.format(pk.qty) }}</td>
+        <td class="po-val po-center">{{ num(pk.pallets) }}</td>
+        <td></td>
+      </tr>
+    </tbody>
+  </table>
+  {% endif %}
+
+  <!-- Footnote + signatures -->
+  <table>
+    <colgroup><col style="width:45%"><col></colgroup>
+    <tr>
+      <td colspan="2" class="po-val">
+        NOTE : THE GOODS PROCURED UNDER CONCESSIONAL RATE OF DUTY @ 0.1% AS PER NOTIFICATION NO. 41/2017
+        DT.23.10.2017 AND WE EXPORT THESE GOODS WITHIN 90 DAYS FROM THE DATE OF INVOICE.
+      </td>
+    </tr>
+    <tr>
+      <td class="po-sign-cell">
+        <div class="po-sign-flex">
+          <div class="po-val">ACCEPTED BY SELLER</div>
+          <div class="po-val">SEAL &amp; SIGNATURE</div>
+        </div>
+      </td>
+      <td class="po-sign-cell">
+        <div class="po-sign-flex po-stamp">
+          <div class="po-val">FOR&nbsp; {{ company.company_name|upper if company else '' }}</div>
+          <div class="po-val">AUTHORISED SIGNATORY</div>
+        </div>
+      </td>
+    </tr>
+  </table>
+</div>

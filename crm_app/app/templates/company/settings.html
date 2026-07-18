@@ -10,7 +10,26 @@
 </div>
 
 <div class="card" style="max-width:760px;">
-  <form method="POST">
+  <form method="POST" enctype="multipart/form-data">
+    <fieldset>
+      <legend>Company logo</legend>
+      {% if company and company.logo_path %}
+      <div class="field">
+        <img src="{{ url_for('static', filename=company.logo_path) }}" alt="Company logo"
+             style="max-width:220px; max-height:110px; object-fit:contain; display:block; border:1px solid var(--color-line, #ddd); border-radius:6px; padding:6px; background:#fff;">
+      </div>
+      <div class="radio-wrap" style="margin-bottom:10px;">
+        <input type="checkbox" id="remove_logo" name="remove_logo" value="1">
+        <label for="remove_logo">Remove current logo</label>
+      </div>
+      {% endif %}
+      <div class="field">
+        <label for="logo_file">{{ 'Replace logo' if company and company.logo_path else 'Upload logo' }}</label>
+        <input type="file" id="logo_file" name="logo_file" accept="image/*">
+        <div class="hint">Shown in the app sidebar and on generated documents (proforma invoices, purchase orders). PNG with a transparent background works best.</div>
+      </div>
+    </fieldset>
+
     <fieldset>
       <legend>Registration details</legend>
       <div class="field">

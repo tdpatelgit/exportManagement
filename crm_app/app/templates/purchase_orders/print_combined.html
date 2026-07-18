@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ purchase_order.po_number }} · Purchase Order + Packing Details</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    /* Each sheet prints on its own A4 page: purchase order first, packing details after. */
+    .combined-page { break-after: page; page-break-after: always; }
+    .combined-page:last-of-type { break-after: auto; page-break-after: auto; }
+    .combined-note {
+      max-width: 205mm; margin: 16px auto -8px;
+      padding: 10px 14px; border-radius: 8px;
+      background: #fff7e0; border: 1px solid #e0c86e; color: #6b5716;
+      font-size: .85rem;
+    }
+    @media print {
+      @page { size: A4 portrait; margin: 6mm; }
+      body { background: #fff !important; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body class="quote-print-body">
+
+  <div class="quote-toolbar no-print">
+    <a href="{{ url_for('purchase_orders.view_purchase_order', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">← Back to purchase order</a>
+    <div class="flex gap-8">
+      {% if packing_lists %}
+      <a href="{{ url_for('packing_lists.view_packing_list', packing_list_id=packing_lists[0].id) }}" class="btn btn-ghost btn-sm">📦 View packing list</a>
+      {% endif %}
+      <button type="button" class="btn btn-primary btn-sm" onclick="window.print()">🖨 Print / Save as PDF</button>
+    </div>
+  </div>
+
+  {% if not packing_lists %}
+  <div class="combined-note no-print">
+    No packing list is linked to this purchase order yet, so only the purchase order page is included below.
+    <a href="{{ url_for('packing_lists.new_packing_list', purchase_order_id=purchase_order.id) }}">Create the packing list →</a>
+  </div>
+  {% endif %}
+
+  <div class="combined-page">
+    {% include 'purchase_orders/_sheet.html' %}
+  </div>
+
+  {% for packing_list in packing_lists %}
+  <div class="combined-page">
+    {% include 'packing_lists/_sheet.html' %}
+  </div>
+  {% endfor %}
+
+</body>
+</html>

@@ -194,8 +194,9 @@ def view_proforma_invoice(proforma_invoice_id):
         abort(404)
     company = container.company_service.get(g.user.company_id)
     packing_lists = container.packing_list_service.list_for_proforma(proforma_invoice_id, g.user.company_id)
+    purchase_order = container.purchase_order_service.get_for_proforma(proforma_invoice_id)
     return render_template("proforma_invoices/print.html", invoice=invoice, company=company,
-                           packing_lists=packing_lists)
+                           packing_lists=packing_lists, purchase_order=purchase_order)
 
 
 @proforma_invoices_bp.route("/<int:proforma_invoice_id>/combined")

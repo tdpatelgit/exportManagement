@@ -41,7 +41,7 @@ from datetime import datetime
 # Because `_migrate` is idempotent and runs on every startup AND on every
 # restore, any backup - however old - is carried forward through the whole
 # chain of steps, never discarded.
-SCHEMA_VERSION = 11  # v11: each product quantity gets its own unit - quantity_unit (new, 'PCS' for existing rows) and alternate_quantity_unit (renamed from `unit`). v10: products.packing became the product_pallet_types table (a named LIST of pallet storage options; existing values migrated to one type named 'pallet')
+SCHEMA_VERSION = 12  # v12: purchase orders (new purchase_orders/purchase_order_items tables via schema.sql, plus packing_lists.purchase_order_id so a PO can carry its own packing list) and our_company.logo_path (company logo shown in the app and on generated documents). v11: each product quantity gets its own unit - quantity_unit (new, 'PCS' for existing rows) and alternate_quantity_unit (renamed from `unit`)
 
 
 class Database:
@@ -625,6 +625,21 @@ class Database:
                 conn.execute("ALTER TABLE products RENAME COLUMN unit TO alternate_quantity_unit")
             if products_existing and "quantity_unit" not in products_existing:
                 conn.execute("ALTER TABLE products ADD COLUMN quantity_unit TEXT NOT NULL DEFAULT 'PCS'")
+
+            # ---- v12: PURCHASE ORDERS + COMPANY LOGO ----
+            # The purchase_orders/purchase_order_items tables themselves are
+            # created by schema.sql (CREATE TABLE IF NOT EXISTS covers old
+            # databases too); only the columns retrofitted onto existing
+            # tables need guarded ALTERs here: a packing list can now be
+            # generated from a purchase order (same "generated from"
+            # reference pattern as proforma_invoice_id/quotation_id), and
+            # Our Company gains an optional logo image.
+            existing = {r["name"] for r in conn.execute("PRAGMA table_info(packing_lists)")}
+            if existing and "purchase_order_id" not in existing:
+                conn.execute("ALTER TABLE packing_lists ADD COLUMN purchase_order_id INTEGER REFERENCES purchase_orders(id)")
+            existing = {r["name"] for r in conn.execute("PRAGMA table_info(our_company)")}
+            if existing and "logo_path" not in existing:
+                conn.execute("ALTER TABLE our_company ADD COLUMN logo_path TEXT")
 
     def _backup_db_file(self, tag: str) -> None:
         """Copies the live DB file into instance/backups/ before a

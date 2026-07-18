@@ -92,6 +92,8 @@ def settings():
                 contact_persons=_extract_contact_persons(request.form),
                 bank_details=_extract_bank_details(request.form),
                 lut_details=_extract_lut_details(request.form),
+                logo_file=request.files.get("logo_file"),
+                remove_logo=bool(request.form.get("remove_logo")),
             )
             flash("Our Company profile saved.", "success")
             return redirect(url_for("company.settings"))

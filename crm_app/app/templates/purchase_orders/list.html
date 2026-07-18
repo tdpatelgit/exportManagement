@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Purchase Orders{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Sales documents</div>
+    <h1>Purchase Orders</h1>
+  </div>
+  <div class="topbar-actions">
+    <a href="{{ url_for('purchase_orders.new_purchase_order') }}" class="btn btn-primary">+ New purchase order</a>
+  </div>
+</div>
+
+<div class="card">
+  {% if purchase_orders %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th>PO no.</th>
+          <th>Date</th>
+          <th>Seller</th>
+          <th>From proforma</th>
+          <th>Created by</th>
+          <th class="num">Order value (INR)</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for po in purchase_orders %}
+        <tr>
+          <td class="mono">{{ po.po_number }}</td>
+          <td class="text-sm">{{ po.po_date }}</td>
+          <td><strong>{{ po.seller_name }}</strong></td>
+          <td class="text-sm">{{ po.proforma_invoice_number or '—' }}</td>
+          <td class="text-sm">{{ po.created_by_name }}</td>
+          <td class="num">₹ {{ '{:,.2f}'.format(po.order_value_inr) }}</td>
+          <td><a href="{{ url_for('purchase_orders.view_purchase_order', purchase_order_id=po.id) }}" class="text-sm">Open →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No purchase orders yet. <a href="{{ url_for('purchase_orders.new_purchase_order') }}">Create one →</a></div>
+  {% endif %}
+</div>
+
+{% endblock %}

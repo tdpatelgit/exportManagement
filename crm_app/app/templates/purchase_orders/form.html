@@ -1,0 +1,380 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit purchase order' if purchase_order else 'New purchase order' }}{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Sales documents</div>
+    <h1>{{ 'Edit ' + purchase_order.po_number if purchase_order else 'New purchase order' }}</h1>
+    {% if not purchase_order %}<div class="text-sm text-soft">PO number is generated automatically on save.</div>{% endif %}
+  </div>
+</div>
+
+<form method="POST" id="po-form">
+  {% set data = form_data if form_data else purchase_order %}
+  <div class="card">
+    <div class="card-header"><h3>Start from</h3></div>
+    <div class="form-row">
+      <div class="field">
+        <label for="proforma_select">Prefill from an existing proforma invoice <span class="text-soft text-sm">(optional)</span></label>
+        <select id="proforma_select">
+          <option value="">— Select a proforma invoice —</option>
+          {% for pi in invoices %}
+            <option value="{{ pi.id }}" {{ 'selected' if data and data.proforma_invoice_id | string == pi.id | string }}>{{ pi.invoice_number }} — {{ pi.consignee_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="lead_select">Link to a lead <span class="text-soft text-sm">(optional)</span></label>
+        <select id="lead_select">
+          <option value="">— Select a lead —</option>
+          {% for l in leads %}
+            <option value="{{ l.id }}" {{ 'selected' if data and data.lead_id | string == l.id | string }}>{{ l.company_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <p class="hint">Choosing a proforma invoice reloads this page and copies its product lines in as a starting point — the purchase order is then its own independent record. Prices are typed in INR (they're the supplier's ex-factory rates, not the proforma's USD selling prices).</p>
+    <input type="hidden" name="lead_id" id="lead_id" value="{{ data.lead_id | default('', true) }}">
+    <input type="hidden" name="proforma_invoice_id" id="proforma_invoice_id" value="{{ data.proforma_invoice_id | default('', true) }}">
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Order details</h3></div>
+    <div class="form-row">
+      <div class="field"><label for="po_date">Date<span class="required-mark">*</span></label><input type="date" id="po_date" name="po_date" required value="{{ data.po_date | default(today, true) }}"></div>
+      <div class="field"><label for="seller_ref_no">Seller ref. no.</label><input type="text" id="seller_ref_no" name="seller_ref_no" value="{{ data.seller_ref_no | default('', true) }}"></div>
+      <div class="field"><label for="delivery_time">Delivery time</label><input type="text" id="delivery_time" name="delivery_time" placeholder="e.g. 20 DAY FROM PO DATE" value="{{ data.delivery_time | default('', true) }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label for="port_of_loading">Port of loading</label><input type="text" id="port_of_loading" name="port_of_loading" value="{{ data.port_of_loading | default('', true) }}"></div>
+      <div class="field"><label for="port_of_discharge">Port of discharge</label><input type="text" id="port_of_discharge" name="port_of_discharge" value="{{ data.port_of_discharge | default('', true) }}"></div>
+      <div class="field"><label for="container_details">Container details</label><input type="text" id="container_details" name="container_details" placeholder="e.g. 1 X 20 FT STANDARD DRY" value="{{ data.container_details | default('', true) }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="field" style="max-width:220px;"><label for="advance_percent">Advance</label><input type="text" id="advance_percent" name="advance_percent" placeholder="e.g. 0%" value="{{ data.advance_percent | default('', true) }}"></div>
+      <div class="field"><label for="payment_terms">Payment terms</label><input type="text" id="payment_terms" name="payment_terms" placeholder="e.g. 40 DAYS AGAINST INVOICE DATE 100%" value="{{ data.payment_terms | default('', true) }}"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Seller</h3></div>
+    <div class="field">
+      <label for="seller_select">Prefill from an existing client <span class="text-soft text-sm">(optional — usually a Supplier)</span></label>
+      <select id="seller_select">
+        <option value="">— Select a client —</option>
+        {% for c in clients %}
+          <option value="{{ c.id }}" data-name="{{ c.company_name }}" data-address="{{ c.address or '' }}"
+                  {{ 'selected' if data and data.seller_client_id | string == c.id | string }}>
+            {{ c.company_name }} ({{ c.client_type }})
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <input type="hidden" name="seller_client_id" id="seller_client_id" value="{{ data.seller_client_id | default('', true) }}">
+    <div class="field"><label for="seller_name">Seller name<span class="required-mark">*</span></label><input type="text" id="seller_name" name="seller_name" required value="{{ data.seller_name | default('', true) }}"></div>
+    <div class="field"><label for="seller_address">Seller address</label><textarea id="seller_address" name="seller_address" rows="3">{{ data.seller_address | default('', true) }}</textarea></div>
+    <div class="form-row">
+      <div class="field"><label for="seller_pan">Seller PAN no.</label><input type="text" id="seller_pan" name="seller_pan" value="{{ data.seller_pan | default('', true) }}"></div>
+      <div class="field"><label for="seller_gstin">Seller GSTIN</label><input type="text" id="seller_gstin" name="seller_gstin" value="{{ data.seller_gstin | default('', true) }}"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Products</h3></div>
+    <div class="table-wrap">
+      <table class="ledger" id="items-table">
+        <thead>
+          <tr>
+            <th>Sr</th>
+            <th style="min-width:220px;">Product</th>
+            <th>HSN code</th>
+            <th>Boxes</th>
+            <th>Qty (SQM/LM)</th>
+            <th>Unit</th>
+            <th>Price (INR)</th>
+            <th>Per</th>
+            <th class="num">Total (INR)</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="items-body">
+          {% set rows = form_items if form_items is not none else (purchase_order.items if purchase_order else []) %}
+          {% for row in rows %}
+          <tr class="item-row" data-alt-qty="{{ alt_qty_map.get(row.product_id | int, '') if row.product_id else '' }}">
+            <td class="js-sr">{{ loop.index }}</td>
+            <td>
+              <input type="hidden" name="item_product_id[]" class="js-product-id" value="{{ row.product_id or '' }}">
+              <textarea name="item_product_name[]" class="js-product-name" rows="2" required>{{ row.product_name }}</textarea>
+              <button type="button" class="btn btn-ghost btn-sm js-choose-product">📦 Choose product</button>
+            </td>
+            <td><input type="text" name="item_hsn_code[]" class="js-hsn" value="{{ row.hsn_code or '' }}" readonly tabindex="-1"></td>
+            <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" value="{{ row.quantity_boxes or '' }}"></td>
+            <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required value="{{ row.quantity_value or '' }}"></td>
+            <td>
+              <select name="item_unit[]" class="js-unit">
+                {% for u in PRODUCT_UNITS %}
+                  <option value="{{ u }}" {{ 'selected' if row.unit == u }}>{{ u }}</option>
+                {% endfor %}
+                {% if row.unit and row.unit not in PRODUCT_UNITS %}<option value="{{ row.unit }}" selected>{{ row.unit }}</option>{% endif %}
+              </select>
+            </td>
+            <td><input type="number" step="0.01" name="item_price_inr[]" class="js-price" required value="{{ row.price_inr or '' }}"></td>
+            <td>
+              <select name="item_price_per[]" class="js-price-per">
+                <option value="BOX" {{ 'selected' if (row.price_per or 'BOX') == 'BOX' }}>BOX</option>
+                <option value="UNIT" {{ 'selected' if row.price_per and row.price_per != 'BOX' }}>Unit</option>
+              </select>
+            </td>
+            <td class="num js-total">0.00</td>
+            <td><button type="button" class="btn-link-danger js-remove-row">Remove</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <button type="button" class="btn btn-ghost btn-sm" id="add-row-btn">+ Add product line</button>
+    <p class="hint">Choosing a catalog product prefills its name, HSN code and unit. Qty auto-fills from Boxes × the product's Alternate Quantity when known, but stays editable. Price is the seller's ex-factory rate in INR — per BOX (the usual basis) or per the row's quantity unit.</p>
+    <div class="form-row" style="margin-top:14px;">
+      <div class="field" style="max-width:160px;"><label for="igst_percent">IGST %</label><input type="number" step="0.01" min="0" max="100" id="igst_percent" name="igst_percent" value="{{ data.igst_percent | default(0, true) }}"></div>
+      <div class="field" style="max-width:160px;"><label for="cgst_percent">CGST %</label><input type="number" step="0.01" min="0" max="100" id="cgst_percent" name="cgst_percent" value="{{ data.cgst_percent | default(0, true) }}"></div>
+      <div class="field" style="max-width:160px;"><label for="sgst_percent">SGST %</label><input type="number" step="0.01" min="0" max="100" id="sgst_percent" name="sgst_percent" value="{{ data.sgst_percent | default(0, true) }}"></div>
+    </div>
+    <div class="flex-between" style="margin-top:14px;">
+      <div></div>
+      <div class="text-sm">
+        <strong>Total amount:</strong> ₹ <span id="subtotal-display">0.00</span>
+        &nbsp;·&nbsp; <strong>Round off:</strong> ₹ <span id="roundoff-display">0.00</span>
+        &nbsp;·&nbsp; <strong>Order value:</strong> ₹ <span id="order-value-display">0.00</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Remarks</h3></div>
+    <div class="field">
+      <textarea name="remarks" rows="4" placeholder="One remark per line, e.g. WE WILL ACCEPT MATERIAL AS PER PO">{{ data.remarks | default('', true) }}</textarea>
+    </div>
+  </div>
+
+  <button type="submit" class="btn btn-primary">{{ 'Save changes' if purchase_order else 'Create purchase order' }}</button>
+  <a href="{{ url_for('purchase_orders.view_purchase_order', purchase_order_id=purchase_order.id) if purchase_order else url_for('purchase_orders.list_purchase_orders') }}" class="btn btn-ghost">Cancel</a>
+</form>
+
+<!-- Product picker modal: flat, searchable product list (same picker the
+     proforma invoice form uses) -->
+<div id="product-picker-overlay" class="modal-overlay" hidden>
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Choose a product</h3>
+      <button type="button" class="btn-link-danger" id="picker-close">✕ Close</button>
+    </div>
+    <div class="field">
+      <input type="text" id="picker-search" placeholder="Search products…" autocomplete="off">
+    </div>
+    <div id="picker-products" class="table-wrap"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  function setUnitValue(sel, u) {
+    if (!u) return;
+    if (!Array.from(sel.options).some((o) => o.value === u)) sel.appendChild(new Option(u, u));
+    sel.value = u;
+  }
+
+  const itemsBody = document.getElementById('items-body');
+  const addRowBtn = document.getElementById('add-row-btn');
+
+  const rowTemplate = () => {
+    const tr = document.createElement('tr');
+    tr.className = 'item-row';
+    tr.innerHTML = `
+      <td class="js-sr"></td>
+      <td>
+        <input type="hidden" name="item_product_id[]" class="js-product-id">
+        <textarea name="item_product_name[]" class="js-product-name" rows="2" required></textarea>
+        <button type="button" class="btn btn-ghost btn-sm js-choose-product">📦 Choose product</button>
+      </td>
+      <td><input type="text" name="item_hsn_code[]" class="js-hsn" readonly tabindex="-1"></td>
+      <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes"></td>
+      <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required></td>
+      <td>
+        <select name="item_unit[]" class="js-unit">
+          {% for u in PRODUCT_UNITS %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
+        </select>
+      </td>
+      <td><input type="number" step="0.01" name="item_price_inr[]" class="js-price" required></td>
+      <td>
+        <select name="item_price_per[]" class="js-price-per">
+          <option value="BOX">BOX</option>
+          <option value="UNIT">Unit</option>
+        </select>
+      </td>
+      <td class="num js-total">0.00</td>
+      <td><button type="button" class="btn-link-danger js-remove-row">Remove</button></td>`;
+    return tr;
+  };
+
+  function renumber() {
+    itemsBody.querySelectorAll('.item-row').forEach((tr, i) => {
+      tr.querySelector('.js-sr').textContent = i + 1;
+    });
+  }
+
+  // Each row totals from whichever basis it prices on: per BOX (Boxes x
+  // Price - the ex-factory norm) or per Unit (Qty x Price).
+  function rowTotal(tr) {
+    const boxes = parseFloat(tr.querySelector('.js-boxes').value) || 0;
+    const qty = parseFloat(tr.querySelector('.js-qty').value) || 0;
+    const price = parseFloat(tr.querySelector('.js-price').value) || 0;
+    const perBox = tr.querySelector('.js-price-per').value === 'BOX';
+    return (perBox ? boxes : qty) * price;
+  }
+
+  function recalcTotals() {
+    let subtotal = 0;
+    itemsBody.querySelectorAll('.item-row').forEach((tr) => {
+      const total = rowTotal(tr);
+      tr.querySelector('.js-total').textContent = total.toFixed(2);
+      subtotal += total;
+    });
+    const igst = parseFloat(document.getElementById('igst_percent').value) || 0;
+    const cgst = parseFloat(document.getElementById('cgst_percent').value) || 0;
+    const sgst = parseFloat(document.getElementById('sgst_percent').value) || 0;
+    const gross = subtotal + subtotal * (igst + cgst + sgst) / 100;
+    const orderValue = Math.round(gross);
+    document.getElementById('subtotal-display').textContent = subtotal.toFixed(2);
+    document.getElementById('roundoff-display').textContent = (orderValue - gross).toFixed(2);
+    document.getElementById('order-value-display').textContent = orderValue.toFixed(2);
+  }
+
+  // Qty auto-fills from Boxes x the row's catalog product's Alternate
+  // Quantity whenever both are known (same auto-calc as the PI form).
+  function recalcRowQty(tr) {
+    const altQty = parseFloat(tr.dataset.altQty);
+    if (!altQty) return;
+    const boxes = parseFloat(tr.querySelector('.js-boxes').value) || 0;
+    if (boxes) tr.querySelector('.js-qty').value = (boxes * altQty).toFixed(2);
+  }
+
+  addRowBtn.addEventListener('click', () => {
+    itemsBody.appendChild(rowTemplate());
+    renumber();
+  });
+
+  itemsBody.addEventListener('click', (e) => {
+    if (e.target.classList.contains('js-remove-row')) {
+      e.target.closest('tr').remove();
+      renumber();
+      recalcTotals();
+    } else if (e.target.classList.contains('js-choose-product')) {
+      openPicker(e.target.closest('tr'));
+    }
+  });
+
+  itemsBody.addEventListener('input', (e) => {
+    if (e.target.classList.contains('js-boxes')) {
+      recalcRowQty(e.target.closest('tr'));
+      recalcTotals();
+    } else if (e.target.classList.contains('js-qty') || e.target.classList.contains('js-price')) {
+      recalcTotals();
+    }
+  });
+  itemsBody.addEventListener('change', (e) => {
+    if (e.target.classList.contains('js-price-per')) recalcTotals();
+  });
+  ['igst_percent', 'cgst_percent', 'sgst_percent'].forEach((id) => {
+    document.getElementById(id).addEventListener('input', recalcTotals);
+  });
+
+  // ---- proforma dropdown prefill (reloads the page with ?proforma_invoice_id=) --------------------------------------------------
+  document.getElementById('proforma_select').addEventListener('change', (e) => {
+    const id = e.target.value;
+    if (!id) return;
+    window.location = '{{ url_for("purchase_orders.new_purchase_order") }}?proforma_invoice_id=' + encodeURIComponent(id);
+  });
+
+  // ---- lead dropdown --------------------------------------------------
+  document.getElementById('lead_select').addEventListener('change', (e) => {
+    document.getElementById('lead_id').value = e.target.value || '';
+  });
+
+  // ---- seller dropdown prefill --------------------------------------------------
+  document.getElementById('seller_select').addEventListener('change', (e) => {
+    const opt = e.target.selectedOptions[0];
+    document.getElementById('seller_client_id').value = opt.value || '';
+    if (!opt.value) return;
+    document.getElementById('seller_name').value = opt.dataset.name || '';
+    document.getElementById('seller_address').value = opt.dataset.address || '';
+  });
+
+  // ---- product picker modal (flat searchable product list) --------------------------------------------------
+  const overlay = document.getElementById('product-picker-overlay');
+  const productsEl = document.getElementById('picker-products');
+  const searchEl = document.getElementById('picker-search');
+  let activeRow = null;
+  let allProducts = [];
+
+  function openPicker(row) {
+    activeRow = row;
+    overlay.hidden = false;
+    searchEl.value = '';
+    fetch('/products/api/list').then(r => r.json()).then(data => {
+      allProducts = data.products;
+      renderProducts();
+    });
+  }
+
+  document.getElementById('picker-close').addEventListener('click', () => { overlay.hidden = true; });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.hidden = true; });
+  searchEl.addEventListener('input', () => renderProducts());
+
+  function renderProducts() {
+    const term = searchEl.value.trim().toLowerCase();
+    const filtered = term
+      ? allProducts.filter(p => (p.name || '').toLowerCase().includes(term) || (p.hsn_code || '').toLowerCase().includes(term))
+      : allProducts;
+    if (filtered.length === 0) {
+      productsEl.innerHTML = '<div class="empty-state">No matching products.</div>';
+      return;
+    }
+    const table = document.createElement('table');
+    table.className = 'ledger';
+    table.innerHTML = '<thead><tr><th>Product</th><th>HSN code</th><th>Alt qty / Unit</th><th></th></tr></thead>';
+    const tbody = document.createElement('tbody');
+    filtered.forEach(p => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong></strong></td>
+        <td class="text-sm">${p.hsn_code || '—'}</td>
+        <td class="text-sm">${p.alternate_quantity ? `${p.alternate_quantity} ${p.alt_quantity_unit || ''}` : '—'}</td>
+        <td><button type="button" class="btn btn-primary btn-sm">Select</button></td>`;
+      tr.querySelector('strong').textContent = p.name;
+      tr.querySelector('button').addEventListener('click', () => selectProduct(p));
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    productsEl.innerHTML = '';
+    productsEl.appendChild(table);
+  }
+
+  function selectProduct(p) {
+    if (!activeRow) return;
+    activeRow.querySelector('.js-product-id').value = p.id;
+    activeRow.querySelector('.js-product-name').value = p.name;
+    activeRow.querySelector('.js-hsn').value = p.hsn_code || '';
+    setUnitValue(activeRow.querySelector('.js-unit'), p.alt_quantity_unit);
+    activeRow.dataset.altQty = parseFloat(p.alternate_quantity) || '';
+    recalcRowQty(activeRow);
+    recalcTotals();
+    overlay.hidden = true;
+  }
+
+  renumber();
+  recalcTotals();
+})();
+</script>
+
+{% endblock %}

@@ -318,6 +318,7 @@ class OurCompany:
     iec: Optional[str]
     bin: Optional[str] = None
     address: Optional[str] = None
+    logo_path: Optional[str] = None  # relative to static/, shown in the app sidebar and on generated documents
     updated_at: Optional[str] = None
     contact_details: List[dict] = field(default_factory=list)  # [{type, value, is_primary}]
     contact_persons: List[dict] = field(default_factory=list)  # [{name, is_primary}]
@@ -335,6 +336,7 @@ class OurCompany:
             iec=row["iec"],
             bin=row["bin"] if "bin" in row.keys() else None,
             address=row["address"] if "address" in row.keys() else None,
+            logo_path=row["logo_path"] if "logo_path" in row.keys() else None,
             updated_at=row["updated_at"],
         )
 
@@ -629,6 +631,151 @@ class Quotation:
 
 
 @dataclass
+class PurchaseOrderItem:
+    """One product line of a purchase order. Prices are INR - typically the
+    ex-factory rate per BOX (price_per='BOX'), but a row can also price per
+    its quantity unit (price_per=<unit>). total_inr is derived at save time
+    from whichever basis the row uses."""
+    id: Optional[int]
+    purchase_order_id: Optional[int]
+    sr_no: int
+    product_name: str
+    product_id: Optional[int] = None
+    hsn_code: Optional[str] = None
+    quantity_boxes: Optional[float] = None
+    quantity_value: float = 0
+    unit: str = "SQM"
+    price_inr: float = 0
+    price_per: str = "BOX"
+    total_inr: float = 0
+
+    @staticmethod
+    def from_row(row) -> "PurchaseOrderItem":
+        return PurchaseOrderItem(
+            id=row["id"],
+            purchase_order_id=row["purchase_order_id"],
+            sr_no=row["sr_no"],
+            product_id=row["product_id"],
+            product_name=row["product_name"],
+            hsn_code=row["hsn_code"],
+            quantity_boxes=row["quantity_boxes"],
+            quantity_value=row["quantity_value"],
+            unit=row["unit"],
+            price_inr=row["price_inr"],
+            price_per=row["price_per"],
+            total_inr=row["total_inr"],
+        )
+
+
+@dataclass
+class PurchaseOrder:
+    """The next document after the Proforma Invoice in the client pipeline.
+    Unlike the other documents, OUR company is the BUYER here and a supplier
+    is the SELLER - so the header carries seller details instead of a
+    consignee, and amounts are INR. Tax percentages are stored; every amount
+    (tax, round-off, order value) is derived, never stored."""
+    id: Optional[int]
+    company_id: int
+    po_number: str
+    po_date: str
+    seller_name: str
+    created_by: int
+    lead_id: Optional[int] = None
+    proforma_invoice_id: Optional[int] = None
+    seller_client_id: Optional[int] = None
+    seller_address: Optional[str] = None
+    seller_pan: Optional[str] = None
+    seller_gstin: Optional[str] = None
+    seller_ref_no: Optional[str] = None
+    port_of_loading: Optional[str] = None
+    port_of_discharge: Optional[str] = None
+    container_details: Optional[str] = None
+    delivery_time: Optional[str] = None
+    advance_percent: Optional[str] = None
+    payment_terms: Optional[str] = None
+    remarks: Optional[str] = None
+    igst_percent: float = 0
+    cgst_percent: float = 0
+    sgst_percent: float = 0
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    created_by_name: Optional[str] = None  # populated by joined queries only
+    proforma_invoice_number: Optional[str] = None  # populated by joined queries only
+    items: List[PurchaseOrderItem] = field(default_factory=list)
+    computed_subtotal_inr: Optional[float] = None  # precomputed by list queries that don't load items
+
+    @staticmethod
+    def from_row(row) -> "PurchaseOrder":
+        return PurchaseOrder(
+            id=row["id"],
+            company_id=row["company_id"],
+            po_number=row["po_number"],
+            po_date=row["po_date"],
+            lead_id=row["lead_id"],
+            proforma_invoice_id=row["proforma_invoice_id"],
+            seller_client_id=row["seller_client_id"],
+            seller_name=row["seller_name"],
+            seller_address=row["seller_address"],
+            seller_pan=row["seller_pan"],
+            seller_gstin=row["seller_gstin"],
+            seller_ref_no=row["seller_ref_no"],
+            port_of_loading=row["port_of_loading"],
+            port_of_discharge=row["port_of_discharge"],
+            container_details=row["container_details"],
+            delivery_time=row["delivery_time"],
+            advance_percent=row["advance_percent"],
+            payment_terms=row["payment_terms"],
+            remarks=row["remarks"],
+            igst_percent=row["igst_percent"],
+            cgst_percent=row["cgst_percent"],
+            sgst_percent=row["sgst_percent"],
+            created_by=row["created_by"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            created_by_name=row["created_by_name"] if "created_by_name" in row.keys() else None,
+            proforma_invoice_number=row["proforma_invoice_number"] if "proforma_invoice_number" in row.keys() else None,
+            computed_subtotal_inr=row["items_total"] if "items_total" in row.keys() else None,
+        )
+
+    @property
+    def total_boxes(self) -> float:
+        return sum(item.quantity_boxes or 0 for item in self.items)
+
+    @property
+    def total_quantity(self) -> float:
+        return sum(item.quantity_value or 0 for item in self.items)
+
+    @property
+    def subtotal_inr(self) -> float:
+        if self.computed_subtotal_inr is not None and not self.items:
+            return self.computed_subtotal_inr
+        return sum(item.total_inr for item in self.items)
+
+    @property
+    def igst_amount(self) -> float:
+        return round(self.subtotal_inr * (self.igst_percent or 0) / 100, 2)
+
+    @property
+    def cgst_amount(self) -> float:
+        return round(self.subtotal_inr * (self.cgst_percent or 0) / 100, 2)
+
+    @property
+    def sgst_amount(self) -> float:
+        return round(self.subtotal_inr * (self.sgst_percent or 0) / 100, 2)
+
+    @property
+    def order_value_inr(self) -> float:
+        """The final order value, rounded to the whole rupee (the round-off
+        line on the printed PO bridges the difference)."""
+        return float(round(self.subtotal_inr + self.igst_amount + self.cgst_amount + self.sgst_amount))
+
+    @property
+    def round_off_inr(self) -> float:
+        gross = self.subtotal_inr + self.igst_amount + self.cgst_amount + self.sgst_amount
+        return round(self.order_value_inr - gross, 2)
+
+
+@dataclass
 class PackingListItem:
     """One design of a product packed in a given quantity. product_name and
     design_name are stored snapshots - product_id/design_id are reference
@@ -683,6 +830,7 @@ class PackingList:
     lead_id: Optional[int] = None
     proforma_invoice_id: Optional[int] = None
     quotation_id: Optional[int] = None
+    purchase_order_id: Optional[int] = None
     export_ref_no: Optional[str] = None
     buyer_order_no: Optional[str] = None
     other_reference: Optional[str] = None
@@ -703,6 +851,7 @@ class PackingList:
     created_by_name: Optional[str] = None  # populated by joined queries only
     proforma_invoice_number: Optional[str] = None  # populated by joined queries only
     quotation_number: Optional[str] = None  # populated by joined queries only
+    purchase_order_number: Optional[str] = None  # populated by joined queries only
     items: List[PackingListItem] = field(default_factory=list)
 
     @staticmethod
@@ -715,6 +864,7 @@ class PackingList:
             lead_id=row["lead_id"],
             proforma_invoice_id=row["proforma_invoice_id"],
             quotation_id=row["quotation_id"] if "quotation_id" in row.keys() else None,
+            purchase_order_id=row["purchase_order_id"] if "purchase_order_id" in row.keys() else None,
             export_ref_no=row["export_ref_no"],
             buyer_order_no=row["buyer_order_no"],
             other_reference=row["other_reference"],
@@ -737,6 +887,7 @@ class PackingList:
             created_by_name=row["created_by_name"] if "created_by_name" in row.keys() else None,
             proforma_invoice_number=row["proforma_invoice_number"] if "proforma_invoice_number" in row.keys() else None,
             quotation_number=row["quotation_number"] if "quotation_number" in row.keys() else None,
+            purchase_order_number=row["purchase_order_number"] if "purchase_order_number" in row.keys() else None,
         )
 
     @property
