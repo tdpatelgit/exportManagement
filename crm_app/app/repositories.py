@@ -20,6 +20,7 @@ from app.models import (
     Tenant, User, Lead, Client, ContactPerson, Communication,
     PaymentEntry, DocumentEntry, OurCompany, Category, Product, ProductPalletType, ProductFolder, Design,
     Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
+    PurchaseOrder, PurchaseOrderItem,
     PackingList, PackingListItem, DocumentVersion,
 )
 
@@ -527,6 +528,13 @@ class CompanyRepository:
             "INSERT INTO our_company (company_id, company_name, address, gstin, pan_no, iec, bin) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (company_id, company_name, address, gstin, pan_no, iec, bin_no),
+        )
+
+    def set_logo(self, our_company_id: int, logo_path: Optional[str]) -> None:
+        """logo_path is relative to static/ (None clears the logo)."""
+        self.db.execute(
+            "UPDATE our_company SET logo_path = ?, updated_at = datetime('now') WHERE id = ?",
+            (logo_path, our_company_id),
         )
 
     def replace_lut_details(self, our_company_id: int, lut_details: list) -> None:
@@ -1168,6 +1176,144 @@ class ProformaInvoiceRepository:
         self.db.execute("DELETE FROM proforma_invoices WHERE id = ?", (invoice_id,))
 
 
+class PurchaseOrderRepository:
+    """Mirrors ProformaInvoiceRepository layer-for-layer: header + line
+    items, day-scoped number sequence, reference-only lead/proforma links."""
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    def count_for_date_prefix(self, company_id: int, number_prefix: str) -> int:
+        row = self.db.query_one(
+            "SELECT COUNT(*) AS cnt FROM purchase_orders WHERE company_id = ? AND po_number LIKE ?",
+            (company_id, f"{number_prefix}%"),
+        )
+        return row["cnt"] if row else 0
+
+    # {items_total} slot lets list queries add a precomputed per-PO subtotal
+    # without repeating the join block.
+    _SELECT = """
+        SELECT po.*, u.full_name AS created_by_name, pi.invoice_number AS proforma_invoice_number{items_total}
+        FROM purchase_orders po
+        JOIN users u ON u.id = po.created_by
+        LEFT JOIN proforma_invoices pi ON pi.id = po.proforma_invoice_id
+    """
+    _ITEMS_TOTAL = (", COALESCE((SELECT SUM(total_inr) FROM purchase_order_items "
+                    "WHERE purchase_order_id = po.id), 0) AS items_total")
+
+    def get_by_id(self, purchase_order_id: int) -> Optional[PurchaseOrder]:
+        row = self.db.query_one(
+            self._SELECT.format(items_total="") + " WHERE po.id = ?", (purchase_order_id,)
+        )
+        if not row:
+            return None
+        purchase_order = PurchaseOrder.from_row(row)
+        item_rows = self.db.query(
+            "SELECT * FROM purchase_order_items WHERE purchase_order_id = ? ORDER BY sr_no", (purchase_order_id,)
+        )
+        purchase_order.items = [PurchaseOrderItem.from_row(r) for r in item_rows]
+        return purchase_order
+
+    def list_all(self, company_id: int) -> List[PurchaseOrder]:
+        rows = self.db.query(
+            self._SELECT.format(items_total=self._ITEMS_TOTAL) +
+            " WHERE po.company_id = ? ORDER BY po.po_date DESC, po.id DESC",
+            (company_id,),
+        )
+        return [PurchaseOrder.from_row(r) for r in rows]
+
+    def list_for_lead(self, lead_id: int) -> List[PurchaseOrder]:
+        """Same 'reference-only' join pattern as QuotationRepository.list_for_lead -
+        a converted client sees its purchase orders through its originating lead_id."""
+        rows = self.db.query(
+            self._SELECT.format(items_total=self._ITEMS_TOTAL) +
+            " WHERE po.lead_id = ? ORDER BY po.po_date DESC, po.id DESC",
+            (lead_id,),
+        )
+        return [PurchaseOrder.from_row(r) for r in rows]
+
+    def list_for_proforma(self, proforma_invoice_id: int) -> List[PurchaseOrder]:
+        """Every purchase order generated from this proforma invoice, newest
+        first - used to link back to an already-generated PO instead of
+        starting a duplicate one."""
+        rows = self.db.query(
+            self._SELECT.format(items_total="") + " WHERE po.proforma_invoice_id = ? ORDER BY po.id DESC",
+            (proforma_invoice_id,),
+        )
+        return [PurchaseOrder.from_row(r) for r in rows]
+
+    def map_by_proforma(self, company_id: int) -> dict:
+        """proforma_invoice_id -> most recently created purchase_order id, for
+        this company. Powers the proforma list page's "View PO" link."""
+        rows = self.db.query(
+            "SELECT proforma_invoice_id, id FROM purchase_orders "
+            "WHERE company_id = ? AND proforma_invoice_id IS NOT NULL ORDER BY id",
+            (company_id,),
+        )
+        result = {}
+        for row in rows:
+            result[row["proforma_invoice_id"]] = row["id"]
+        return result
+
+    def create(self, purchase_order: PurchaseOrder) -> PurchaseOrder:
+        new_id = self.db.execute(
+            """INSERT INTO purchase_orders
+               (company_id, po_number, po_date, lead_id, proforma_invoice_id, seller_client_id,
+                seller_name, seller_address, seller_pan, seller_gstin, seller_ref_no,
+                port_of_loading, port_of_discharge, container_details, delivery_time,
+                advance_percent, payment_terms, remarks, igst_percent, cgst_percent, sgst_percent,
+                created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (purchase_order.company_id, purchase_order.po_number, purchase_order.po_date,
+             purchase_order.lead_id, purchase_order.proforma_invoice_id, purchase_order.seller_client_id,
+             purchase_order.seller_name, purchase_order.seller_address, purchase_order.seller_pan,
+             purchase_order.seller_gstin, purchase_order.seller_ref_no, purchase_order.port_of_loading,
+             purchase_order.port_of_discharge, purchase_order.container_details, purchase_order.delivery_time,
+             purchase_order.advance_percent, purchase_order.payment_terms, purchase_order.remarks,
+             purchase_order.igst_percent, purchase_order.cgst_percent, purchase_order.sgst_percent,
+             purchase_order.created_by),
+        )
+        self._replace_items(new_id, purchase_order.items)
+        return self.get_by_id(new_id)
+
+    def update(self, purchase_order_id: int, purchase_order: PurchaseOrder) -> None:
+        self.db.execute(
+            """UPDATE purchase_orders SET po_date = ?, lead_id = ?, proforma_invoice_id = ?,
+                                           seller_client_id = ?, seller_name = ?, seller_address = ?,
+                                           seller_pan = ?, seller_gstin = ?, seller_ref_no = ?,
+                                           port_of_loading = ?, port_of_discharge = ?, container_details = ?,
+                                           delivery_time = ?, advance_percent = ?, payment_terms = ?,
+                                           remarks = ?, igst_percent = ?, cgst_percent = ?, sgst_percent = ?,
+                                           updated_at = datetime('now')
+               WHERE id = ?""",
+            (purchase_order.po_date, purchase_order.lead_id, purchase_order.proforma_invoice_id,
+             purchase_order.seller_client_id, purchase_order.seller_name, purchase_order.seller_address,
+             purchase_order.seller_pan, purchase_order.seller_gstin, purchase_order.seller_ref_no,
+             purchase_order.port_of_loading, purchase_order.port_of_discharge, purchase_order.container_details,
+             purchase_order.delivery_time, purchase_order.advance_percent, purchase_order.payment_terms,
+             purchase_order.remarks, purchase_order.igst_percent, purchase_order.cgst_percent,
+             purchase_order.sgst_percent, purchase_order_id),
+        )
+        self._replace_items(purchase_order_id, purchase_order.items)
+
+    def _replace_items(self, purchase_order_id: int, items: List[PurchaseOrderItem]) -> None:
+        with self.db.get_connection() as conn:
+            conn.execute("DELETE FROM purchase_order_items WHERE purchase_order_id = ?", (purchase_order_id,))
+            for item in items:
+                conn.execute(
+                    """INSERT INTO purchase_order_items
+                       (purchase_order_id, sr_no, product_id, product_name, hsn_code,
+                        quantity_boxes, quantity_value, unit, price_inr, price_per, total_inr)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (purchase_order_id, item.sr_no, item.product_id, item.product_name, item.hsn_code,
+                     item.quantity_boxes, item.quantity_value, item.unit, item.price_inr,
+                     item.price_per, item.total_inr),
+                )
+
+    def delete(self, purchase_order_id: int) -> None:
+        self.db.execute("DELETE FROM purchase_orders WHERE id = ?", (purchase_order_id,))
+
+
 class PackingListRepository:
     """Mirrors ProformaInvoiceRepository layer-for-layer: header + line
     items, day-scoped number sequence, reference-only lead link."""
@@ -1184,11 +1330,12 @@ class PackingListRepository:
 
     _SELECT = """
         SELECT pl.*, u.full_name AS created_by_name, pi.invoice_number AS proforma_invoice_number,
-               q.quotation_number AS quotation_number
+               q.quotation_number AS quotation_number, po.po_number AS purchase_order_number
         FROM packing_lists pl
         JOIN users u ON u.id = pl.created_by
         LEFT JOIN proforma_invoices pi ON pi.id = pl.proforma_invoice_id
         LEFT JOIN quotations q ON q.id = pl.quotation_id
+        LEFT JOIN purchase_orders po ON po.id = pl.purchase_order_id
     """
 
     def get_by_id(self, packing_list_id: int) -> Optional[PackingList]:
@@ -1247,18 +1394,29 @@ class PackingListRepository:
         )
         return self._attach_items([PackingList.from_row(r) for r in rows])
 
+    def list_for_purchase_order(self, purchase_order_id: int) -> List[PackingList]:
+        """Every packing list generated from one purchase order (the PO's own
+        PL) - drives the combined PO + packing details print view, same as
+        list_for_proforma."""
+        rows = self.db.query(
+            self._SELECT + " WHERE pl.purchase_order_id = ? ORDER BY pl.id",
+            (purchase_order_id,),
+        )
+        return self._attach_items([PackingList.from_row(r) for r in rows])
+
     def create(self, packing_list: PackingList) -> PackingList:
         new_id = self.db.execute(
             """INSERT INTO packing_lists
                (company_id, packing_list_number, packing_list_date, lead_id, proforma_invoice_id,
-                quotation_id, export_ref_no, buyer_order_no, other_reference, consignee_name, consignee_address,
+                quotation_id, purchase_order_id, export_ref_no, buyer_order_no, other_reference,
+                consignee_name, consignee_address,
                 notify_name, notify_address, country_of_origin, country_of_destination, vessel_flight,
                 port_of_loading, port_of_discharge, final_destination, container_details,
                 terms_of_delivery, remarks, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (packing_list.company_id, packing_list.packing_list_number, packing_list.packing_list_date,
              packing_list.lead_id, packing_list.proforma_invoice_id, packing_list.quotation_id,
-             packing_list.export_ref_no,
+             packing_list.purchase_order_id, packing_list.export_ref_no,
              packing_list.buyer_order_no, packing_list.other_reference, packing_list.consignee_name,
              packing_list.consignee_address, packing_list.notify_name, packing_list.notify_address,
              packing_list.country_of_origin, packing_list.country_of_destination,
@@ -1272,7 +1430,7 @@ class PackingListRepository:
     def update(self, packing_list_id: int, packing_list: PackingList) -> None:
         self.db.execute(
             """UPDATE packing_lists SET packing_list_date = ?, lead_id = ?, proforma_invoice_id = ?,
-                                         quotation_id = ?,
+                                         quotation_id = ?, purchase_order_id = ?,
                                          export_ref_no = ?, buyer_order_no = ?, other_reference = ?,
                                          consignee_name = ?, consignee_address = ?, notify_name = ?,
                                          notify_address = ?, country_of_origin = ?, country_of_destination = ?,
@@ -1281,7 +1439,7 @@ class PackingListRepository:
                                          remarks = ?, updated_at = datetime('now')
                WHERE id = ?""",
             (packing_list.packing_list_date, packing_list.lead_id, packing_list.proforma_invoice_id,
-             packing_list.quotation_id,
+             packing_list.quotation_id, packing_list.purchase_order_id,
              packing_list.export_ref_no, packing_list.buyer_order_no, packing_list.other_reference,
              packing_list.consignee_name, packing_list.consignee_address, packing_list.notify_name,
              packing_list.notify_address, packing_list.country_of_origin,

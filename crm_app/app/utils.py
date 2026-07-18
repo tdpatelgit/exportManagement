@@ -90,12 +90,48 @@ def amount_in_words(amount, currency_label: str = "US DOLLARS") -> str:
     return words + " ONLY"
 
 
+_INR_SCALES = [(10_000_000, "CRORE"), (100_000, "LAKH"), (1_000, "THOUSAND")]
+
+
+def number_to_words_indian(n: int) -> str:
+    """Like number_to_words but with the Indian crore/lakh grouping - the
+    style INR purchase orders spell their order value in."""
+    if n == 0:
+        return "ZERO"
+    words = []
+    remaining = n
+    for value, name in _INR_SCALES:
+        if remaining >= value:
+            count = remaining // value
+            words.append(f"{_three_digit_words(count)} {name}")
+            remaining %= value
+    if remaining > 0:
+        words.append(_three_digit_words(remaining))
+    return " ".join(words)
+
+
+def inr_in_words(amount) -> str:
+    """e.g. 383833 -> 'THREE LAKH EIGHTY-THREE THOUSAND EIGHT HUNDRED
+    THIRTY-THREE INR ONLY' - used by the printed Purchase Order."""
+    amount = round(float(amount or 0), 2)
+    whole = int(amount)
+    paise = int(round((amount - whole) * 100))
+    words = number_to_words_indian(whole)
+    if paise:
+        words += f" AND PAISE {number_to_words_indian(paise)}"
+    return words + " INR ONLY"
+
+
 def register_template_helpers(app):
     """Small, presentation-only helpers exposed to every Jinja template."""
 
     @app.template_filter("amount_in_words")
     def amount_in_words_filter(value):
         return amount_in_words(value)
+
+    @app.template_filter("inr_in_words")
+    def inr_in_words_filter(value):
+        return inr_in_words(value)
 
     @app.template_filter("long_date")
     def long_date(value):

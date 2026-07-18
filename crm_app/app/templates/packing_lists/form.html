@@ -16,6 +16,15 @@
     <div class="card-header"><h3>Start from</h3></div>
     <div class="form-row">
       <div class="field">
+        <label for="purchase_order_select">Prefill from an existing purchase order <span class="text-soft text-sm">(optional)</span></label>
+        <select id="purchase_order_select">
+          <option value="">— Select a purchase order —</option>
+          {% for po in purchase_orders %}
+            <option value="{{ po.id }}" {{ 'selected' if data and data.purchase_order_id | string == po.id | string }}>{{ po.po_number }} — {{ po.seller_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
         <label for="proforma_select">Prefill from an existing proforma invoice <span class="text-soft text-sm">(optional)</span></label>
         <select id="proforma_select">
           <option value="">— Select a proforma invoice —</option>
@@ -43,10 +52,11 @@
         </select>
       </div>
     </div>
-    <p class="hint">Choosing a proforma invoice or a quotation reloads this page with one starting row per product — you then pick the design for each row and split the quantities into smaller, per-design amounts.</p>
+    <p class="hint">Choosing a proforma invoice or a quotation reloads this page with one starting row per product — you then pick the design for each row and split the quantities into smaller, per-design amounts. Choosing a purchase order does the same, and when that PO was generated from a proforma that already has a packing list, its design rows are imported ready-filled.</p>
     <input type="hidden" name="lead_id" id="lead_id" value="{{ data.lead_id | default('', true) }}">
     <input type="hidden" name="proforma_invoice_id" id="proforma_invoice_id" value="{{ data.proforma_invoice_id | default('', true) }}">
     <input type="hidden" name="quotation_id" id="quotation_id" value="{{ data.quotation_id | default('', true) }}">
+    <input type="hidden" name="purchase_order_id" id="purchase_order_id" value="{{ data.purchase_order_id | default('', true) }}">
   </div>
 
   <div class="card">
@@ -518,6 +528,13 @@
       block.querySelectorAll('.design-row').forEach((row) => recalcRow(row));
       recalcTotals();
     }
+  });
+
+  // ---- purchase order dropdown prefill (reloads the page with ?purchase_order_id=) --------------------------------------------------
+  document.getElementById('purchase_order_select').addEventListener('change', (e) => {
+    const id = e.target.value;
+    if (!id) return;
+    window.location = '{{ url_for("packing_lists.new_packing_list") }}?purchase_order_id=' + encodeURIComponent(id);
   });
 
   // ---- proforma dropdown prefill (reloads the page with ?proforma_invoice_id=) --------------------------------------------------

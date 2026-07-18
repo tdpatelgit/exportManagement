@@ -31,6 +31,11 @@
       {% else %}
       <a href="{{ url_for('packing_lists.new_packing_list', proforma_invoice_id=invoice.id) }}" class="btn btn-ghost btn-sm">📦 Create packing list</a>
       {% endif %}
+      {% if purchase_order %}
+      <a href="{{ url_for('purchase_orders.view_purchase_order', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">🧾 View purchase order</a>
+      {% else %}
+      <a href="{{ url_for('purchase_orders.new_purchase_order', proforma_invoice_id=invoice.id) }}" class="btn btn-ghost btn-sm">🧾 Generate purchase order</a>
+      {% endif %}
       <a href="{{ url_for('proforma_invoices.edit_proforma_invoice', proforma_invoice_id=invoice.id) }}" class="btn btn-ghost btn-sm">Edit</a>
       {% if current_user.is_admin %}
       <a href="{{ url_for('proforma_invoices.proforma_invoice_versions', proforma_invoice_id=invoice.id) }}" class="btn btn-ghost btn-sm">Version history</a>

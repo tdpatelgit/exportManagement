@@ -179,6 +179,7 @@ CREATE TABLE IF NOT EXISTS our_company (
     pan_no          TEXT,
     iec             TEXT,
     bin             TEXT,
+    logo_path       TEXT,       -- company logo, relative to static/ (shown in the app sidebar and on generated documents)
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -424,6 +425,60 @@ CREATE TABLE IF NOT EXISTS proforma_invoice_items (
 );
 
 -- ============================================================
+-- PURCHASE ORDERS  (header + line items, number generated as
+-- PO{YYYYMMDD}{seq-of-that-day} per company. The next document after the
+-- Proforma Invoice in the client pipeline: OUR company is the BUYER and a
+-- supplier is the SELLER, prices are in INR (typically ex-factory per box).
+-- Can be started from an existing proforma invoice - proforma_invoice_id is
+-- a "generated from" reference only, same pattern as
+-- proforma_invoices.quotation_id. Tax percentages are stored; the amounts,
+-- round-off and final order value are always derived from the items.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS purchase_orders (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id              INTEGER NOT NULL REFERENCES tenants(id),
+    po_number               TEXT NOT NULL,
+    po_date                 TEXT NOT NULL,
+    lead_id                 INTEGER REFERENCES leads(id),               -- optional, prefill/reference only
+    proforma_invoice_id     INTEGER REFERENCES proforma_invoices(id),   -- optional, "generated from" reference only
+    seller_client_id        INTEGER REFERENCES clients(id),             -- optional, the Supplier client picked as seller
+    seller_name             TEXT NOT NULL,
+    seller_address          TEXT,
+    seller_pan              TEXT,
+    seller_gstin            TEXT,
+    seller_ref_no           TEXT,
+    port_of_loading         TEXT,
+    port_of_discharge       TEXT,
+    container_details       TEXT,
+    delivery_time           TEXT,          -- e.g. "20 DAY FROM PO DATE"
+    advance_percent         TEXT,          -- e.g. "0%" - free text half of the payment terms block
+    payment_terms           TEXT,          -- e.g. "40 DAYS AGAINST INVOICE DATE 100%"
+    remarks                 TEXT,
+    igst_percent            REAL NOT NULL DEFAULT 0,
+    cgst_percent            REAL NOT NULL DEFAULT 0,
+    sgst_percent            REAL NOT NULL DEFAULT 0,
+    created_by              INTEGER NOT NULL REFERENCES users(id),
+    created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (company_id, po_number)
+);
+
+CREATE TABLE IF NOT EXISTS purchase_order_items (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_order_id   INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+    sr_no               INTEGER NOT NULL,
+    product_id          INTEGER REFERENCES products(id) ON DELETE SET NULL,   -- optional, just for prefill/reference
+    product_name        TEXT NOT NULL,
+    hsn_code            TEXT,
+    quantity_boxes      REAL,
+    quantity_value      REAL NOT NULL DEFAULT 0,
+    unit                TEXT NOT NULL DEFAULT 'SQM',
+    price_inr           REAL NOT NULL DEFAULT 0,
+    price_per           TEXT NOT NULL DEFAULT 'BOX',   -- what price_inr is per: 'BOX' or the row's unit
+    total_inr           REAL NOT NULL DEFAULT 0
+);
+
+-- ============================================================
 -- PACKING LISTS  (header + line items, number generated as
 -- PL{YYYYMMDD}{seq-of-that-day} per company. Normally started from an
 -- existing proforma invoice, but can also be started directly from a
@@ -440,6 +495,7 @@ CREATE TABLE IF NOT EXISTS packing_lists (
     lead_id                 INTEGER REFERENCES leads(id),               -- optional, prefill/reference only
     proforma_invoice_id     INTEGER REFERENCES proforma_invoices(id),   -- optional, "generated from" reference only
     quotation_id            INTEGER REFERENCES quotations(id),         -- optional, "generated from" reference only (skips the PI step)
+    purchase_order_id       INTEGER REFERENCES purchase_orders(id),    -- optional, "generated from" reference only (the PO's own PL)
     export_ref_no           TEXT,
     buyer_order_no          TEXT,
     other_reference         TEXT,
@@ -493,7 +549,7 @@ CREATE TABLE IF NOT EXISTS packing_list_items (
 CREATE TABLE IF NOT EXISTS document_versions (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     company_id          INTEGER NOT NULL REFERENCES tenants(id),
-    document_type       TEXT NOT NULL,   -- 'quotation' | 'proforma_invoice' | 'packing_list'
+    document_type       TEXT NOT NULL,   -- 'quotation' | 'proforma_invoice' | 'purchase_order' | 'packing_list'
     document_id         INTEGER NOT NULL,
     version_number      INTEGER NOT NULL,
     document_number     TEXT NOT NULL,   -- snapshot of quotation_number/invoice_number/packing_list_number, for display
@@ -528,6 +584,10 @@ CREATE INDEX IF NOT EXISTS idx_proforma_invoices_created_by ON proforma_invoices
 CREATE INDEX IF NOT EXISTS idx_proforma_invoices_date ON proforma_invoices(invoice_date);
 CREATE INDEX IF NOT EXISTS idx_proforma_invoice_items_invoice ON proforma_invoice_items(proforma_invoice_id);
 CREATE INDEX IF NOT EXISTS idx_proforma_invoices_company ON proforma_invoices(company_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_company ON purchase_orders(company_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_created_by ON purchase_orders(created_by);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_date ON purchase_orders(po_date);
+CREATE INDEX IF NOT EXISTS idx_purchase_order_items_po ON purchase_order_items(purchase_order_id);
 CREATE INDEX IF NOT EXISTS idx_packing_lists_company ON packing_lists(company_id);
 CREATE INDEX IF NOT EXISTS idx_packing_lists_created_by ON packing_lists(created_by);
 CREATE INDEX IF NOT EXISTS idx_packing_lists_date ON packing_lists(packing_list_date);

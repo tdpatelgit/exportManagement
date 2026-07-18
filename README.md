@@ -275,3 +275,5 @@ Straight from the brief, in the order they make sense to build:
   bump `SCHEMA_VERSION` and add a data-preserving step to `_migrate()` (never
   drop rows)** to keep old backups integrable. See the comment above
   `SCHEMA_VERSION` for the exact recipe.
+
+

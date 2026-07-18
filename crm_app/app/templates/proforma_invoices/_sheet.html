@@ -91,6 +91,10 @@
     <tr>
       <td class="pi-side" rowspan="4">EXPORTER</td>
       <td rowspan="3" style="border-bottom:none;">
+        {% if company and company.logo_path %}
+        <img src="{{ url_for('static', filename=company.logo_path) }}" alt="{{ company.company_name }} logo"
+             style="float:right; max-width:90px; max-height:48px; object-fit:contain; margin-left:6px;">
+        {% endif %}
         <span class="pi-val">{{ company.company_name|upper if company else '' }}</span><br>
         <span class="pi-val">{{ (company.address or '')|upper|replace('\n', '<br>')|safe if company else '' }}</span>
         {% if company and company.gstin %}<br><span class="pi-val">GSTIN : {{ company.gstin }}</span>{% endif %}

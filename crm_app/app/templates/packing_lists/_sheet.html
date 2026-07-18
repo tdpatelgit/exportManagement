@@ -49,9 +49,16 @@
 
     <tr><td class="pk-title" colspan="13">&lt; &lt; &lt; &lt; &lt; &nbsp;PACKING DETAILS&nbsp; &gt; &gt; &gt; &gt; &gt;</td></tr>
 
+    {% if packing_list.purchase_order_id %}
+      {% set pk_src_label, pk_src_number = 'PURCHASE ORDER NO', packing_list.purchase_order_number %}
+    {% elif packing_list.quotation_id and not packing_list.proforma_invoice_id %}
+      {% set pk_src_label, pk_src_number = 'QUOTATION NO', packing_list.quotation_number %}
+    {% else %}
+      {% set pk_src_label, pk_src_number = 'PROFORMA INVOICE NO', packing_list.proforma_invoice_number %}
+    {% endif %}
     <tr>
-      <td class="pk-label pk-left" colspan="2">{{ 'QUOTATION NO' if packing_list.quotation_id and not packing_list.proforma_invoice_id else 'PROFORMA INVOICE NO' }}</td>
-      <td class="pk-label" colspan="3">{{ (packing_list.quotation_number if packing_list.quotation_id and not packing_list.proforma_invoice_id else packing_list.proforma_invoice_number) or '-' }}</td>
+      <td class="pk-label pk-left" colspan="2">{{ pk_src_label }}</td>
+      <td class="pk-label" colspan="3">{{ pk_src_number or '-' }}</td>
       <td class="pk-label">DATE</td>
       <td class="pk-label" colspan="7">{{ packing_list.packing_list_date | long_date }}</td>
     </tr>

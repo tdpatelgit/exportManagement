@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ purchase_order.po_number }} · Purchase Order</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    @media print {
+      @page { size: A4 portrait; margin: 6mm; }
+      body { background: #fff !important; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body class="quote-print-body">
+
+  {% if historical_version %}
+  <div class="quote-toolbar no-print" style="background:#fff4d6;">
+    <div>Viewing <strong>version {{ historical_version.version_number }}</strong> of {{ purchase_order.po_number }} - saved {{ historical_version.created_at | friendly_date }} by {{ historical_version.changed_by_name }}. Read-only.</div>
+    <a href="{{ url_for('purchase_orders.view_purchase_order', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">View current version →</a>
+  </div>
+  {% endif %}
+
+  <div class="quote-toolbar no-print">
+    <a href="{{ url_for('purchase_orders.list_purchase_orders') }}" class="btn btn-ghost btn-sm">← All purchase orders</a>
+    <div class="flex gap-8">
+      {% if not historical_version %}
+      {% if packing_lists %}
+      <a href="{{ url_for('packing_lists.view_packing_list', packing_list_id=packing_lists[0].id) }}" class="btn btn-ghost btn-sm">📦 View packing list</a>
+      {% else %}
+      <a href="{{ url_for('packing_lists.new_packing_list', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">📦 Create packing list</a>
+      {% endif %}
+      <a href="{{ url_for('purchase_orders.edit_purchase_order', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">Edit</a>
+      {% if current_user.is_admin %}
+      <a href="{{ url_for('purchase_orders.purchase_order_versions', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">Version history</a>
+      {% endif %}
+      <form method="POST" action="{{ url_for('purchase_orders.delete_purchase_order', purchase_order_id=purchase_order.id) }}" onsubmit="return confirm('Delete this purchase order?');">
+        <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+      </form>
+      <a href="{{ url_for('purchase_orders.combined_purchase_order', purchase_order_id=purchase_order.id) }}" class="btn btn-primary btn-sm">🖨 Generate combined document</a>
+      {% endif %}
+      <button type="button" class="btn btn-primary btn-sm" onclick="window.print()">🖨 Generate PO only</button>
+    </div>
+  </div>
+
+  {% include 'purchase_orders/_sheet.html' %}
+
+</body>
+</html>
