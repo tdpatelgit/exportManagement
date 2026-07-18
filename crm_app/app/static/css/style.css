@@ -488,14 +488,22 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
 .quote-meta-table { width: 100%; border-collapse: collapse; border: 1px solid var(--color-ink); margin-bottom: 16px; }
 .quote-meta-table td { border: 1px solid var(--color-line-dark); padding: 6px 9px; vertical-align: top; }
 .quote-side-label {
-  writing-mode: vertical-rl; transform: rotate(180deg); text-align: center;
+  text-align: center; vertical-align: middle;
   font-weight: 700; font-size: .5975rem; letter-spacing: .08em; background: var(--color-paper); width: 26px;
 }
+/* The rotation must live on an inner span, never on the <td> itself:
+   Chromium's print/PDF rasterizer drops the collapsed table borders owned by
+   a transformed cell, which erased the top/left border of the EXPORTER and
+   IMPORTER cells in downloaded PDFs (screen rendering was unaffected). */
+.quote-side-label span {
+  display: inline-block; writing-mode: vertical-rl; transform: rotate(180deg);
+}
 .quote-side-label-upright {
-  writing-mode: horizontal-tb; transform: none; text-align: center;
+  text-align: center;
   font-weight: 700; font-size: .5975rem; letter-spacing: normal; line-height: 1.3;
   background: var(--color-paper); width: 78px;
 }
+.quote-side-label-upright span { writing-mode: horizontal-tb; transform: none; }
 .quote-block { width: 40%; }
 .quote-field-label { font-weight: 600; font-size: .5975rem; text-transform: uppercase; color: var(--color-text-soft); width: 26%; background: var(--color-paper); }
 .quote-field-value { font-weight: 500; }
@@ -554,6 +562,17 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
   .quote-remarks {
     border-color: var(--color-ink) !important;
   }
+  /* Stretch the main quotation sheet to a full A4 page: the items table
+     absorbs the leftover height (flex: 1) and each product row carries a
+     percentage height (set inline by the template), so with fewer than the
+     maximum products the rows thicken until the sheet fills the page.
+     278mm fits inside both print.html (8mm @page margin) and
+     print_combined.html (6mm). The annexure sheet is deliberately excluded. */
+  .quote-fill-sheet {
+    display: flex; flex-direction: column;
+    height: 278mm; box-sizing: border-box;
+  }
+  .quote-fill-sheet .quote-items-table { flex: 1 1 auto; }
 }
 
 .login-shell {
