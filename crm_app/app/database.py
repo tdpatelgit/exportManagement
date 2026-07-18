@@ -41,7 +41,7 @@ from datetime import datetime
 # Because `_migrate` is idempotent and runs on every startup AND on every
 # restore, any backup - however old - is carried forward through the whole
 # chain of steps, never discarded.
-SCHEMA_VERSION = 10  # v10: products.packing (single boxes-per-pallet figure) becomes the product_pallet_types table - a named LIST of pallet storage options per product; existing values migrate to one type named 'pallet'
+SCHEMA_VERSION = 11  # v11: each product quantity gets its own unit - quantity_unit (new, 'PCS' for existing rows) and alternate_quantity_unit (renamed from `unit`). v10: products.packing became the product_pallet_types table (a named LIST of pallet storage options; existing values migrated to one type named 'pallet')
 
 
 class Database:
@@ -611,6 +611,20 @@ class Database:
                             (row["company_id"], row["id"], boxes),
                         )
                 conn.execute("ALTER TABLE products DROP COLUMN packing")
+
+            # ---- v11: EACH PRODUCT QUANTITY GETS ITS OWN UNIT ----
+            # The product spec is now (quantity unit, quantity) +
+            # (alt quantity unit, alt quantity) + pallet types. `unit` only
+            # ever described the alternate quantity (it prefills the Unit
+            # column on document lines), so it's renamed to
+            # alternate_quantity_unit - the rename is also the one-shot
+            # guard. quantity was always a pcs-per-box figure, so existing
+            # rows get quantity_unit = 'PCS'.
+            products_existing = {r["name"] for r in conn.execute("PRAGMA table_info(products)")}
+            if products_existing and "unit" in products_existing:
+                conn.execute("ALTER TABLE products RENAME COLUMN unit TO alternate_quantity_unit")
+            if products_existing and "quantity_unit" not in products_existing:
+                conn.execute("ALTER TABLE products ADD COLUMN quantity_unit TEXT NOT NULL DEFAULT 'PCS'")
 
     def _backup_db_file(self, tag: str) -> None:
         """Copies the live DB file into instance/backups/ before a

@@ -69,8 +69,8 @@
       Loose (no pallets)
       {%- for pt in pallet_types %} · {{ pt.name }} ({{ pt.boxes_per_pallet | int if pt.boxes_per_pallet == (pt.boxes_per_pallet | int) else pt.boxes_per_pallet }} boxes){% endfor %}
     </div></div>
-    <div><div class="text-sm text-soft">Quantity</div><div>{{ product.quantity or '—' }}</div></div>
-    <div><div class="text-sm text-soft">Alternate quantity</div><div>{{ product.alternate_quantity or '—' }}{% if product.alternate_quantity %} {{ product.unit }}{% endif %}</div></div>
+    <div><div class="text-sm text-soft">Quantity</div><div>{{ product.quantity or '—' }}{% if product.quantity %} {{ product.quantity_unit }}{% endif %}</div></div>
+    <div><div class="text-sm text-soft">Alt quantity</div><div>{{ product.alternate_quantity or '—' }}{% if product.alternate_quantity %} {{ product.alternate_quantity_unit }}{% endif %}</div></div>
     <div><div class="text-sm text-soft">Net weight / box</div><div>{{ (product.net_weight_kg ~ ' KG') if product.net_weight_kg is not none else '—' }}</div></div>
     <div><div class="text-sm text-soft">Gross weight / box</div><div>{{ (product.gross_weight_kg ~ ' KG') if product.gross_weight_kg is not none else '—' }}</div></div>
   </div>

@@ -248,9 +248,10 @@ CREATE TABLE IF NOT EXISTS products (
     igst_percent        REAL,           -- the only tax input; SGST/CGST are stored as half of it
     sgst_percent        REAL,
     cgst_percent        REAL,
-    quantity            TEXT,
+    quantity_unit       TEXT NOT NULL DEFAULT 'PCS',   -- what `quantity` is measured in
+    quantity            TEXT,           -- per-box quantity (e.g. pcs per box)
+    alternate_quantity_unit TEXT NOT NULL DEFAULT 'SQM',  -- what `alternate_quantity` is measured in; prefills document lines' Unit column
     alternate_quantity  TEXT,           -- per-box quantity, drives the Boxes x AltQty auto-calc
-    unit                TEXT NOT NULL DEFAULT 'SQM',   -- what the quantity is measured in; prefills document lines
     weight_class        TEXT,
     net_weight_kg       REAL,           -- net weight per box (KG); drives the packing list's Boxes x weight auto-calc
     gross_weight_kg     REAL,           -- gross weight per box (KG); same auto-calc as net_weight_kg

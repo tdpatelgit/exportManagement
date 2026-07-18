@@ -805,7 +805,8 @@ class ProductService:
 
     def create_product(self, current_user: User, product_name: str, description: str,
                         hsn_code: str, igst_percent: str, quantity: str,
-                        alternate_quantity: str, unit: str,
+                        alternate_quantity: str, quantity_unit: str = "",
+                        alternate_quantity_unit: str = "",
                         net_weight_kg: str = "", gross_weight_kg: str = "",
                         pallet_types: Optional[list] = None,
                         category_id=None) -> Product:
@@ -818,8 +819,10 @@ class ProductService:
             id=None, company_id=current_user.company_id, product_name=product_name.strip(),
             category_id=self._parse_category_id(current_user.company_id, category_id),
             description=description or None, hsn_code=hsn_code or None,
+            quantity_unit=self._parse_unit(quantity_unit, default="PCS"),
             quantity=quantity or None,
-            alternate_quantity=alternate_quantity or None, unit=self._parse_unit(unit),
+            alternate_quantity_unit=self._parse_unit(alternate_quantity_unit, default="SQM"),
+            alternate_quantity=alternate_quantity or None,
             net_weight_kg=self._parse_weight("Net weight", net_weight_kg),
             gross_weight_kg=self._parse_weight("Gross weight", gross_weight_kg),
             **self._tax_fields(igst_percent),
@@ -832,7 +835,8 @@ class ProductService:
     def update_product(self, current_user: User, product_id: int, product_name: str,
                         description: str, hsn_code: str, igst_percent: str,
                         quantity: str, alternate_quantity: str,
-                        unit: str, net_weight_kg: str = "", gross_weight_kg: str = "",
+                        quantity_unit: str = "", alternate_quantity_unit: str = "",
+                        net_weight_kg: str = "", gross_weight_kg: str = "",
                         pallet_types: Optional[list] = None,
                         category_id=None) -> None:
         if not current_user.is_admin:
@@ -845,8 +849,10 @@ class ProductService:
             "product_name": product_name.strip(), "description": description or None,
             "hsn_code": hsn_code or None,
             "category_id": self._parse_category_id(current_user.company_id, category_id),
+            "quantity_unit": self._parse_unit(quantity_unit, default="PCS"),
             "quantity": quantity or None,
-            "alternate_quantity": alternate_quantity or None, "unit": self._parse_unit(unit),
+            "alternate_quantity_unit": self._parse_unit(alternate_quantity_unit, default="SQM"),
+            "alternate_quantity": alternate_quantity or None,
             "net_weight_kg": self._parse_weight("Net weight", net_weight_kg),
             "gross_weight_kg": self._parse_weight("Gross weight", gross_weight_kg),
             **self._tax_fields(igst_percent),
@@ -1017,15 +1023,14 @@ class ProductService:
         return round(weight, 3)
 
     @staticmethod
-    def _parse_unit(unit: str) -> str:
-        """The unit a product's quantity is measured in (SQM/LM/PCS/KG/SET).
-        Stored on the product so document forms (quotations, proforma
-        invoices, packing lists) can prefill their Unit column instead of
-        asking every time. Free-ish text on purpose - the form offers the
-        standard choices, but an unknown value just falls back to SQM
-        rather than blocking the save."""
+    def _parse_unit(unit: str, default: str = "SQM") -> str:
+        """A unit one of the product's quantities is measured in. Free text
+        typed on the product form (SQM, LM, PCS, BOX, ...), normalised to
+        uppercase; blank falls back to the default - quantity_unit defaults
+        to PCS, and alternate_quantity_unit to SQM (it's what prefills the
+        Unit column on document forms)."""
         unit = (unit or "").strip().upper()
-        return unit if unit in PRODUCT_UNITS else "SQM"
+        return unit or default
 
     @staticmethod
     def _parse_percent(label: str, value: str) -> Optional[float]:
