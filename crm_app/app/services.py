@@ -1556,6 +1556,7 @@ class PackingListService:
                 "quantity_boxes": "", "pcs": "",
                 "quantity_value": "", "unit": item.unit,
                 "net_weight_kg": "", "gross_weight_kg": "",
+                "source_boxes": item.quantity_boxes,
             }
             for item in invoice.items
         ]
@@ -1582,6 +1583,7 @@ class PackingListService:
                 "quantity_boxes": "", "pcs": "",
                 "quantity_value": "", "unit": item.unit,
                 "net_weight_kg": "", "gross_weight_kg": "",
+                "source_boxes": item.quantity_boxes,
             }
             for item in quotation.items
         ]
