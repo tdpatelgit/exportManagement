@@ -223,7 +223,7 @@ CREATE TABLE IF NOT EXISTS our_company_bank_details (
 -- nest to any depth via self-reference (category_id=NULL products sit
 -- directly at the root, the same way a design can sit directly under a
 -- product); a PRODUCT is the tax/HSN identity AND the physical packing spec
--- (packing, quantity, alternate quantity, unit, weight class) that
+-- (pallet types, quantity, alternate quantity, unit, weight class) that
 -- quotations, proforma invoices and packing lists all read from - every
 -- design under a product shares that spec; SUB CATEGORIES (the
 -- product_folders table) organise designs under a product and can nest to
@@ -248,7 +248,6 @@ CREATE TABLE IF NOT EXISTS products (
     igst_percent        REAL,           -- the only tax input; SGST/CGST are stored as half of it
     sgst_percent        REAL,
     cgst_percent        REAL,
-    packing             TEXT,
     quantity            TEXT,
     alternate_quantity  TEXT,           -- per-box quantity, drives the Boxes x AltQty auto-calc
     unit                TEXT NOT NULL DEFAULT 'SQM',   -- what the quantity is measured in; prefills document lines
@@ -257,6 +256,21 @@ CREATE TABLE IF NOT EXISTS products (
     gross_weight_kg     REAL,           -- gross weight per box (KG); same auto-calc as net_weight_kg
     created_at          TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Named pallet storage options for one product (e.g. "pine pallet" holding
+-- 31 boxes). Every product also implicitly has a "loose" option - goods
+-- sold unpalletised, zero pallets - which is NOT stored here. The alternate
+-- quantity a pallet holds is never stored: it's always derived as
+-- boxes_per_pallet x the product's per-box alternate_quantity.
+CREATE TABLE IF NOT EXISTS product_pallet_types (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id          INTEGER NOT NULL REFERENCES tenants(id),
+    product_id          INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    name                TEXT NOT NULL,
+    boxes_per_pallet    REAL NOT NULL,
+    sort_order          INTEGER NOT NULL DEFAULT 0,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS product_folders (
@@ -500,6 +514,7 @@ CREATE INDEX IF NOT EXISTS idx_categories_company ON categories(company_id);
 CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
 -- idx_products_category lives in database.py's _migrate: on a pre-v4 DB the
 -- category_id column doesn't exist yet when this script runs.
+CREATE INDEX IF NOT EXISTS idx_pallet_types_product ON product_pallet_types(product_id);
 CREATE INDEX IF NOT EXISTS idx_product_folders_product ON product_folders(product_id);
 CREATE INDEX IF NOT EXISTS idx_product_folders_parent ON product_folders(parent_id);
 CREATE INDEX IF NOT EXISTS idx_designs_product ON designs(product_id);

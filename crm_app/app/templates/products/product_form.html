@@ -46,7 +46,6 @@
     <div class="hint">IGST is a percentage (0–100); leave it blank if it doesn't apply. SGST and CGST are calculated automatically as half of IGST.</div>
 
     <div class="form-row">
-      <div class="field"><label for="packing">Packing (boxes per pallet)</label><input type="text" id="packing" name="packing" value="{{ data.packing | default('', true) }}"></div>
       <div class="field"><label for="quantity">Quantity (pcs per box)</label><input type="text" id="quantity" name="quantity" value="{{ data.quantity | default('', true) }}"></div>
     </div>
     <div class="form-row">
@@ -65,6 +64,40 @@
         <div class="hint">Prefills the Unit column on every document.</div>
       </div>
     </div>
+    <div class="field">
+      <label>Pallet packing</label>
+      <div class="table-wrap">
+        <table class="ledger" id="pallet-types-table">
+          <thead>
+            <tr>
+              <th style="min-width:160px;">Pallet type</th>
+              <th style="max-width:140px;">Boxes per pallet</th>
+              <th>Alt qty per pallet (auto)</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="pallet-types-body">
+            <tr>
+              <td class="text-soft">Loose (built-in)</td>
+              <td class="text-soft">—</td>
+              <td class="text-soft">Goods sold unpalletised — zero pallets</td>
+              <td></td>
+            </tr>
+            {% for row in pallet_rows %}
+            <tr class="pallet-type-row">
+              <td><input type="text" name="pallet_type_name[]" class="js-pallet-name" value="{{ row.name }}"></td>
+              <td><input type="number" step="0.01" min="0" name="pallet_type_boxes[]" class="js-pallet-boxes" value="{{ row.boxes_per_pallet }}"></td>
+              <td class="js-pallet-alt text-sm text-soft">—</td>
+              <td><button type="button" class="btn-link-danger js-remove-pallet-type">Remove</button></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" id="add-pallet-type-btn">+ Add pallet type</button>
+      <div class="hint">Named pallet storage options for this product (e.g. "pine pallet" holding 31 boxes). Every product also always offers "Loose" — no pallets at all. The Alt qty per pallet is worked out automatically as Boxes per pallet × Alternate quantity per box. These options fill the Pallet type dropdown on proforma invoices and packing lists; the printed PDFs are unchanged.</div>
+    </div>
+
     <div class="form-row">
       <div class="field">
         <label for="net_weight_kg">Net weight per box (KG)</label>
@@ -95,6 +128,50 @@
   }
   igst.addEventListener('input', recalc);
   recalc();
+
+  // ---- pallet types list editor --------------------------------------------------
+  // Alt qty per pallet is display-only (never submitted): Boxes per pallet x
+  // the Alternate quantity per box typed above, recomputed live so it can't
+  // drift. The "Loose" row is the built-in no-pallet option - informational
+  // only, never stored.
+  const palletBody = document.getElementById('pallet-types-body');
+  const altQtyInput = document.getElementById('alternate_quantity');
+  const unitSelect = document.getElementById('unit');
+
+  function palletRowTemplate() {
+    const tr = document.createElement('tr');
+    tr.className = 'pallet-type-row';
+    tr.innerHTML = `
+      <td><input type="text" name="pallet_type_name[]" class="js-pallet-name" placeholder="e.g. pine pallet"></td>
+      <td><input type="number" step="0.01" min="0" name="pallet_type_boxes[]" class="js-pallet-boxes"></td>
+      <td class="js-pallet-alt text-sm text-soft">—</td>
+      <td><button type="button" class="btn-link-danger js-remove-pallet-type">Remove</button></td>`;
+    return tr;
+  }
+
+  function recalcPalletAltQty() {
+    const perBox = parseFloat(altQtyInput.value) || 0;
+    palletBody.querySelectorAll('.pallet-type-row').forEach((tr) => {
+      const boxes = parseFloat(tr.querySelector('.js-pallet-boxes').value) || 0;
+      tr.querySelector('.js-pallet-alt').textContent =
+        (boxes && perBox) ? (boxes * perBox).toFixed(2) + ' ' + unitSelect.value : '—';
+    });
+  }
+
+  document.getElementById('add-pallet-type-btn').addEventListener('click', () => {
+    palletBody.appendChild(palletRowTemplate());
+  });
+  palletBody.addEventListener('click', (e) => {
+    if (e.target.classList.contains('js-remove-pallet-type')) {
+      e.target.closest('tr').remove();
+    }
+  });
+  palletBody.addEventListener('input', (e) => {
+    if (e.target.classList.contains('js-pallet-boxes')) recalcPalletAltQty();
+  });
+  altQtyInput.addEventListener('input', recalcPalletAltQty);
+  unitSelect.addEventListener('change', recalcPalletAltQty);
+  recalcPalletAltQty();
 })();
 </script>
 

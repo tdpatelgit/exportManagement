@@ -44,7 +44,10 @@
     <div><div class="text-sm text-soft">Category</div><div>{{ category.name if category else '— (catalog root)' }}</div></div>
     <div><div class="text-sm text-soft">IGST</div><div>{{ (product.igst_percent ~ ' %') if product.igst_percent is not none else '—' }}</div></div>
     <div><div class="text-sm text-soft">SGST / CGST (half of IGST)</div><div>{{ (product.sgst_percent ~ ' %') if product.sgst_percent is not none else '—' }} / {{ (product.cgst_percent ~ ' %') if product.cgst_percent is not none else '—' }}</div></div>
-    <div><div class="text-sm text-soft">Packing</div><div>{{ product.packing or '—' }}</div></div>
+    <div><div class="text-sm text-soft">Pallet packing</div><div>
+      Loose (no pallets)
+      {%- for pt in pallet_types %} · {{ pt.name }} ({{ pt.boxes_per_pallet | int if pt.boxes_per_pallet == (pt.boxes_per_pallet | int) else pt.boxes_per_pallet }} boxes){% endfor %}
+    </div></div>
     <div><div class="text-sm text-soft">Quantity</div><div>{{ product.quantity or '—' }}</div></div>
     <div><div class="text-sm text-soft">Alternate quantity</div><div>{{ product.alternate_quantity or '—' }}{% if product.alternate_quantity %} {{ product.unit }}{% endif %}</div></div>
     <div><div class="text-sm text-soft">Net weight / box</div><div>{{ (product.net_weight_kg ~ ' KG') if product.net_weight_kg is not none else '—' }}</div></div>

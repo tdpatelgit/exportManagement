@@ -30,14 +30,15 @@ from werkzeug.utils import secure_filename
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
 from app.models import (
     User, Lead, Client, ContactPerson, Communication, PaymentEntry, DocumentEntry,
-    LEAD_STATUSES, CLIENT_STATUSES, CLIENT_STATUS_ADVANCE_ON, PRODUCT_UNITS, Category, Product, ProductFolder,
+    LEAD_STATUSES, CLIENT_STATUSES, CLIENT_STATUS_ADVANCE_ON, PRODUCT_UNITS, Category, Product,
+    ProductPalletType, ProductFolder,
     Design, Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem, PackingList, PackingListItem,
     DocumentVersion,
 )
 from app.repositories import (
     TenantRepository, UserRepositoryBase, LeadRepositoryBase, ClientRepositoryBase,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
-    CategoryRepository, ProductRepository, ProductFolderRepository, DesignRepository,
+    CategoryRepository, ProductRepository, ProductPalletTypeRepository, ProductFolderRepository, DesignRepository,
     QuotationRepository, ProformaInvoiceRepository, PackingListRepository, DocumentVersionRepository,
 )
 from app.database import Database, SCHEMA_VERSION
@@ -627,14 +628,40 @@ class ReportService:
 # identity, folders nest to any depth inside one product, designs are the
 # sellable leaves with price/packing/photos)
 # ============================================================
+def _leading_number(text) -> float:
+    """The number a free-text packing figure starts with ('31 boxes' ->
+    31.0), 0.0 when there isn't one - shared by the per-box auto-calc
+    factors and the pallet types' derived alternate-quantity figure."""
+    m = re.match(r"\s*([\d.]+)", str(text or ""))
+    try:
+        return float(m.group(1)) if m else 0.0
+    except ValueError:
+        return 0.0
+
+
+def pallet_alt_quantity(pallet_type: ProductPalletType, product: Optional[Product]) -> float:
+    """The alternate quantity one pallet of this type holds - always derived
+    (boxes on the pallet x the product's per-box alternate quantity), never
+    stored, so it can't drift when the product spec changes. 0.0 when the
+    product has no usable alternate-quantity figure."""
+    per_box = _leading_number(product.alternate_quantity) if product else 0.0
+    return round(pallet_type.boxes_per_pallet * per_box, 2) if per_box else 0.0
+
+
 class ProductService:
+    # The unstored palleting option every product offers: goods sold loose,
+    # no pallets at all. Reserved so a stored pallet type can't shadow it.
+    LOOSE_NAME = "loose"
+
     def __init__(self, category_repo: CategoryRepository, product_repo: ProductRepository,
                  folder_repo: ProductFolderRepository, design_repo: DesignRepository,
+                 pallet_type_repo: ProductPalletTypeRepository,
                  upload_folder: str, allowed_extensions: set):
         self.category_repo = category_repo
         self.product_repo = product_repo
         self.folder_repo = folder_repo
         self.design_repo = design_repo
+        self.pallet_type_repo = pallet_type_repo
         self.upload_folder = upload_folder
         self.allowed_extensions = allowed_extensions
 
@@ -736,47 +763,95 @@ class ProductService:
         half = round(igst / 2, 2) if igst is not None else None
         return {"igst_percent": igst, "sgst_percent": half, "cgst_percent": half}
 
+    def _parse_pallet_types(self, pallet_types: Optional[list]) -> List[ProductPalletType]:
+        """Validates the raw name/boxes pairs submitted by the product form
+        into ProductPalletType rows. Rows left entirely blank are skipped;
+        a row with only one half filled in is an error. 'loose' is reserved
+        for the built-in no-pallet option every product already has."""
+        parsed = []
+        for i, raw in enumerate(pallet_types or [], start=1):
+            name = (raw.get("name") or "").strip()
+            boxes_raw = (raw.get("boxes_per_pallet") or "").strip()
+            if not name and not boxes_raw:
+                continue
+            if not name:
+                raise ValidationError(f"Pallet type {i}: a name is compulsory.")
+            if name.lower() == self.LOOSE_NAME:
+                raise ValidationError(
+                    f"Pallet type {i}: '{self.LOOSE_NAME}' is reserved - every product "
+                    "already offers it as the built-in no-pallet option."
+                )
+            try:
+                boxes = float(boxes_raw)
+            except ValueError:
+                raise ValidationError(f"Pallet type '{name}': boxes per pallet must be a number.")
+            if boxes <= 0:
+                raise ValidationError(f"Pallet type '{name}': boxes per pallet must be greater than zero.")
+            parsed.append(ProductPalletType(
+                id=None, company_id=0, product_id=0, name=name, boxes_per_pallet=boxes,
+            ))
+        return parsed
+
+    def pallet_types_for_product(self, product_id: int) -> List[ProductPalletType]:
+        return self.pallet_type_repo.list_for_product(product_id)
+
+    def pallet_types_by_product(self, company_id: int) -> dict:
+        """product_id -> [ProductPalletType, ...] for the whole company in
+        one query - what the JSON product list and the document forms use."""
+        grouped = {}
+        for pt in self.pallet_type_repo.list_all(company_id):
+            grouped.setdefault(pt.product_id, []).append(pt)
+        return grouped
+
     def create_product(self, current_user: User, product_name: str, description: str,
-                        hsn_code: str, igst_percent: str, packing: str, quantity: str,
+                        hsn_code: str, igst_percent: str, quantity: str,
                         alternate_quantity: str, unit: str,
                         net_weight_kg: str = "", gross_weight_kg: str = "",
+                        pallet_types: Optional[list] = None,
                         category_id=None) -> Product:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
         if not product_name or not product_name.strip():
             raise ValidationError("Product name is compulsory.")
+        parsed_pallet_types = self._parse_pallet_types(pallet_types)
         product = Product(
             id=None, company_id=current_user.company_id, product_name=product_name.strip(),
             category_id=self._parse_category_id(current_user.company_id, category_id),
             description=description or None, hsn_code=hsn_code or None,
-            packing=packing or None, quantity=quantity or None,
+            quantity=quantity or None,
             alternate_quantity=alternate_quantity or None, unit=self._parse_unit(unit),
             net_weight_kg=self._parse_weight("Net weight", net_weight_kg),
             gross_weight_kg=self._parse_weight("Gross weight", gross_weight_kg),
             **self._tax_fields(igst_percent),
         )
-        return self.product_repo.create(product)
+        product = self.product_repo.create(product)
+        if parsed_pallet_types:
+            self.pallet_type_repo.replace_for_product(current_user.company_id, product.id, parsed_pallet_types)
+        return product
 
     def update_product(self, current_user: User, product_id: int, product_name: str,
                         description: str, hsn_code: str, igst_percent: str,
-                        packing: str, quantity: str, alternate_quantity: str,
+                        quantity: str, alternate_quantity: str,
                         unit: str, net_weight_kg: str = "", gross_weight_kg: str = "",
+                        pallet_types: Optional[list] = None,
                         category_id=None) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
         if not product_name or not product_name.strip():
             raise ValidationError("Product name is compulsory.")
         self.get_product(product_id, current_user.company_id)
+        parsed_pallet_types = self._parse_pallet_types(pallet_types)
         self.product_repo.update(product_id, {
             "product_name": product_name.strip(), "description": description or None,
             "hsn_code": hsn_code or None,
             "category_id": self._parse_category_id(current_user.company_id, category_id),
-            "packing": packing or None, "quantity": quantity or None,
+            "quantity": quantity or None,
             "alternate_quantity": alternate_quantity or None, "unit": self._parse_unit(unit),
             "net_weight_kg": self._parse_weight("Net weight", net_weight_kg),
             "gross_weight_kg": self._parse_weight("Gross weight", gross_weight_kg),
             **self._tax_fields(igst_percent),
         })
+        self.pallet_type_repo.replace_for_product(current_user.company_id, product_id, parsed_pallet_types)
 
     def delete_product(self, current_user: User, product_id: int) -> None:
         if not current_user.is_admin:
@@ -1492,22 +1567,15 @@ _PACK_NOTE_PATTERN = re.compile(r"([\d.]+)\s*PCS?\s*=\s*([\d.]+)\s*(?:SQM|LM)", 
 
 
 def _per_box_factors(product, description: str) -> tuple:
-    """(pcs_per_box, qty_per_box, box_per_pallet) for one packing row: the
-    row's catalog product's Quantity / Alternate Quantity / Packing (its
-    boxes-per-pallet count) when set - every design under a product shares
-    the same packing spec - else pcs_per_box/qty_per_box fall back to the
-    packing note parsed from the description. 0.0 means unknown - callers
-    skip that auto-calc."""
-    def _leading_number(text) -> float:
-        m = re.match(r"\s*([\d.]+)", str(text or ""))
-        try:
-            return float(m.group(1)) if m else 0.0
-        except ValueError:
-            return 0.0
-
+    """(pcs_per_box, qty_per_box) for one packing row: the row's catalog
+    product's Quantity / Alternate Quantity when set - every design under a
+    product shares the same packing spec - else the packing note parsed
+    from the description. 0.0 means unknown - callers skip that auto-calc.
+    (Boxes-per-pallet is NOT a product-level fallback any more: it comes
+    from the pallet type the row explicitly selected, because the default
+    palleting option is 'loose' - no pallets at all.)"""
     pcs_per_box = _leading_number(product.quantity) if product else 0.0
     qty_per_box = _leading_number(product.alternate_quantity) if product else 0.0
-    box_per_pallet = _leading_number(product.packing) if product else 0.0
     note = _PACK_NOTE_PATTERN.search(description or "")
     if note:
         try:
@@ -1515,7 +1583,7 @@ def _per_box_factors(product, description: str) -> tuple:
             qty_per_box = qty_per_box or float(note.group(2))
         except ValueError:
             pass
-    return pcs_per_box, qty_per_box, box_per_pallet
+    return pcs_per_box, qty_per_box
 
 
 class PackingListService:
@@ -1682,13 +1750,12 @@ class PackingListService:
             # Boxes is missing (only possible by bypassing the form's
             # `required` attribute) but Pallets and Box-per-pallet are both
             # known, fall back to deriving Boxes from those; otherwise
-            # Boxes truly is missing and that's an error. Box-per-pallet
-            # itself falls back to the row's catalog product's Packing
-            # figure (its boxes-per-pallet count) when the row didn't type
-            # one in - every design under that product shares the same
-            # packing spec.
-            pcs_per_box, qty_per_box, product_box_per_pallet = _per_box_factors(product, product_name)
-            box_per_pallet = box_per_pallet or product_box_per_pallet or None
+            # Boxes truly is missing and that's an error. Box-per-pallet is
+            # whatever pallet type the row selected on the form (empty =
+            # the default 'loose' option: goods unpalletised, no pallets) -
+            # it deliberately does NOT fall back to the catalog product,
+            # since a product's pallet types are options, not a default.
+            pcs_per_box, qty_per_box = _per_box_factors(product, product_name)
             if quantity_boxes is None:
                 if pallets and box_per_pallet:
                     quantity_boxes = round(pallets * box_per_pallet, 2)
@@ -1699,10 +1766,13 @@ class PackingListService:
             # a partial last pallet (Boxes not a perfect multiple of
             # Box-per-pallet) can't be expressed as a clean quotient, so in
             # that case Pallets is left as whatever the user typed by hand.
+            # No pallet type selected ('loose') means zero pallets, full stop.
             if box_per_pallet:
                 exact_pallets = quantity_boxes / box_per_pallet
                 if abs(exact_pallets - round(exact_pallets)) < 1e-9:
                     pallets = round(exact_pallets, 2)
+            else:
+                pallets = None
 
             # Qty (and Pcs, when left blank) are authoritatively Boxes x the
             # per-box factors whenever those are known (design's own figures,
