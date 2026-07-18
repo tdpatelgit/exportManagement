@@ -707,7 +707,7 @@ class ProductService:
 
     def create_product(self, current_user: User, product_name: str, description: str,
                         hsn_code: str, igst_percent: str, packing: str, quantity: str,
-                        alternate_quantity: str, unit: str, weight_class: str,
+                        alternate_quantity: str, unit: str,
                         net_weight_kg: str = "", gross_weight_kg: str = "",
                         category_id=None) -> Product:
         if not current_user.is_admin:
@@ -720,7 +720,6 @@ class ProductService:
             description=description or None, hsn_code=hsn_code or None,
             packing=packing or None, quantity=quantity or None,
             alternate_quantity=alternate_quantity or None, unit=self._parse_unit(unit),
-            weight_class=weight_class or None,
             net_weight_kg=self._parse_weight("Net weight", net_weight_kg),
             gross_weight_kg=self._parse_weight("Gross weight", gross_weight_kg),
             **self._tax_fields(igst_percent),
@@ -730,7 +729,7 @@ class ProductService:
     def update_product(self, current_user: User, product_id: int, product_name: str,
                         description: str, hsn_code: str, igst_percent: str,
                         packing: str, quantity: str, alternate_quantity: str,
-                        unit: str, weight_class: str, net_weight_kg: str = "", gross_weight_kg: str = "",
+                        unit: str, net_weight_kg: str = "", gross_weight_kg: str = "",
                         category_id=None) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can manage the product catalog.")
@@ -743,7 +742,6 @@ class ProductService:
             "category_id": self._parse_category_id(current_user.company_id, category_id),
             "packing": packing or None, "quantity": quantity or None,
             "alternate_quantity": alternate_quantity or None, "unit": self._parse_unit(unit),
-            "weight_class": weight_class or None,
             "net_weight_kg": self._parse_weight("Net weight", net_weight_kg),
             "gross_weight_kg": self._parse_weight("Gross weight", gross_weight_kg),
             **self._tax_fields(igst_percent),
@@ -1381,7 +1379,6 @@ class ProformaInvoiceService:
             notify_address=(fields.get("notify_address") or "").strip() or None,
             country_of_origin=(fields.get("country_of_origin") or "").strip() or "INDIA",
             country_of_destination=(fields.get("country_of_destination") or "").strip() or None,
-            vessel_flight=(fields.get("vessel_flight") or "").strip() or None,
             port_of_loading=(fields.get("port_of_loading") or "").strip() or None,
             port_of_discharge=(fields.get("port_of_discharge") or "").strip() or None,
             final_destination=(fields.get("final_destination") or "").strip() or None,

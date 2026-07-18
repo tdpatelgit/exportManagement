@@ -153,14 +153,12 @@
       <td class="pi-val pi-center">{{ (invoice.country_of_destination or '-')|upper }}</td>
     </tr>
     <tr>
-      <td class="pi-label pi-center">Vessel / Flight Name &amp; No</td>
-      <td class="pi-label pi-center">Port Of Loading</td>
+      <td class="pi-label pi-center" colspan="2">Port Of Loading</td>
       <td class="pi-label pi-center">Transhipment</td>
       <td class="pi-label pi-center">Partial Shipment</td>
     </tr>
     <tr>
-      <td class="pi-val pi-center">{{ (invoice.vessel_flight or 'N/A')|upper }}</td>
-      <td class="pi-val pi-center">{{ (invoice.port_of_loading or '-')|upper }}</td>
+      <td class="pi-val pi-center" colspan="2">{{ (invoice.port_of_loading or '-')|upper }}</td>
       <td class="pi-val pi-center">{{ (invoice.transhipment or '-')|upper }}</td>
       <td class="pi-val pi-center">{{ (invoice.partial_shipment or '-')|upper }}</td>
     </tr>

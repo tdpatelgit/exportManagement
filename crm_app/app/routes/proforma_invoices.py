@@ -21,7 +21,7 @@ proforma_invoices_bp = Blueprint("proforma_invoices", __name__, url_prefix="/pro
 _HEADER_FIELDS = [
     "invoice_date", "lead_id", "quotation_id", "export_ref_no", "buyer_order_no", "other_reference",
     "consignee_name", "consignee_address", "notify_name", "notify_address",
-    "country_of_origin", "country_of_destination", "vessel_flight",
+    "country_of_origin", "country_of_destination",
     "port_of_loading", "port_of_discharge", "final_destination",
     "transhipment", "partial_shipment", "variation_in_qty", "delivery_period",
     "container_details", "terms_of_delivery", "payment_terms", "remarks",

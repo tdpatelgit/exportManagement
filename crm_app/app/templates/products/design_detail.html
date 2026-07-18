@@ -68,7 +68,6 @@
     <div><div class="text-sm text-soft">Packing</div><div>{{ product.packing or '—' }}</div></div>
     <div><div class="text-sm text-soft">Quantity</div><div>{{ product.quantity or '—' }}</div></div>
     <div><div class="text-sm text-soft">Alternate quantity</div><div>{{ product.alternate_quantity or '—' }}{% if product.alternate_quantity %} {{ product.unit }}{% endif %}</div></div>
-    <div><div class="text-sm text-soft">Weight class</div><div>{{ product.weight_class or '—' }}</div></div>
     <div><div class="text-sm text-soft">Net weight / box</div><div>{{ (product.net_weight_kg ~ ' KG') if product.net_weight_kg is not none else '—' }}</div></div>
     <div><div class="text-sm text-soft">Gross weight / box</div><div>{{ (product.gross_weight_kg ~ ' KG') if product.gross_weight_kg is not none else '—' }}</div></div>
   </div>
