@@ -80,7 +80,7 @@ class ServiceContainer:
         )
         self.proforma_invoice_service = ProformaInvoiceService(
             self.proforma_invoice_repo, self.product_repo, self.lead_repo, self.quotation_repo,
-            self.document_version_service,
+            self.document_version_service, self.client_repo,
         )
         self.packing_list_service = PackingListService(
             self.packing_list_repo, self.product_repo, self.design_repo,
