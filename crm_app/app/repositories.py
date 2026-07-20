@@ -715,6 +715,13 @@ class CompanyRepository:
                 (company.id,),
             )
         ]
+        company.rcmc_details = [
+            dict(r) for r in self.db.query(
+                "SELECT * FROM our_company_rcmc_details WHERE our_company_id = ? "
+                "ORDER BY is_primary DESC, registration_date DESC, id",
+                (company.id,),
+            )
+        ]
         return company
 
     def upsert(self, company_id: int, company_name: str, address: str, gstin: str,
@@ -751,6 +758,22 @@ class CompanyRepository:
                     "INSERT INTO our_company_lut_details (our_company_id, lut_number, financial_year, is_primary) "
                     "VALUES (?, ?, ?, ?)",
                     (our_company_id, l["lut_number"], l["financial_year"], int(l["is_primary"])),
+                )
+
+    def replace_rcmc_details(self, our_company_id: int, rcmc_details: list) -> None:
+        """rcmc_details: [{'registration_number': str, 'registration_date': str, 'valid_until': str,
+        'organisation_name': str, 'organisation_address': str, 'contact_number': str,
+        'email_address': str, 'is_primary': bool}]"""
+        with self.db.get_connection() as conn:
+            conn.execute("DELETE FROM our_company_rcmc_details WHERE our_company_id = ?", (our_company_id,))
+            for r in rcmc_details:
+                conn.execute(
+                    "INSERT INTO our_company_rcmc_details (our_company_id, registration_number, registration_date, "
+                    "valid_until, organisation_name, organisation_address, contact_number, email_address, is_primary) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (our_company_id, r["registration_number"], r["registration_date"], r["valid_until"],
+                     r.get("organisation_name", ""), r.get("organisation_address", ""),
+                     r.get("contact_number", ""), r.get("email_address", ""), int(r["is_primary"])),
                 )
 
     def replace_contact_details(self, our_company_id: int, details: list) -> None:
@@ -924,11 +947,11 @@ class ProductRepository:
         )
 
     def delete(self, product_id: int) -> None:
-        """Cascades to the product's folders and designs via ON DELETE CASCADE.
+        """Cascades to the products folders and designs via ON DELETE CASCADE.
         Document line items keep their snapshot text (name/HSN) - only the
         catalog reference is nulled out first. Done explicitly rather than
         relying on ON DELETE SET NULL because quotation/proforma item tables
-        created before this rule existed don't carry it."""
+        created before this rule existed dont carry it."""
         with self.db.get_connection() as conn:
             conn.execute("UPDATE quotation_items SET product_id = NULL WHERE product_id = ?", (product_id,))
             conn.execute("UPDATE proforma_invoice_items SET product_id = NULL WHERE product_id = ?", (product_id,))
@@ -959,7 +982,7 @@ class ProductPalletTypeRepository:
 
     def list_all(self, company_id: int) -> List[ProductPalletType]:
         """Every pallet type of every product in one company - lets the
-        product-picker JSON API attach each product's list without one
+        product-picker JSON API attach each products list without one
         query per product."""
         rows = self.db.query(
             "SELECT * FROM product_pallet_types WHERE company_id = ? ORDER BY product_id, sort_order, id",
@@ -1001,7 +1024,7 @@ class ProductFolderRepository:
         return [ProductFolder.from_row(r) for r in rows]
 
     def list_ancestors(self, folder_id: int) -> List[ProductFolder]:
-        """Walks parent_id up to the product's top level - powers the breadcrumb trail."""
+        """Walks parent_id up to the products top level - powers the breadcrumb trail."""
         trail = []
         current = self.get_by_id(folder_id)
         while current:
@@ -1023,7 +1046,7 @@ class ProductFolderRepository:
     def delete(self, folder_id: int) -> None:
         """Cascades to subfolders and designs via ON DELETE CASCADE. Packing
         list lines keep their design_name snapshot - the design reference is
-        nulled for every design in the folder's subtree first."""
+        nulled for every design in the folders subtree first."""
         with self.db.get_connection() as conn:
             conn.execute(
                 """UPDATE packing_list_items SET design_id = NULL WHERE design_id IN (
@@ -1048,7 +1071,7 @@ class DesignRepository:
         return Design.from_row(row) if row else None
 
     def list_in(self, product_id: int, folder_id: Optional[int]) -> List[Design]:
-        """Designs sitting in one folder - folder_id=None is the product's top level."""
+        """Designs sitting in one folder - folder_id=None is the products top level."""
         if folder_id is None:
             rows = self.db.query(
                 "SELECT * FROM designs WHERE product_id = ? AND folder_id IS NULL ORDER BY design_name",
@@ -1143,7 +1166,7 @@ class QuotationRepository:
     def list_for_lead(self, lead_id: int) -> List[Quotation]:
         """Quotations created against a given lead. This is also how a
         converted client 'sees' its quotations - a client never has its own
-        quotation link; the client's originating `lead_id` (Client.lead_id)
+        quotation link; the clients originating `lead_id` (Client.lead_id)
         is reused to look them up here, so a quotation made while the
         company was still a lead automatically stays visible once it
         becomes a client, with nothing to keep in sync by hand."""
@@ -1761,3 +1784,46 @@ class DocumentVersionRepository:
             (document_type, document_id, version_number),
         )
         return DocumentVersion.from_row(row) if row else None
+
+# ============================================================
+# RCMC (Rebate Certificate Management)
+# ============================================================
+class RCMCRepository:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def get(self, rcmc_id: int) -> Optional[RCMC]:
+        row = self.db.query_one("SELECT * FROM rcmc WHERE id = ?", (rcmc_id,))
+        return RCMC.from_row(row) if row else None
+
+    def get_by_number(self, company_id: int, rcmc_number: str) -> Optional[RCMC]:
+        row = self.db.query_one(
+            "SELECT * FROM rcmc WHERE company_id = ? AND rcmc_number = ?",
+            (company_id, rcmc_number)
+        )
+        return RCMC.from_row(row) if row else None
+
+    def list_all(self, company_id: int) -> List[RCMC]:
+        rows = self.db.query(
+            "SELECT * FROM rcmc WHERE company_id = ? ORDER BY rcmc_date DESC",
+            (company_id,)
+        )
+        return [RCMC.from_row(r) for r in rows]
+
+    def create(self, company_id: int, rcmc_number: str, rcmc_date: str, rcmc_value: float,
+               created_by: int) -> int:
+        return self.db.execute(
+            "INSERT INTO rcmc (company_id, rcmc_number, rcmc_date, rcmc_value, created_by) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (company_id, rcmc_number, rcmc_date, rcmc_value, created_by)
+        )
+
+    def update(self, rcmc_id: int, rcmc_number: str, rcmc_date: str, rcmc_value: float) -> None:
+        self.db.execute(
+            "UPDATE rcmc SET rcmc_number = ?, rcmc_date = ?, rcmc_value = ?, updated_at = datetime('now') "
+            "WHERE id = ?",
+            (rcmc_number, rcmc_date, rcmc_value, rcmc_id)
+        )
+
+    def delete(self, rcmc_id: int) -> None:
+        self.db.execute("DELETE FROM rcmc WHERE id = ?", (rcmc_id,))

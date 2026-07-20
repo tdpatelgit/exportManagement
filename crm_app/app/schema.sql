@@ -286,6 +286,19 @@ CREATE TABLE IF NOT EXISTS our_company_lut_details (
     is_primary      INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS our_company_rcmc_details (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    our_company_id         INTEGER NOT NULL REFERENCES our_company(id) ON DELETE CASCADE,
+    registration_number    TEXT NOT NULL,
+    registration_date      TEXT NOT NULL,
+    valid_until            TEXT NOT NULL,
+    organisation_name      TEXT,
+    organisation_address   TEXT,
+    contact_number         TEXT,
+    email_address          TEXT,
+    is_primary             INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS our_company_contact_details (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     our_company_id  INTEGER NOT NULL REFERENCES our_company(id) ON DELETE CASCADE,

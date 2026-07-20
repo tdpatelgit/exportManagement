@@ -730,7 +730,7 @@ class CompanyService:
 
     def save(self, current_user: User, company_name: str, address: str, gstin: str, pan_no: str, iec: str,
               bin_no: str, contact_details: list, contact_persons: list, bank_details: list, lut_details: list,
-              logo_file=None, remove_logo: bool = False) -> None:
+              rcmc_details: list, logo_file=None, remove_logo: bool = False) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can edit our company's profile.")
         if not company_name or not company_name.strip():
@@ -766,6 +766,10 @@ class CompanyService:
             if not l.get("lut_number", "").strip() or not l.get("financial_year", "").strip():
                 raise ValidationError("Every LUT row needs both a LUT number and a financial year.")
 
+        for r in rcmc_details:
+            if not r.get("registration_number", "").strip() or not r.get("registration_date", "").strip() or not r.get("valid_until", "").strip():
+                raise ValidationError("Every RCMC row needs a registration number, registration date, and valid-until date.")
+
         existing = self.company_repo.get(current_user.company_id)
         our_company_id = self.company_repo.upsert(
             current_user.company_id, company_name.strip(), address, gstin, pan_no, iec, bin_no
@@ -774,6 +778,7 @@ class CompanyService:
         self.company_repo.replace_contact_persons(our_company_id, valid_persons)
         self.company_repo.replace_bank_details(our_company_id, valid_banks)
         self.company_repo.replace_lut_details(our_company_id, lut_details)
+        self.company_repo.replace_rcmc_details(our_company_id, rcmc_details)
 
         old_logo = existing.logo_path if existing else None
         if logo_file is not None and getattr(logo_file, "filename", ""):
@@ -2755,3 +2760,43 @@ class BackupService:
     def _not_our_backup_msg() -> str:
         return ("This file doesn't look like a backup created by this app. Please upload a "
                 ".zip you downloaded from the Database Backup page.")
+
+# ============================================================
+# RCMC (Rebate Certificate Management)
+# ============================================================
+class RCMCService:
+    def __init__(self, db: Database):
+        self.db = db
+        self.rcmc_repo = RCMCRepository(db)
+
+    def get(self, rcmc_id: int) -> Optional[RCMC]:
+        return self.rcmc_repo.get(rcmc_id)
+
+    def get_by_number(self, company_id: int, rcmc_number: str) -> Optional[RCMC]:
+        return self.rcmc_repo.get_by_number(company_id, rcmc_number)
+
+    def list_all(self, company_id: int) -> List[RCMC]:
+        return self.rcmc_repo.list_all(company_id)
+
+    def create(self, company_id: int, rcmc_number: str, rcmc_date: str, rcmc_value: float,
+               created_by: int) -> int:
+        # Check if RCMC with same number already exists
+        existing = self.rcmc_repo.get_by_number(company_id, rcmc_number)
+        if existing:
+            raise ValidationError(f"RCMC with number {rcmc_number} already exists")
+        
+        return self.rcmc_repo.create(company_id, rcmc_number, rcmc_date, rcmc_value, created_by)
+
+    def update(self, rcmc_id: int, rcmc_number: str, rcmc_date: str, rcmc_value: float) -> None:
+        # Check if another RCMC with same number exists
+        existing = self.rcmc_repo.get(rcmc_id)
+        if existing and existing.rcmc_number != rcmc_number:
+            # If we're changing the number, check if new number already exists
+            other_rcmc = self.rcmc_repo.get_by_number(existing.company_id, rcmc_number)
+            if other_rcmc:
+                raise ValidationError(f"RCMC with number {rcmc_number} already exists")
+        
+        self.rcmc_repo.update(rcmc_id, rcmc_number, rcmc_date, rcmc_value)
+
+    def delete(self, rcmc_id: int) -> None:
+        self.rcmc_repo.delete(rcmc_id)

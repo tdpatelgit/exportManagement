@@ -46,6 +46,34 @@ def _extract_lut_details(form) -> list:
     return entries
 
 
+def _extract_rcmc_details(form) -> list:
+    """Keeps any row that has at least one field filled in, same as
+    `_extract_bank_details`, since RCMC has several optional fields."""
+    numbers = form.getlist("rcmc_registration_number[]")
+    reg_dates = form.getlist("rcmc_registration_date[]")
+    valid_untils = form.getlist("rcmc_valid_until[]")
+    org_names = form.getlist("rcmc_organisation_name[]")
+    org_addresses = form.getlist("rcmc_organisation_address[]")
+    contact_numbers = form.getlist("rcmc_contact_number[]")
+    emails = form.getlist("rcmc_email_address[]")
+    primaries = set(form.getlist("rcmc_primary[]"))
+    entries = []
+    for i, number in enumerate(numbers):
+        row = {
+            "registration_number": number.strip(),
+            "registration_date": reg_dates[i].strip() if i < len(reg_dates) else "",
+            "valid_until": valid_untils[i].strip() if i < len(valid_untils) else "",
+            "organisation_name": org_names[i].strip() if i < len(org_names) else "",
+            "organisation_address": org_addresses[i].strip() if i < len(org_addresses) else "",
+            "contact_number": contact_numbers[i].strip() if i < len(contact_numbers) else "",
+            "email_address": emails[i].strip() if i < len(emails) else "",
+            "is_primary": str(i) in primaries,
+        }
+        if any(v for k, v in row.items() if k != "is_primary"):
+            entries.append(row)
+    return entries
+
+
 def _extract_bank_details(form) -> list:
     """Keeps any row that has at least one field filled in (rather than
     silently dropping incomplete rows), so the service layer can reject
@@ -92,6 +120,7 @@ def settings():
                 contact_persons=_extract_contact_persons(request.form),
                 bank_details=_extract_bank_details(request.form),
                 lut_details=_extract_lut_details(request.form),
+                rcmc_details=_extract_rcmc_details(request.form),
                 logo_file=request.files.get("logo_file"),
                 remove_logo=bool(request.form.get("remove_logo")),
             )
