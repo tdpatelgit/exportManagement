@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ party.company_name }}{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Admin edit · compulsory fields only</div>
+    <h1>{{ party.company_name }}</h1>
+  </div>
+</div>
+
+<div class="card" style="max-width:720px;">
+  <form method="POST">
+    <div class="field">
+      <label for="company_name">Company name<span class="required-mark">*</span></label>
+      <input type="text" id="company_name" name="company_name" required value="{{ party.company_name }}">
+    </div>
+    <div class="form-row">
+      <div class="field"><label for="phone">Phone<span class="required-mark">*</span></label><input type="tel" id="phone" name="phone" required value="{{ party.phone }}"></div>
+      <div class="field"><label for="email">Email<span class="required-mark">*</span></label><input type="email" id="email" name="email" required value="{{ party.email }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label for="facebook">Facebook</label><input type="text" id="facebook" name="facebook" value="{{ party.facebook or '' }}"></div>
+      <div class="field"><label for="instagram">Instagram</label><input type="text" id="instagram" name="instagram" value="{{ party.instagram or '' }}"></div>
+      <div class="field"><label for="other_social">Other social</label><input type="text" id="other_social" name="other_social" value="{{ party.other_social or '' }}"></div>
+    </div>
+    <div class="field">
+      <label for="address">Address</label>
+      <textarea id="address" name="address" rows="3">{{ party.address or '' }}</textarea>
+      <div class="hint">Used to prefill the buyer address when this {{ type_label.lower() }} is selected on a quotation.</div>
+    </div>
+    <button type="submit" class="btn btn-primary">Save changes</button>
+    <a href="{{ url_for(endpoint_prefix ~ '.view_party', party_id=party.id) }}" class="btn btn-ghost">Cancel</a>
+  </form>
+</div>
+
+{% endblock %}

@@ -25,8 +25,14 @@
 
 {% if lead.is_converted %}
   <div class="flash flash-success" style="margin-bottom:18px;">
-    This lead has been converted to a client.
-    <a href="{{ url_for('clients.view_client', client_id=lead.converted_client_id) }}">View the client record →</a>
+    This lead has been converted to a {{ lead.converted_client_type|lower }}.
+    {% if lead.converted_client_type == 'Buyer' %}
+      <a href="{{ url_for('buyers.view_party', party_id=lead.converted_client_id) }}">View the buyer record →</a>
+    {% elif lead.converted_client_type == 'Exporter' %}
+      <a href="{{ url_for('exporters.view_party', party_id=lead.converted_client_id) }}">View the exporter record →</a>
+    {% elif lead.converted_client_type == 'Supplier' %}
+      <a href="{{ url_for('suppliers.view_supplier', supplier_id=lead.converted_client_id) }}">View the supplier record →</a>
+    {% endif %}
   </div>
 {% endif %}
 

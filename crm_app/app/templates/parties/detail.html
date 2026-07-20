@@ -1,15 +1,15 @@
 {% extends "base.html" %}
-{% block title %}{{ client.company_name }}{% endblock %}
+{% block title %}{{ party.company_name }}{% endblock %}
 {% block content %}
 
 <div class="topbar">
   <div>
-    <div class="eyebrow">Client #{{ client.id }} {% if client.lead_id %}· converted from <a href="{{ url_for('leads.view_lead', lead_id=client.lead_id) }}">Lead #{{ client.lead_id }}</a>{% endif %}</div>
-    <h1>{{ client.company_name }}</h1>
+    <div class="eyebrow">{{ type_label }} #{{ party.id }} {% if party.lead_id %}· converted from <a href="{{ url_for('leads.view_lead', lead_id=party.lead_id) }}">Lead #{{ party.lead_id }}</a>{% endif %}</div>
+    <h1>{{ party.company_name }}</h1>
   </div>
   <div class="topbar-actions">
     {% if current_user.is_admin %}
-      <a href="{{ url_for('clients.edit_client', client_id=client.id) }}" class="btn btn-ghost">Edit compulsory fields</a>
+      <a href="{{ url_for(endpoint_prefix ~ '.edit_party', party_id=party.id) }}" class="btn btn-ghost">Edit compulsory fields</a>
     {% endif %}
   </div>
 </div>
@@ -18,23 +18,22 @@
   <div class="card">
     <div class="card-header">
       <h3>Company details</h3>
-      <span class="pill">{{ client.client_type }}</span>
     </div>
     <table class="ledger">
-      <tr><td class="text-soft" style="width:40%;">Phone</td><td>{{ client.phone }}</td></tr>
-      <tr><td class="text-soft">Email</td><td>{{ client.email }}</td></tr>
-      <tr><td class="text-soft">Facebook</td><td>{{ client.facebook or '—' }}</td></tr>
-      <tr><td class="text-soft">Instagram</td><td>{{ client.instagram or '—' }}</td></tr>
-      <tr><td class="text-soft">Other social</td><td>{{ client.other_social or '—' }}</td></tr>
-      <tr><td class="text-soft">Address</td><td>{{ client.address or '—' }}</td></tr>
-      <tr><td class="text-soft">Client since</td><td>{{ client.created_at|friendly_date }}</td></tr>
+      <tr><td class="text-soft" style="width:40%;">Phone</td><td>{{ party.phone }}</td></tr>
+      <tr><td class="text-soft">Email</td><td>{{ party.email }}</td></tr>
+      <tr><td class="text-soft">Facebook</td><td>{{ party.facebook or '—' }}</td></tr>
+      <tr><td class="text-soft">Instagram</td><td>{{ party.instagram or '—' }}</td></tr>
+      <tr><td class="text-soft">Other social</td><td>{{ party.other_social or '—' }}</td></tr>
+      <tr><td class="text-soft">Address</td><td>{{ party.address or '—' }}</td></tr>
+      <tr><td class="text-soft">{{ type_label }} since</td><td>{{ party.created_at|friendly_date }}</td></tr>
       <tr><td class="text-soft">Total received</td><td class="num">₹{{ '{:,.2f}'.format(total_received_inr) }}</td></tr>
     </table>
     <hr class="divider">
-    <form method="POST" action="{{ url_for('clients.update_status', client_id=client.id) }}" class="flex gap-8">
+    <form method="POST" action="{{ url_for(endpoint_prefix ~ '.update_status', party_id=party.id) }}" class="flex gap-8">
       <select name="status" style="flex:1;">
         {% for key, label in CLIENT_STATUSES %}
-          <option value="{{ key }}" {{ 'selected' if key == client.status }}>{{ label }}</option>
+          <option value="{{ key }}" {{ 'selected' if key == party.status }}>{{ label }}</option>
         {% endfor %}
       </select>
       <button type="submit" class="btn btn-ink">Update status</button>
@@ -46,14 +45,14 @@
     <table class="ledger">
       <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th></th></tr></thead>
       <tbody>
-        {% for c in client.contacts %}
+        {% for c in party.contacts %}
         <tr>
           <td>{{ c.name }} {% if c.is_primary %}<span class="pill">Primary</span>{% endif %}</td>
           <td class="text-sm">{{ c.phone or '—' }}</td>
           <td class="text-sm">{{ c.email or '—' }}</td>
           <td>
             {% if not c.is_primary %}
-            <form method="POST" action="{{ url_for('clients.set_primary_contact', client_id=client.id, contact_id=c.id) }}">
+            <form method="POST" action="{{ url_for(endpoint_prefix ~ '.set_primary_contact', party_id=party.id, contact_id=c.id) }}">
               <button type="submit" class="btn btn-ghost btn-sm">Make primary</button>
             </form>
             {% endif %}
@@ -63,7 +62,7 @@
       </tbody>
     </table>
     <hr class="divider">
-    <form method="POST" action="{{ url_for('clients.add_contact', client_id=client.id) }}" class="form-row">
+    <form method="POST" action="{{ url_for(endpoint_prefix ~ '.add_contact', party_id=party.id) }}" class="form-row">
       <div class="field"><label>Name</label><input type="text" name="name" required></div>
       <div class="field"><label>Phone</label><input type="tel" name="phone"></div>
       <div class="field"><label>Email</label><input type="email" name="email"></div>
@@ -74,7 +73,7 @@
 
 <div class="card">
   <div class="card-header"><h3>Payment history</h3><span class="text-sm text-soft">All amounts auto-converted to INR</span></div>
-  <form method="POST" action="{{ url_for('clients.add_payment', client_id=client.id) }}" style="margin-bottom:18px;">
+  <form method="POST" action="{{ url_for(endpoint_prefix ~ '.add_payment', party_id=party.id) }}" style="margin-bottom:18px;">
     <div class="form-row">
       <div class="field"><label>Account<span class="required-mark">*</span></label><input type="text" name="account_name" placeholder="e.g. HDFC Current A/C" required></div>
       <div class="field"><label>Date &amp; time<span class="required-mark">*</span></label><input type="datetime-local" name="payment_datetime" required></div>
@@ -119,7 +118,7 @@
 
 <div class="card">
   <div class="card-header"><h3>Documents</h3></div>
-  <form method="POST" action="{{ url_for('clients.add_document', client_id=client.id) }}" style="margin-bottom:18px;">
+  <form method="POST" action="{{ url_for(endpoint_prefix ~ '.add_document', party_id=party.id) }}" style="margin-bottom:18px;">
     <div class="form-row">
       <div class="field"><label>Document name<span class="required-mark">*</span></label><input type="text" name="document_name" required></div>
       <div class="field">
@@ -137,7 +136,7 @@
       <div class="field"><label>Date<span class="required-mark">*</span></label><input type="date" name="document_date" required></div>
     </div>
     <div class="field"><label>Notes</label><input type="text" name="notes" placeholder="optional"></div>
-    <p class="hint">Manually recorded documents are metadata only for now. Quotations and proforma invoices made for this client's originating lead (before or after conversion) appear below automatically - future auto-generated document types will too.</p>
+    <p class="hint">Manually recorded documents are metadata only for now. Quotations and proforma invoices made for this {{ type_label.lower() }}'s originating lead (before or after conversion) appear below automatically - future auto-generated document types will too.</p>
     <button type="submit" class="btn btn-primary btn-sm">Record document</button>
   </form>
 
@@ -166,7 +165,7 @@
 <div class="card">
   <div class="card-header"><h3>Communications</h3><span class="text-sm text-soft">{{ communications|length }} logged</span></div>
 
-  <form method="POST" action="{{ url_for('clients.add_communication', client_id=client.id) }}" style="margin-bottom:18px;">
+  <form method="POST" action="{{ url_for(endpoint_prefix ~ '.add_communication', party_id=party.id) }}" style="margin-bottom:18px;">
     <div class="form-row">
       <div class="field"><label>Date &amp; time<span class="required-mark">*</span></label><input type="datetime-local" name="comm_date" required></div>
       <div class="field">

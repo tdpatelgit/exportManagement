@@ -180,15 +180,26 @@ def add_communication(lead_id):
     return redirect(url_for("leads.view_lead", lead_id=lead_id))
 
 
+_CONVERT_TARGETS = {
+    "Buyer": ("buyer_service", "buyers.view_party"),
+    "Exporter": ("exporter_service", "exporters.view_party"),
+    "Supplier": ("supplier_service", "suppliers.view_supplier"),
+}
+
+
 @leads_bp.route("/<int:lead_id>/convert", methods=["POST"])
 @admin_required
 def convert_to_client(lead_id):
+    client_type = request.form.get("client_type", "Buyer")
+    if client_type not in _CONVERT_TARGETS:
+        client_type = "Buyer"
+    service_attr, view_endpoint = _CONVERT_TARGETS[client_type]
     try:
-        client = current_app.container.client_service.convert_lead(
-            lead_id, g.user, client_type=request.form.get("client_type", "Buyer")
-        )
-        flash(f"Lead approved and converted to client '{client.company_name}'.", "success")
-        return redirect(url_for("clients.view_client", client_id=client.id))
+        service = getattr(current_app.container, service_attr)
+        record = service.convert_lead(lead_id, g.user)
+        flash(f"Lead approved and converted to {client_type.lower()} '{record.company_name}'.", "success")
+        id_kwarg = "party_id" if service_attr != "supplier_service" else "supplier_id"
+        return redirect(url_for(view_endpoint, **{id_kwarg: record.id}))
     except (ValidationError, PermissionDeniedError) as e:
         flash(str(e), "error")
     except NotFoundError:

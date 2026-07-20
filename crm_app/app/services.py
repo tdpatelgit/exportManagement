@@ -29,7 +29,7 @@ from werkzeug.utils import secure_filename
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
 from app.models import (
-    User, Lead, Client, ContactPerson, Communication, PaymentEntry, DocumentEntry,
+    User, Lead, Party, Supplier, ContactPerson, Communication, PaymentEntry, DocumentEntry,
     LEAD_STATUSES, CLIENT_STATUSES, CLIENT_STATUS_ADVANCE_ON, PRODUCT_UNITS, Category, Product,
     ProductPalletType, ProductFolder,
     Design, Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
@@ -37,7 +37,7 @@ from app.models import (
     DocumentVersion,
 )
 from app.repositories import (
-    TenantRepository, UserRepositoryBase, LeadRepositoryBase, ClientRepositoryBase,
+    TenantRepository, UserRepositoryBase, LeadRepositoryBase, PartyRepositoryBase, SupplierRepositoryBase,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
     CategoryRepository, ProductRepository, ProductPalletTypeRepository, ProductFolderRepository, DesignRepository,
     QuotationRepository, ProformaInvoiceRepository, PurchaseOrderRepository, PackingListRepository,
@@ -291,17 +291,20 @@ class LeadService:
 
 
 # ============================================================
-# CLIENT SERVICE
+# PARTY SERVICE (Buyer / Exporter - identical behaviour; one instance per
+# type, constructed with that type's repo and parent_type. Supplier has its
+# own SupplierService below since its shape has diverged.)
 # ============================================================
-class ClientService:
-    def __init__(self, client_repo: ClientRepositoryBase, lead_repo: LeadRepositoryBase,
+class PartyService:
+    def __init__(self, party_repo: PartyRepositoryBase, parent_type: str, lead_repo: LeadRepositoryBase,
                  comm_service: CommunicationService, payment_repo: PaymentRepository,
                  document_repo: DocumentRepository, currency_service: CurrencyService,
                  quotation_repo: QuotationRepository,
                  proforma_invoice_repo: Optional[ProformaInvoiceRepository] = None,
                  packing_list_repo: Optional[PackingListRepository] = None,
                  purchase_order_repo: Optional[PurchaseOrderRepository] = None):
-        self.client_repo = client_repo
+        self.party_repo = party_repo
+        self.parent_type = parent_type  # 'buyer' | 'exporter'
         self.lead_repo = lead_repo
         self.comm_service = comm_service
         self.payment_repo = payment_repo
@@ -312,106 +315,136 @@ class ClientService:
         self.packing_list_repo = packing_list_repo
         self.purchase_order_repo = purchase_order_repo
 
-    # ---- lead -> client conversion (admin only) --------------------------------------------------
-    def convert_lead(self, lead_id: int, admin_user: User, client_type: str = "Buyer") -> Client:
+    @property
+    def client_type(self) -> str:
+        return self.parent_type.capitalize()  # 'Buyer' | 'Exporter' - matches leads.converted_client_type
+
+    # ---- lead -> party conversion (admin only) --------------------------------------------------
+    def convert_lead(self, lead_id: int, admin_user: User) -> Party:
         if not admin_user.is_admin:
-            raise PermissionDeniedError("Only an admin can approve a lead for conversion to client.")
+            raise PermissionDeniedError(f"Only an admin can approve a lead for conversion to {self.client_type.lower()}.")
         lead = self.lead_repo.get_by_id(lead_id)
         if not lead or lead.company_id != admin_user.company_id:
             raise NotFoundError(f"Lead #{lead_id} not found.")
         if lead.is_converted:
-            raise ValidationError("This lead has already been converted to a client.")
-        if client_type not in ("Supplier", "Exporter", "Buyer"):
-            client_type = "Buyer"
+            raise ValidationError("This lead has already been converted.")
 
-        client = Client(
+        party = Party(
             id=None, company_id=lead.company_id, lead_id=lead.id, company_name=lead.company_name,
             phone=lead.phone, email=lead.email, facebook=lead.facebook, instagram=lead.instagram,
-            other_social=lead.other_social, client_type=client_type,
+            other_social=lead.other_social,
             status="proforma_invoice_submission_pending", created_by=admin_user.id,
         )
-        return self.client_repo.convert_from_lead(client, lead.contacts)
+        return self.party_repo.convert_from_lead(party, lead.contacts)
+
+    # ---- add directly (admin only, no originating lead) --------------------------------------------------
+    def create(self, current_user: User, fields: dict, contacts: Optional[List[dict]] = None) -> Party:
+        if not current_user.is_admin:
+            raise PermissionDeniedError(f"Only an admin can add a new {self.client_type.lower()}.")
+        company_name = (fields.get("company_name") or "").strip()
+        phone = (fields.get("phone") or "").strip()
+        email = (fields.get("email") or "").strip()
+        if not company_name or not phone or not email:
+            raise ValidationError("Company name, phone and email are all compulsory.")
+
+        party = Party(
+            id=None, company_id=current_user.company_id, lead_id=None, company_name=company_name,
+            phone=phone, email=email,
+            facebook=(fields.get("facebook") or "").strip() or None,
+            instagram=(fields.get("instagram") or "").strip() or None,
+            other_social=(fields.get("other_social") or "").strip() or None,
+            address=(fields.get("address") or "").strip() or None,
+            status="proforma_invoice_submission_pending", created_by=current_user.id,
+        )
+        party = self.party_repo.create(party)
+        for c in (contacts or []):
+            if not (c.get("name") or "").strip():
+                continue
+            self.party_repo.contacts.add(party.id, ContactPerson(
+                id=None, name=c["name"].strip(), phone=c.get("phone") or None, email=c.get("email") or None,
+                is_primary=bool(c.get("is_primary")),
+            ))
+        return self.get(party.id, current_user.company_id)
 
     # ---- reads --------------------------------------------------
-    def get(self, client_id: int, company_id: int) -> Client:
-        client = self.client_repo.get_by_id(client_id)
-        if not client or client.company_id != company_id:
-            # 404, not 403 - don't reveal that another company's client exists.
-            raise NotFoundError(f"Client #{client_id} not found.")
-        return client
+    def get(self, party_id: int, company_id: int) -> Party:
+        party = self.party_repo.get_by_id(party_id)
+        if not party or party.company_id != company_id:
+            # 404, not 403 - don't reveal that another company's record exists.
+            raise NotFoundError(f"{self.client_type} #{party_id} not found.")
+        return party
 
-    def list_all(self, company_id: int, client_type: Optional[str] = None,
-                 status: Optional[str] = None) -> List[Client]:
-        return self.client_repo.list_all(company_id, client_type, status)
+    def list_all(self, company_id: int, status: Optional[str] = None) -> List[Party]:
+        return self.party_repo.list_all(company_id, status)
 
     # ---- writes --------------------------------------------------
-    def update_compulsory_fields(self, client_id: int, current_user: User, fields: dict) -> None:
+    def update_compulsory_fields(self, party_id: int, current_user: User, fields: dict) -> None:
         if not current_user.is_admin:
-            raise PermissionDeniedError("Only an admin can change a client's compulsory fields.")
-        self.get(client_id, current_user.company_id)  # 404s if missing/another company's
+            raise PermissionDeniedError(f"Only an admin can change a {self.client_type.lower()}'s compulsory fields.")
+        self.get(party_id, current_user.company_id)  # 404s if missing/another company's
         if not fields.get("company_name") or not fields.get("phone") or not fields.get("email"):
             raise ValidationError("Company name, phone and email are all compulsory.")
-        self.client_repo.update_compulsory_fields(client_id, fields)
+        self.party_repo.update_compulsory_fields(party_id, fields)
 
-    def update_status(self, client_id: int, current_user: User, status: str) -> None:
-        self.get(client_id, current_user.company_id)  # 404s if missing/another company's
+    def update_status(self, party_id: int, current_user: User, status: str) -> None:
+        self.get(party_id, current_user.company_id)  # 404s if missing/another company's
         valid_statuses = {s for s, _ in CLIENT_STATUSES}
         if status not in valid_statuses:
-            raise ValidationError("Invalid client status.")
-        self.client_repo.update_status(client_id, status)
+            raise ValidationError("Invalid status.")
+        self.party_repo.update_status(party_id, status)
 
-    def add_contact(self, client_id: int, current_user: User, name: str, phone: str, email: str) -> ContactPerson:
-        self.get(client_id, current_user.company_id)  # 404s if missing/another company's
+    def add_contact(self, party_id: int, current_user: User, name: str, phone: str, email: str) -> ContactPerson:
+        self.get(party_id, current_user.company_id)  # 404s if missing/another company's
         if not name or not name.strip():
             raise ValidationError("Contact person name is required.")
-        return self.client_repo.contacts.add(client_id, ContactPerson(
+        return self.party_repo.contacts.add(party_id, ContactPerson(
             id=None, name=name.strip(), phone=phone or None, email=email or None, is_primary=False
         ))
 
-    def set_primary_contact(self, client_id: int, current_user: User, contact_id: int) -> None:
-        client = self.get(client_id, current_user.company_id)
-        if not any(c.id == contact_id for c in client.contacts):
-            raise ValidationError("That contact does not belong to this client.")
-        self.client_repo.contacts.set_primary(client_id, contact_id)
+    def set_primary_contact(self, party_id: int, current_user: User, contact_id: int) -> None:
+        party = self.get(party_id, current_user.company_id)
+        if not any(c.id == contact_id for c in party.contacts):
+            raise ValidationError("That contact does not belong to this record.")
+        self.party_repo.contacts.set_primary(party_id, contact_id)
 
-    def add_communication(self, client_id: int, current_user: User, **comm_kwargs) -> Communication:
-        self.get(client_id, current_user.company_id)  # 404s if missing/another company's
-        return self.comm_service.add("client", client_id, current_user.id, **comm_kwargs)
+    def add_communication(self, party_id: int, current_user: User, **comm_kwargs) -> Communication:
+        self.get(party_id, current_user.company_id)  # 404s if missing/another company's
+        return self.comm_service.add(self.parent_type, party_id, current_user.id, **comm_kwargs)
 
-    def add_payment(self, client_id: int, current_user: User, account_name: str, payment_datetime: str,
+    def add_payment(self, party_id: int, current_user: User, account_name: str, payment_datetime: str,
                      amount_original: float, currency_code: str) -> PaymentEntry:
-        self.get(client_id, current_user.company_id)
+        self.get(party_id, current_user.company_id)
         if not account_name or not account_name.strip():
             raise ValidationError("Account name is required for a payment entry.")
         if amount_original is None or amount_original <= 0:
             raise ValidationError("Payment amount must be a positive number.")
         rate, amount_inr = self.currency_service.convert(amount_original, currency_code)
         payment = PaymentEntry(
-            id=None, client_id=client_id, account_name=account_name.strip(),
+            id=None, parent_type=self.parent_type, parent_id=party_id, account_name=account_name.strip(),
             payment_datetime=payment_datetime or datetime.now().strftime("%Y-%m-%d %H:%M"),
             amount_original=amount_original, currency_code=currency_code.upper(),
             conversion_rate=rate, amount_inr=amount_inr,
         )
         return self.payment_repo.add(payment)
 
-    def add_document(self, client_id: int, current_user: User, document_name: str, document_type: str,
+    def add_document(self, party_id: int, current_user: User, document_name: str, document_type: str,
                       document_date: str, notes: str) -> DocumentEntry:
-        self.get(client_id, current_user.company_id)
+        self.get(party_id, current_user.company_id)
         if not document_name or not document_name.strip():
             raise ValidationError("Document name is required.")
         if not document_type or not document_type.strip():
             raise ValidationError("Document type is required.")
         doc = DocumentEntry(
-            id=None, client_id=client_id, document_name=document_name.strip(),
+            id=None, parent_type=self.parent_type, parent_id=party_id, document_name=document_name.strip(),
             document_type=document_type.strip(),
             document_date=document_date or date.today().isoformat(), notes=notes or None,
         )
         return self.document_repo.add(doc)
 
-    def document_feed(self, client: Client) -> List[dict]:
-        """One combined, date-sorted list for the client's 'Documents' card:
+    def document_feed(self, party: Party) -> List[dict]:
+        """One combined, date-sorted list for the 'Documents' card:
         manually recorded DocumentEntry rows plus every quotation/proforma
-        invoice made against the client's originating lead (these aren't
+        invoice made against the party's originating lead (these aren't
         separate sections here - they're just auto-generated document types
         feeding the same card). Future auto-generated document types should
         feed into this the same way. `link` carries its own kwarg dict so
@@ -421,30 +454,30 @@ class ClientService:
                 "name": d.document_name, "type": d.document_type, "date": d.document_date,
                 "notes": d.notes, "link": None,
             }
-            for d in self.document_repo.list_for_client(client.id)
+            for d in self.document_repo.list_for(self.parent_type, party.id)
         ]
-        for q in self.quotation_repo.list_for_lead(client.lead_id) if client.lead_id else []:
+        for q in self.quotation_repo.list_for_lead(party.lead_id) if party.lead_id else []:
             rows.append({
                 "name": q.quotation_number, "type": "Quotation", "date": q.quotation_date,
                 "notes": f"{q.buyer_name} · $ {q.invoice_value_usd:,.2f}",
                 "link": ("quotations.view_quotation", {"quotation_id": q.id}),
             })
         if self.proforma_invoice_repo:
-            for pi in self.proforma_invoice_repo.list_for_lead(client.lead_id) if client.lead_id else []:
+            for pi in self.proforma_invoice_repo.list_for_lead(party.lead_id) if party.lead_id else []:
                 rows.append({
                     "name": pi.invoice_number, "type": "Proforma Invoice", "date": pi.invoice_date,
                     "notes": f"{pi.consignee_name} · $ {pi.invoice_value_usd:,.2f}",
                     "link": ("proforma_invoices.view_proforma_invoice", {"proforma_invoice_id": pi.id}),
                 })
         if self.purchase_order_repo:
-            for po in self.purchase_order_repo.list_for_lead(client.lead_id) if client.lead_id else []:
+            for po in self.purchase_order_repo.list_for_lead(party.lead_id) if party.lead_id else []:
                 rows.append({
                     "name": po.po_number, "type": "Purchase Order", "date": po.po_date,
                     "notes": f"{po.seller_name} · ₹ {po.order_value_inr:,.2f}",
                     "link": ("purchase_orders.view_purchase_order", {"purchase_order_id": po.id}),
                 })
         if self.packing_list_repo:
-            for pl in self.packing_list_repo.list_for_lead(client.lead_id) if client.lead_id else []:
+            for pl in self.packing_list_repo.list_for_lead(party.lead_id) if party.lead_id else []:
                 rows.append({
                     "name": pl.packing_list_number, "type": "Packing List", "date": pl.packing_list_date,
                     "notes": f"{pl.total_quantity:,.2f} qty",
@@ -454,35 +487,230 @@ class ClientService:
         return rows
 
 
-def advance_client_status(client_repo: ClientRepositoryBase, lead_repo: LeadRepositoryBase,
+# ============================================================
+# SUPPLIER SERVICE (its own profile shape - GSTIN/PAN/IEC/bank/contacts,
+# modeled on CompanyService but per-supplier rather than per-tenant, since a
+# company can have many suppliers. Document types for suppliers aren't
+# defined yet, so payments/documents/communications reuse the same shared
+# satellite tables as Buyer/Exporter, tagged parent_type='supplier'.)
+# ============================================================
+class SupplierService:
+    def __init__(self, supplier_repo: SupplierRepositoryBase, lead_repo: LeadRepositoryBase,
+                 comm_service: CommunicationService, payment_repo: PaymentRepository,
+                 document_repo: DocumentRepository, currency_service: CurrencyService,
+                 purchase_order_repo: Optional[PurchaseOrderRepository] = None):
+        self.supplier_repo = supplier_repo
+        self.lead_repo = lead_repo
+        self.comm_service = comm_service
+        self.payment_repo = payment_repo
+        self.document_repo = document_repo
+        self.currency_service = currency_service
+        self.purchase_order_repo = purchase_order_repo
+
+    # ---- lead -> supplier conversion (admin only) --------------------------------------------------
+    def convert_lead(self, lead_id: int, admin_user: User) -> Supplier:
+        if not admin_user.is_admin:
+            raise PermissionDeniedError("Only an admin can approve a lead for conversion to supplier.")
+        lead = self.lead_repo.get_by_id(lead_id)
+        if not lead or lead.company_id != admin_user.company_id:
+            raise NotFoundError(f"Lead #{lead_id} not found.")
+        if lead.is_converted:
+            raise ValidationError("This lead has already been converted.")
+
+        supplier = Supplier(
+            id=None, company_id=lead.company_id, lead_id=lead.id, company_name=lead.company_name,
+            status="proforma_invoice_submission_pending", created_by=admin_user.id,
+        )
+        supplier = self.supplier_repo.convert_from_lead(supplier)
+        # A Lead doesn't capture GSTIN/PAN/IEC/bank details - those are
+        # filled in afterward on the supplier record. It does capture a
+        # phone/email and contact persons, so seed those across in the same
+        # shape our_company itself uses.
+        details = []
+        if lead.phone:
+            details.append({"type": "phone", "value": lead.phone, "is_primary": True})
+        if lead.email:
+            details.append({"type": "email", "value": lead.email, "is_primary": True})
+        if details:
+            self.supplier_repo.replace_contact_details(supplier.id, details)
+        if lead.contacts:
+            primary = next((c for c in lead.contacts if c.is_primary), lead.contacts[0])
+            self.supplier_repo.replace_contact_persons(supplier.id, [{"name": primary.name, "is_primary": True}])
+        return self.get(supplier.id, admin_user.company_id)
+
+    # ---- reads --------------------------------------------------
+    def get(self, supplier_id: int, company_id: int) -> Supplier:
+        supplier = self.supplier_repo.get_by_id(supplier_id)
+        if not supplier or supplier.company_id != company_id:
+            # 404, not 403 - don't reveal that another company's record exists.
+            raise NotFoundError(f"Supplier #{supplier_id} not found.")
+        return supplier
+
+    def list_all(self, company_id: int, status: Optional[str] = None) -> List[Supplier]:
+        return self.supplier_repo.list_all(company_id, status)
+
+    # ---- add directly (admin only, no originating lead) --------------------------------------------------
+    def create(self, current_user: User, company_name: str, address: str, gstin: str, pan_no: str, iec: str,
+               contact_details: list, contact_persons: list, bank_details: list) -> Supplier:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can add a new supplier.")
+        if not company_name or not company_name.strip():
+            raise ValidationError("Company name is compulsory.")
+        valid_details, valid_persons = self._validate_profile_rows(contact_details, contact_persons, bank_details)
+
+        supplier = Supplier(
+            id=None, company_id=current_user.company_id, lead_id=None, company_name=company_name.strip(),
+            status="proforma_invoice_submission_pending", created_by=current_user.id,
+            address=(address or "").strip() or None, gstin=gstin or None, pan_no=pan_no or None, iec=iec or None,
+        )
+        supplier = self.supplier_repo.create(supplier)
+        self.supplier_repo.replace_contact_details(supplier.id, valid_details)
+        self.supplier_repo.replace_contact_persons(supplier.id, valid_persons)
+        self.supplier_repo.replace_bank_details(supplier.id, bank_details)
+        return self.get(supplier.id, current_user.company_id)
+
+    @staticmethod
+    def _validate_profile_rows(contact_details: list, contact_persons: list, bank_details: list) -> tuple:
+        """Shared by create/update_profile: every contact detail row needs a
+        type once it has a value, and every bank detail row is all-or-
+        nothing once any of its fields is filled in. Returns
+        (valid_details, valid_persons) - bank_details doesn't need
+        filtering, just validating in place."""
+        valid_details = [d for d in contact_details if d.get("value", "").strip()]
+        for d in valid_details:
+            if not d.get("type", "").strip():
+                raise ValidationError("Every contact detail row needs a type.")
+        valid_persons = [p for p in contact_persons if p.get("name", "").strip()]
+
+        bank_fields = ["bank_name", "account_number", "ifsc_code", "swift_code", "branch", "bank_address"]
+        bank_labels = {
+            "bank_name": "bank name", "account_number": "account number", "ifsc_code": "IFSC code",
+            "swift_code": "SWIFT code", "branch": "branch", "bank_address": "bank address",
+        }
+        for b in bank_details:
+            missing = [bank_labels[f] for f in bank_fields if not b.get(f, "").strip()]
+            if missing:
+                raise ValidationError(f"Bank detail '{b.get('bank_name') or '(unnamed)'}' is missing: {', '.join(missing)}.")
+
+        return valid_details, valid_persons
+
+    # ---- writes --------------------------------------------------
+    def update_profile(self, supplier_id: int, current_user: User, company_name: str, address: str,
+                        gstin: str, pan_no: str, iec: str, contact_details: list,
+                        contact_persons: list, bank_details: list) -> None:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can edit a supplier's profile.")
+        self.get(supplier_id, current_user.company_id)  # 404s if missing/another company's
+        if not company_name or not company_name.strip():
+            raise ValidationError("Company name is compulsory.")
+        valid_details, valid_persons = self._validate_profile_rows(contact_details, contact_persons, bank_details)
+
+        self.supplier_repo.update_profile(supplier_id, {
+            "company_name": company_name.strip(), "address": address or None,
+            "gstin": gstin or None, "pan_no": pan_no or None, "iec": iec or None,
+        })
+        self.supplier_repo.replace_contact_details(supplier_id, valid_details)
+        self.supplier_repo.replace_contact_persons(supplier_id, valid_persons)
+        self.supplier_repo.replace_bank_details(supplier_id, bank_details)
+
+    def update_status(self, supplier_id: int, current_user: User, status: str) -> None:
+        self.get(supplier_id, current_user.company_id)  # 404s if missing/another company's
+        valid_statuses = {s for s, _ in CLIENT_STATUSES}
+        if status not in valid_statuses:
+            raise ValidationError("Invalid status.")
+        self.supplier_repo.update_status(supplier_id, status)
+
+    def add_communication(self, supplier_id: int, current_user: User, **comm_kwargs) -> Communication:
+        self.get(supplier_id, current_user.company_id)  # 404s if missing/another company's
+        return self.comm_service.add("supplier", supplier_id, current_user.id, **comm_kwargs)
+
+    def add_payment(self, supplier_id: int, current_user: User, account_name: str, payment_datetime: str,
+                     amount_original: float, currency_code: str) -> PaymentEntry:
+        self.get(supplier_id, current_user.company_id)
+        if not account_name or not account_name.strip():
+            raise ValidationError("Account name is required for a payment entry.")
+        if amount_original is None or amount_original <= 0:
+            raise ValidationError("Payment amount must be a positive number.")
+        rate, amount_inr = self.currency_service.convert(amount_original, currency_code)
+        payment = PaymentEntry(
+            id=None, parent_type="supplier", parent_id=supplier_id, account_name=account_name.strip(),
+            payment_datetime=payment_datetime or datetime.now().strftime("%Y-%m-%d %H:%M"),
+            amount_original=amount_original, currency_code=currency_code.upper(),
+            conversion_rate=rate, amount_inr=amount_inr,
+        )
+        return self.payment_repo.add(payment)
+
+    def add_document(self, supplier_id: int, current_user: User, document_name: str, document_type: str,
+                      document_date: str, notes: str) -> DocumentEntry:
+        self.get(supplier_id, current_user.company_id)
+        if not document_name or not document_name.strip():
+            raise ValidationError("Document name is required.")
+        if not document_type or not document_type.strip():
+            raise ValidationError("Document type is required.")
+        doc = DocumentEntry(
+            id=None, parent_type="supplier", parent_id=supplier_id, document_name=document_name.strip(),
+            document_type=document_type.strip(),
+            document_date=document_date or date.today().isoformat(), notes=notes or None,
+        )
+        return self.document_repo.add(doc)
+
+    def document_feed(self, supplier: Supplier) -> List[dict]:
+        """Manually recorded documents plus every Purchase Order where this
+        supplier was picked as the seller - a Supplier's natural link to POs
+        is seller_supplier_id, not an originating lead (unlike Buyer/
+        Exporter, whose auto-generated documents are found via lead_id)."""
+        rows = [
+            {
+                "name": d.document_name, "type": d.document_type, "date": d.document_date,
+                "notes": d.notes, "link": None,
+            }
+            for d in self.document_repo.list_for("supplier", supplier.id)
+        ]
+        if self.purchase_order_repo:
+            for po in self.purchase_order_repo.list_for_seller(supplier.id):
+                rows.append({
+                    "name": po.po_number, "type": "Purchase Order", "date": po.po_date,
+                    "notes": f"{po.seller_name} · ₹ {po.order_value_inr:,.2f}",
+                    "link": ("purchase_orders.view_purchase_order", {"purchase_order_id": po.id}),
+                })
+        rows.sort(key=lambda r: r["date"], reverse=True)
+        return rows
+
+
+def advance_client_status(party_repos: dict, lead_repo: LeadRepositoryBase,
                            lead_id: Optional[int], document_type: str) -> None:
-    """Moves the client tied to `lead_id` forward to whatever CLIENT_STATUSES
-    stage becomes pending once `document_type` has just been generated - e.g.
-    generating a Proforma Invoice clears "proforma invoice submission
-    pending" and lands on "purchase order submission pending". Every
-    document service calls this same helper after create/update; adding a
-    new document type only means registering it in
-    models.CLIENT_STATUS_ADVANCE_ON, no other wiring needed. No-op for
-    document types that don't map to a stage (e.g. Packing List), leads that
-    haven't converted to a client yet, or when the client is already at or
-    past the target stage (regenerating/editing a document shouldn't walk
-    the client status backwards)."""
+    """Moves the buyer/supplier/exporter tied to `lead_id` forward to
+    whatever CLIENT_STATUSES stage becomes pending once `document_type` has
+    just been generated - e.g. generating a Proforma Invoice clears
+    "proforma invoice submission pending" and lands on "purchase order
+    submission pending". Every document service calls this same helper
+    after create/update; adding a new document type only means registering
+    it in models.CLIENT_STATUS_ADVANCE_ON, no other wiring needed.
+    `party_repos` maps 'Buyer'/'Supplier'/'Exporter' -> that type's repo, so
+    the right table can be looked up once `lead.converted_client_type` is
+    known. No-op for document types that don't map to a stage (e.g. Packing
+    List), leads that haven't converted yet, or when the record is already
+    at or past the target stage (regenerating/editing a document shouldn't
+    walk the status backwards)."""
     target_status = CLIENT_STATUS_ADVANCE_ON.get(document_type)
     if not target_status or not lead_id:
         return
     lead = lead_repo.get_by_id(lead_id)
-    if not lead or not lead.is_converted or not lead.converted_client_id:
+    if not lead or not lead.is_converted or not lead.converted_client_id or not lead.converted_client_type:
         return
-    client = client_repo.get_by_id(lead.converted_client_id)
-    if not client:
+    repo = party_repos.get(lead.converted_client_type)
+    if not repo:
+        return
+    record = repo.get_by_id(lead.converted_client_id)
+    if not record:
         return
     order = [key for key, _ in CLIENT_STATUSES]
     try:
-        if order.index(target_status) <= order.index(client.status):
+        if order.index(target_status) <= order.index(record.status):
             return
     except ValueError:
         pass  # current status isn't a recognized stage - advance anyway
-    client_repo.update_status(client.id, target_status)
+    repo.update_status(record.id, target_status)
 
 
 # ============================================================
@@ -582,11 +810,14 @@ class CompanyService:
 # ============================================================
 class StatsService:
     def __init__(self, user_repo: UserRepositoryBase, lead_repo: LeadRepositoryBase,
-                 comm_repo: CommunicationRepository, client_repo: ClientRepositoryBase):
+                 comm_repo: CommunicationRepository, buyer_repo: PartyRepositoryBase,
+                 exporter_repo: PartyRepositoryBase, supplier_repo: SupplierRepositoryBase):
         self.user_repo = user_repo
         self.lead_repo = lead_repo
         self.comm_repo = comm_repo
-        self.client_repo = client_repo
+        self.buyer_repo = buyer_repo
+        self.exporter_repo = exporter_repo
+        self.supplier_repo = supplier_repo
 
     def employee_performance(self, company_id: int) -> List[dict]:
         """One row per employee: leads generated + communications logged.
@@ -607,7 +838,13 @@ class StatsService:
 
     def overview_counts(self, company_id: int) -> dict:
         all_leads = self.lead_repo.list_all(company_id)
-        all_clients = self.client_repo.list_all(company_id)
+        # "Clients" on the dashboard now spans all three separate entities -
+        # a buyer, a supplier and an exporter each still count as one client.
+        all_clients = (
+            self.buyer_repo.list_all(company_id)
+            + self.exporter_repo.list_all(company_id)
+            + self.supplier_repo.list_all(company_id)
+        )
         status_breakdown = {}
         for lead in all_leads:
             status_breakdown[lead.status] = status_breakdown.get(lead.status, 0) + 1
@@ -646,16 +883,20 @@ class ReportService:
                    (SELECT COUNT(*) FROM communications c
                      WHERE c.employee_id = u.id AND date(c.comm_date) BETWEEN date(?) AND date(?)
                    ) AS communications_logged,
-                   (SELECT COUNT(*) FROM clients cl
-                     WHERE cl.lead_id IN (SELECT id FROM leads WHERE created_by = u.id)
-                       AND cl.company_id = ?
-                       AND date(cl.created_at) BETWEEN date(?) AND date(?)
+                   (SELECT
+                        (SELECT COUNT(*) FROM buyers b WHERE b.lead_id IN (SELECT id FROM leads WHERE created_by = u.id)
+                           AND b.company_id = ? AND date(b.created_at) BETWEEN date(?) AND date(?)) +
+                        (SELECT COUNT(*) FROM exporters e WHERE e.lead_id IN (SELECT id FROM leads WHERE created_by = u.id)
+                           AND e.company_id = ? AND date(e.created_at) BETWEEN date(?) AND date(?)) +
+                        (SELECT COUNT(*) FROM suppliers s WHERE s.lead_id IN (SELECT id FROM leads WHERE created_by = u.id)
+                           AND s.company_id = ? AND date(s.created_at) BETWEEN date(?) AND date(?))
                    ) AS clients_converted
             FROM users u
             WHERE u.role = 'employee' AND u.company_id = ?
             ORDER BY u.full_name
             """,
             (company_id, start_date, end_date, start_date, end_date,
+             company_id, start_date, end_date, company_id, start_date, end_date,
              company_id, start_date, end_date, company_id),
         )
         return [dict(r) for r in rows]
@@ -663,9 +904,14 @@ class ReportService:
     def payments_received_total(self, company_id: int, start_date: str, end_date: str) -> dict:
         row = self.db.query_one(
             """SELECT COUNT(*) AS payment_count, COALESCE(SUM(ph.amount_inr), 0) AS total_inr
-               FROM payment_history ph JOIN clients c ON c.id = ph.client_id
-               WHERE c.company_id = ? AND date(ph.payment_datetime) BETWEEN date(?) AND date(?)""",
-            (company_id, start_date, end_date),
+               FROM payment_history ph
+               WHERE date(ph.payment_datetime) BETWEEN date(?) AND date(?)
+                 AND (
+                   (ph.parent_type = 'buyer' AND ph.parent_id IN (SELECT id FROM buyers WHERE company_id = ?))
+                   OR (ph.parent_type = 'exporter' AND ph.parent_id IN (SELECT id FROM exporters WHERE company_id = ?))
+                   OR (ph.parent_type = 'supplier' AND ph.parent_id IN (SELECT id FROM suppliers WHERE company_id = ?))
+                 )""",
+            (start_date, end_date, company_id, company_id, company_id),
         )
         return dict(row) if row else {"payment_count": 0, "total_inr": 0}
 
@@ -1374,13 +1620,13 @@ class ProformaInvoiceService:
 
     def __init__(self, invoice_repo: ProformaInvoiceRepository, product_repo: ProductRepository,
                  lead_repo: LeadRepositoryBase, quotation_repo: QuotationRepository,
-                 version_service: "DocumentVersionService", client_repo: Optional[ClientRepositoryBase] = None):
+                 version_service: "DocumentVersionService", party_repos: Optional[dict] = None):
         self.invoice_repo = invoice_repo
         self.product_repo = product_repo
         self.lead_repo = lead_repo
         self.quotation_repo = quotation_repo
         self.version_service = version_service
-        self.client_repo = client_repo
+        self.party_repos = party_repos  # {'Buyer': ..., 'Supplier': ..., 'Exporter': ...} for advance_client_status
 
     # ---- reads --------------------------------------------------
     def get(self, invoice_id: int, company_id: int) -> ProformaInvoice:
@@ -1588,8 +1834,8 @@ class ProformaInvoiceService:
         invoice.invoice_number = self._generate_number(current_user.company_id, invoice.invoice_date)
         created = self.invoice_repo.create(invoice)
         self.version_service.record("proforma_invoice", created, current_user.id)
-        if self.client_repo:
-            advance_client_status(self.client_repo, self.lead_repo, created.lead_id, "proforma_invoice")
+        if self.party_repos:
+            advance_client_status(self.party_repos, self.lead_repo, created.lead_id, "proforma_invoice")
         return created
 
     def update(self, current_user: User, invoice_id: int, fields: dict, raw_items: list) -> ProformaInvoice:
@@ -1600,8 +1846,8 @@ class ProformaInvoiceService:
         self.invoice_repo.update(invoice_id, invoice)
         updated = self.get(invoice_id, current_user.company_id)
         self.version_service.record("proforma_invoice", updated, current_user.id)
-        if self.client_repo:
-            advance_client_status(self.client_repo, self.lead_repo, updated.lead_id, "proforma_invoice")
+        if self.party_repos:
+            advance_client_status(self.party_repos, self.lead_repo, updated.lead_id, "proforma_invoice")
         return updated
 
     def delete(self, current_user: User, invoice_id: int) -> None:
@@ -1623,13 +1869,15 @@ class PurchaseOrderService:
 
     def __init__(self, purchase_order_repo: PurchaseOrderRepository, product_repo: ProductRepository,
                  lead_repo: LeadRepositoryBase, proforma_invoice_repo: ProformaInvoiceRepository,
-                 version_service: "DocumentVersionService", client_repo: Optional[ClientRepositoryBase] = None):
+                 version_service: "DocumentVersionService", party_repos: Optional[dict] = None,
+                 supplier_repo: Optional[SupplierRepositoryBase] = None):
         self.purchase_order_repo = purchase_order_repo
         self.product_repo = product_repo
         self.lead_repo = lead_repo
         self.proforma_invoice_repo = proforma_invoice_repo
         self.version_service = version_service
-        self.client_repo = client_repo
+        self.party_repos = party_repos  # {'Buyer': ..., 'Supplier': ..., 'Exporter': ...} for advance_client_status
+        self.supplier_repo = supplier_repo  # for validating seller_supplier_id belongs to this company
 
     # ---- reads --------------------------------------------------
     def get(self, purchase_order_id: int, company_id: int) -> PurchaseOrder:
@@ -1793,17 +2041,17 @@ class PurchaseOrderService:
             if not invoice or invoice.company_id != current_user.company_id:
                 proforma_invoice_id = None
 
-        seller_client_id = int(fields["seller_client_id"]) if fields.get("seller_client_id") else None
-        if seller_client_id is not None and self.client_repo is not None:
-            # Only trust a client from this same company - same reasoning as lead_id above.
-            client = self.client_repo.get_by_id(seller_client_id)
-            if not client or client.company_id != current_user.company_id:
-                seller_client_id = None
+        seller_supplier_id = int(fields["seller_supplier_id"]) if fields.get("seller_supplier_id") else None
+        if seller_supplier_id is not None and self.supplier_repo is not None:
+            # Only trust a supplier from this same company - same reasoning as lead_id above.
+            supplier = self.supplier_repo.get_by_id(seller_supplier_id)
+            if not supplier or supplier.company_id != current_user.company_id:
+                seller_supplier_id = None
 
         return PurchaseOrder(
             id=None, company_id=current_user.company_id, po_number="", po_date=po_date,
             seller_name=seller_name, created_by=current_user.id, lead_id=lead_id,
-            proforma_invoice_id=proforma_invoice_id, seller_client_id=seller_client_id,
+            proforma_invoice_id=proforma_invoice_id, seller_supplier_id=seller_supplier_id,
             seller_address=(fields.get("seller_address") or "").strip() or None,
             seller_pan=(fields.get("seller_pan") or "").strip() or None,
             seller_gstin=(fields.get("seller_gstin") or "").strip() or None,
@@ -1828,8 +2076,8 @@ class PurchaseOrderService:
         purchase_order.po_number = self._generate_number(current_user.company_id, purchase_order.po_date)
         created = self.purchase_order_repo.create(purchase_order)
         self.version_service.record("purchase_order", created, current_user.id)
-        if self.client_repo:
-            advance_client_status(self.client_repo, self.lead_repo, created.lead_id, "purchase_order")
+        if self.party_repos:
+            advance_client_status(self.party_repos, self.lead_repo, created.lead_id, "purchase_order")
         return created
 
     def update(self, current_user: User, purchase_order_id: int, fields: dict, raw_items: list) -> PurchaseOrder:
@@ -1840,8 +2088,8 @@ class PurchaseOrderService:
         self.purchase_order_repo.update(purchase_order_id, purchase_order)
         updated = self.get(purchase_order_id, current_user.company_id)
         self.version_service.record("purchase_order", updated, current_user.id)
-        if self.client_repo:
-            advance_client_status(self.client_repo, self.lead_repo, updated.lead_id, "purchase_order")
+        if self.party_repos:
+            advance_client_status(self.party_repos, self.lead_repo, updated.lead_id, "purchase_order")
         return updated
 
     def delete(self, current_user: User, purchase_order_id: int) -> None:

@@ -41,7 +41,7 @@ from datetime import datetime
 # Because `_migrate` is idempotent and runs on every startup AND on every
 # restore, any backup - however old - is carried forward through the whole
 # chain of steps, never discarded.
-SCHEMA_VERSION = 12  # v12: purchase orders (new purchase_orders/purchase_order_items tables via schema.sql, plus packing_lists.purchase_order_id so a PO can carry its own packing list) and our_company.logo_path (company logo shown in the app and on generated documents). v11: each product quantity gets its own unit - quantity_unit (new, 'PCS' for existing rows) and alternate_quantity_unit (renamed from `unit`)
+SCHEMA_VERSION = 13  # v13: the single `clients` table (Buyer/Supplier/Exporter via client_type) is split into three separate entities - buyers/exporters (same shape as before, minus client_type), and suppliers (an our_company-shaped profile: GSTIN/PAN/IEC/bank/contacts, no logo/BIN/LUT). party_contacts replaces client_contacts for buyer/exporter; payment_history/documents/communications gain a parent_type discriminator so one type's ids can't collide with another's; purchase_orders.seller_client_id becomes seller_supplier_id; leads gains converted_client_type alongside converted_client_id. v12: purchase orders (new purchase_orders/purchase_order_items tables via schema.sql, plus packing_lists.purchase_order_id so a PO can carry its own packing list) and our_company.logo_path (company logo shown in the app and on generated documents). v11: each product quantity gets its own unit - quantity_unit (new, 'PCS' for existing rows) and alternate_quantity_unit (renamed from `unit`)
 
 
 class Database:
@@ -579,7 +579,7 @@ class Database:
             # it on every root table now that the column is guaranteed to
             # exist (either from a fresh install's schema.sql, or from the
             # legacy-upgrade block above). Safe to run unconditionally.
-            for table in ("users", "leads", "clients", "categories", "products", "product_folders", "designs", "quotations"):
+            for table in ("users", "leads", "categories", "products", "product_folders", "designs", "quotations"):
                 conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_company ON {table}(company_id)")
 
             # ---- v10: PALLET PACKING BECOMES A LIST OF PALLET TYPES ----
@@ -640,6 +640,293 @@ class Database:
             existing = {r["name"] for r in conn.execute("PRAGMA table_info(our_company)")}
             if existing and "logo_path" not in existing:
                 conn.execute("ALTER TABLE our_company ADD COLUMN logo_path TEXT")
+
+            # ---- v13: BUYERS / SUPPLIERS / EXPORTERS REPLACE `clients` ----
+            # Buyer, Supplier and Exporter become separate entities instead
+            # of one `clients` table with a client_type discriminator.
+            # Buyers/exporters keep the old shape verbatim (their ids are
+            # preserved so every other table's reference to the old
+            # clients.id keeps resolving with no remap); suppliers get an
+            # our_company-shaped profile instead (GSTIN/PAN/IEC/bank/
+            # contacts - no logo/BIN/LUT). Guarded on `clients` still
+            # existing, so this runs exactly once per database.
+            if conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='clients'"
+            ).fetchone():
+                conn.commit()
+                self._backup_db_file("pre_client_split")
+
+                # 1. Split every client row into its new home table.
+                conn.execute("""
+                    INSERT INTO buyers (id, company_id, lead_id, company_name, phone, email,
+                                         facebook, instagram, other_social, address, status,
+                                         created_by, created_at, updated_at)
+                    SELECT id, company_id, lead_id, company_name, phone, email,
+                           facebook, instagram, other_social, address, status,
+                           created_by, created_at, updated_at
+                    FROM clients WHERE client_type = 'Buyer'
+                """)
+                conn.execute("""
+                    INSERT INTO exporters (id, company_id, lead_id, company_name, phone, email,
+                                            facebook, instagram, other_social, address, status,
+                                            created_by, created_at, updated_at)
+                    SELECT id, company_id, lead_id, company_name, phone, email,
+                           facebook, instagram, other_social, address, status,
+                           created_by, created_at, updated_at
+                    FROM clients WHERE client_type = 'Exporter'
+                """)
+                conn.execute("""
+                    INSERT INTO suppliers (id, company_id, lead_id, company_name, address, status,
+                                            created_by, created_at, updated_at)
+                    SELECT id, company_id, lead_id, company_name, address, status,
+                           created_by, created_at, updated_at
+                    FROM clients WHERE client_type = 'Supplier'
+                """)
+                # A migrated supplier's phone/email is all it had - seed it
+                # into supplier_contact_details, the same shape
+                # our_company's own contact details already use.
+                for row in conn.execute(
+                    "SELECT id, phone, email FROM clients WHERE client_type = 'Supplier'"
+                ).fetchall():
+                    if row["phone"]:
+                        conn.execute(
+                            "INSERT INTO supplier_contact_details (supplier_id, type, value, is_primary) "
+                            "VALUES (?, 'phone', ?, 1)",
+                            (row["id"], row["phone"]),
+                        )
+                    if row["email"]:
+                        conn.execute(
+                            "INSERT INTO supplier_contact_details (supplier_id, type, value, is_primary) "
+                            "VALUES (?, 'email', ?, 1)",
+                            (row["id"], row["email"]),
+                        )
+
+                # 2. client_contacts -> party_contacts (buyer/exporter) or
+                #    supplier_contact_persons (supplier - name only; phone/
+                #    email don't fit that table's shape, same as
+                #    our_company's own contact persons never carrying one).
+                conn.execute("""
+                    INSERT INTO party_contacts (parent_type, parent_id, name, phone, email, is_primary)
+                    SELECT 'buyer', cc.client_id, cc.name, cc.phone, cc.email, cc.is_primary
+                    FROM client_contacts cc JOIN clients c ON c.id = cc.client_id
+                    WHERE c.client_type = 'Buyer'
+                """)
+                conn.execute("""
+                    INSERT INTO party_contacts (parent_type, parent_id, name, phone, email, is_primary)
+                    SELECT 'exporter', cc.client_id, cc.name, cc.phone, cc.email, cc.is_primary
+                    FROM client_contacts cc JOIN clients c ON c.id = cc.client_id
+                    WHERE c.client_type = 'Exporter'
+                """)
+                conn.execute("""
+                    INSERT INTO supplier_contact_persons (supplier_id, name, is_primary)
+                    SELECT cc.client_id, cc.name, cc.is_primary
+                    FROM client_contacts cc JOIN clients c ON c.id = cc.client_id
+                    WHERE c.client_type = 'Supplier'
+                """)
+
+                conn.commit()
+                conn.execute("PRAGMA foreign_keys = OFF")
+                conn.execute("PRAGMA legacy_alter_table = ON")
+
+                # 3. communications: widen the parent_type CHECK from
+                #    ('lead', 'client') to ('lead', 'buyer', 'supplier',
+                #    'exporter') - a plain UPDATE can't do this alone since
+                #    the OLD constraint would reject 'buyer'/'supplier'/
+                #    'exporter' values, so this needs the same rebuild dance
+                #    as payment_history/documents below.
+                conn.execute("ALTER TABLE communications RENAME TO communications_old")
+                conn.execute("""
+                    CREATE TABLE communications (
+                        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                        parent_type     TEXT NOT NULL CHECK (parent_type IN ('lead', 'buyer', 'supplier', 'exporter')),
+                        parent_id       INTEGER NOT NULL,
+                        employee_id     INTEGER NOT NULL REFERENCES users(id),
+                        comm_date       TEXT NOT NULL,
+                        mode            TEXT NOT NULL,
+                        description     TEXT NOT NULL,
+                        follow_up_date  TEXT,
+                        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+                    )
+                """)
+                conn.execute("""
+                    INSERT INTO communications (id, parent_type, parent_id, employee_id, comm_date,
+                                                 mode, description, follow_up_date, created_at)
+                    SELECT co.id,
+                           CASE WHEN co.parent_type = 'lead' THEN 'lead' ELSE LOWER(c.client_type) END,
+                           co.parent_id, co.employee_id, co.comm_date, co.mode, co.description,
+                           co.follow_up_date, co.created_at
+                    FROM communications_old co
+                    LEFT JOIN clients c ON co.parent_type = 'client' AND c.id = co.parent_id
+                    WHERE co.parent_type = 'lead' OR c.id IS NOT NULL
+                """)
+                conn.execute("DROP TABLE communications_old")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_comms_parent ON communications(parent_type, parent_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_comms_employee ON communications(employee_id)")
+
+                # 4. payment_history / documents: add parent_type, rename
+                #    client_id -> parent_id. Needs a full rebuild (adding a
+                #    CHECK constraint can't be done with a plain ALTER),
+                #    same rename-create-copy-drop dance used elsewhere here.
+                conn.execute("ALTER TABLE payment_history RENAME TO payment_history_old")
+                conn.execute("""
+                    CREATE TABLE payment_history (
+                        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                        parent_type         TEXT NOT NULL CHECK (parent_type IN ('buyer', 'supplier', 'exporter')),
+                        parent_id           INTEGER NOT NULL,
+                        account_name        TEXT NOT NULL,
+                        payment_datetime    TEXT NOT NULL,
+                        amount_original     REAL NOT NULL,
+                        currency_code       TEXT NOT NULL,
+                        conversion_rate     REAL NOT NULL,
+                        amount_inr          REAL NOT NULL,
+                        created_at          TEXT NOT NULL DEFAULT (datetime('now'))
+                    )
+                """)
+                conn.execute("""
+                    INSERT INTO payment_history (id, parent_type, parent_id, account_name, payment_datetime,
+                                                  amount_original, currency_code, conversion_rate, amount_inr, created_at)
+                    SELECT ph.id, LOWER(c.client_type), ph.client_id, ph.account_name, ph.payment_datetime,
+                           ph.amount_original, ph.currency_code, ph.conversion_rate, ph.amount_inr, ph.created_at
+                    FROM payment_history_old ph JOIN clients c ON c.id = ph.client_id
+                """)
+                conn.execute("DROP TABLE payment_history_old")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_payments_parent ON payment_history(parent_type, parent_id)")
+
+                conn.execute("ALTER TABLE documents RENAME TO documents_old")
+                conn.execute("""
+                    CREATE TABLE documents (
+                        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                        parent_type     TEXT NOT NULL CHECK (parent_type IN ('buyer', 'supplier', 'exporter')),
+                        parent_id       INTEGER NOT NULL,
+                        document_name   TEXT NOT NULL,
+                        document_type   TEXT NOT NULL,
+                        document_date   TEXT NOT NULL,
+                        notes           TEXT,
+                        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+                    )
+                """)
+                conn.execute("""
+                    INSERT INTO documents (id, parent_type, parent_id, document_name, document_type,
+                                            document_date, notes, created_at)
+                    SELECT d.id, LOWER(c.client_type), d.client_id, d.document_name, d.document_type,
+                           d.document_date, d.notes, d.created_at
+                    FROM documents_old d JOIN clients c ON c.id = d.client_id
+                """)
+                conn.execute("DROP TABLE documents_old")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_parent ON documents(parent_type, parent_id)")
+
+                # 5. leads: converted_client_id needs a converted_client_type
+                #    alongside it now that there are three possible target
+                #    tables instead of one.
+                conn.execute("ALTER TABLE leads RENAME TO leads_old")
+                conn.execute("""
+                    CREATE TABLE leads (
+                        id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                        company_id              INTEGER NOT NULL REFERENCES tenants(id),
+                        company_name            TEXT NOT NULL,
+                        phone                   TEXT NOT NULL,
+                        email                   TEXT NOT NULL,
+                        facebook                TEXT,
+                        instagram               TEXT,
+                        other_social            TEXT,
+                        status                  TEXT NOT NULL DEFAULT 'new'
+                                                CHECK (status IN (
+                                                    'new', 'in_communication', 'in_follow_up',
+                                                    'long_follow_up', 'quotation_submission_pending', 'in_client'
+                                                )),
+                        created_by              INTEGER NOT NULL REFERENCES users(id),
+                        created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+                        updated_at              TEXT NOT NULL DEFAULT (datetime('now')),
+                        is_converted            INTEGER NOT NULL DEFAULT 0,
+                        converted_client_type   TEXT CHECK (converted_client_type IN ('Buyer', 'Supplier', 'Exporter')),
+                        converted_client_id     INTEGER
+                    )
+                """)
+                conn.execute("""
+                    INSERT INTO leads (id, company_id, company_name, phone, email, facebook, instagram,
+                                        other_social, status, created_by, created_at, updated_at,
+                                        is_converted, converted_client_type, converted_client_id)
+                    SELECT lo.id, lo.company_id, lo.company_name, lo.phone, lo.email, lo.facebook, lo.instagram,
+                           lo.other_social, lo.status, lo.created_by, lo.created_at, lo.updated_at,
+                           lo.is_converted, c.client_type, lo.converted_client_id
+                    FROM leads_old lo LEFT JOIN clients c ON c.id = lo.converted_client_id
+                """)
+                conn.execute("DROP TABLE leads_old")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_created_by ON leads(created_by)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_company ON leads(company_id)")
+
+                # 6. purchase_orders.seller_client_id -> seller_supplier_id.
+                #    A PO's seller was always meant to be a Supplier - any
+                #    legacy row pointing at a non-Supplier client is stale
+                #    test data, so it's nulled out rather than carried into
+                #    the wrong table.
+                po_cols = {r["name"] for r in conn.execute("PRAGMA table_info(purchase_orders)")}
+                if "seller_client_id" in po_cols:
+                    conn.execute("ALTER TABLE purchase_orders RENAME TO purchase_orders_old")
+                    conn.execute("""
+                        CREATE TABLE purchase_orders (
+                            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                            company_id              INTEGER NOT NULL REFERENCES tenants(id),
+                            po_number               TEXT NOT NULL,
+                            po_date                 TEXT NOT NULL,
+                            lead_id                 INTEGER REFERENCES leads(id),
+                            proforma_invoice_id     INTEGER REFERENCES proforma_invoices(id),
+                            seller_supplier_id      INTEGER REFERENCES suppliers(id),
+                            seller_name             TEXT NOT NULL,
+                            seller_address          TEXT,
+                            seller_pan              TEXT,
+                            seller_gstin            TEXT,
+                            seller_ref_no           TEXT,
+                            port_of_loading         TEXT,
+                            port_of_discharge       TEXT,
+                            container_details       TEXT,
+                            delivery_time           TEXT,
+                            advance_percent         TEXT,
+                            payment_terms           TEXT,
+                            remarks                 TEXT,
+                            igst_percent            REAL NOT NULL DEFAULT 0,
+                            cgst_percent            REAL NOT NULL DEFAULT 0,
+                            sgst_percent            REAL NOT NULL DEFAULT 0,
+                            created_by              INTEGER NOT NULL REFERENCES users(id),
+                            created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+                            updated_at              TEXT NOT NULL DEFAULT (datetime('now')),
+                            UNIQUE (company_id, po_number)
+                        )
+                    """)
+                    conn.execute("""
+                        INSERT INTO purchase_orders (id, company_id, po_number, po_date, lead_id,
+                            proforma_invoice_id, seller_supplier_id, seller_name, seller_address, seller_pan,
+                            seller_gstin, seller_ref_no, port_of_loading, port_of_discharge, container_details,
+                            delivery_time, advance_percent, payment_terms, remarks,
+                            igst_percent, cgst_percent, sgst_percent, created_by, created_at, updated_at)
+                        SELECT po.id, po.company_id, po.po_number, po.po_date, po.lead_id,
+                            po.proforma_invoice_id,
+                            CASE WHEN po.seller_client_id IN (SELECT id FROM suppliers) THEN po.seller_client_id ELSE NULL END,
+                            po.seller_name, po.seller_address, po.seller_pan,
+                            po.seller_gstin, po.seller_ref_no, po.port_of_loading, po.port_of_discharge, po.container_details,
+                            po.delivery_time, po.advance_percent, po.payment_terms, po.remarks,
+                            po.igst_percent, po.cgst_percent, po.sgst_percent, po.created_by, po.created_at, po.updated_at
+                        FROM purchase_orders_old po
+                    """)
+                    conn.execute("DROP TABLE purchase_orders_old")
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_purchase_orders_company ON purchase_orders(company_id)")
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_purchase_orders_created_by ON purchase_orders(created_by)")
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_purchase_orders_date ON purchase_orders(po_date)")
+
+                # 7. clients / client_contacts are now fully migrated away.
+                conn.execute("DROP TABLE client_contacts")
+                conn.execute("DROP TABLE clients")
+
+                conn.execute("PRAGMA legacy_alter_table = OFF")
+                conn.execute("PRAGMA foreign_keys = ON")
+
+            # Unconditional (unlike the block above, which only fires once
+            # per legacy DB): a fresh install's schema.sql already creates
+            # payment_history/documents with parent_type, so these indexes
+            # need to exist either way.
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_payments_parent ON payment_history(parent_type, parent_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_parent ON documents(parent_type, parent_id)")
 
     def _backup_db_file(self, tag: str) -> None:
         """Copies the live DB file into instance/backups/ before a

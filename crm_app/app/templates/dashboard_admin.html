@@ -62,16 +62,16 @@
   </div>
 
   <div class="card">
-    <div class="card-header"><h3>Recent clients</h3><a href="{{ url_for('clients.list_clients') }}" class="text-sm">All clients →</a></div>
-    {% if recent_clients %}
-      {% for client in recent_clients %}
+    <div class="card-header"><h3>Recent buyers</h3><a href="{{ url_for('buyers.list_parties') }}" class="text-sm">All buyers →</a></div>
+    {% if recent_buyers %}
+      {% for buyer in recent_buyers %}
       <div class="flex-between" style="padding:7px 0; border-bottom:1px solid var(--color-line);">
-        <a href="{{ url_for('clients.view_client', client_id=client.id) }}">{{ client.company_name }}</a>
-        <span class="stamp stamp-{{ client.status|status_css }}">{{ client.client_type }}</span>
+        <a href="{{ url_for('buyers.view_party', party_id=buyer.id) }}">{{ buyer.company_name }}</a>
+        <span class="stamp stamp-{{ buyer.status|status_css }}">{{ buyer.status_label }}</span>
       </div>
       {% endfor %}
     {% else %}
-      <div class="empty-state">No clients yet - approve a lead to convert it.</div>
+      <div class="empty-state">No buyers yet - approve a lead to convert it.</div>
     {% endif %}
   </div>
 </div>

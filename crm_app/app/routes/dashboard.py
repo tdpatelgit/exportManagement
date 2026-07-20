@@ -21,13 +21,13 @@ def home():
         performance = container.stats_service.employee_performance(g.user.company_id)
         overview = container.stats_service.overview_counts(g.user.company_id)
         recent_leads = container.lead_service.list_for_dashboard(g.user)[:8]
-        recent_clients = container.client_service.list_all(g.user.company_id)[:8]
+        recent_buyers = container.buyer_service.list_all(g.user.company_id)[:8]
         return render_template(
             "dashboard_admin.html",
             performance=performance,
             overview=overview,
             recent_leads=recent_leads,
-            recent_clients=recent_clients,
+            recent_buyers=recent_buyers,
         )
 
     # Employee view: their own leads + upcoming/overdue follow-ups.
