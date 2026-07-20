@@ -36,8 +36,12 @@
           <td>
             {% if f.parent_type == 'lead' %}
               <a href="{{ url_for('leads.view_lead', lead_id=f.parent_id) }}" class="text-sm">Open →</a>
-            {% else %}
-              <a href="{{ url_for('clients.view_client', client_id=f.parent_id) }}" class="text-sm">Open →</a>
+            {% elif f.parent_type == 'buyer' %}
+              <a href="{{ url_for('buyers.view_party', party_id=f.parent_id) }}" class="text-sm">Open →</a>
+            {% elif f.parent_type == 'exporter' %}
+              <a href="{{ url_for('exporters.view_party', party_id=f.parent_id) }}" class="text-sm">Open →</a>
+            {% elif f.parent_type == 'supplier' %}
+              <a href="{{ url_for('suppliers.view_supplier', supplier_id=f.parent_id) }}" class="text-sm">Open →</a>
             {% endif %}
           </td>
         </tr>

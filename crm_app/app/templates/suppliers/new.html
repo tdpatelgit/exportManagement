@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}New Supplier{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Add directly · no originating lead</div>
+    <h1>New Supplier</h1>
+  </div>
+</div>
+
+<div class="card" style="max-width:760px;">
+  <form method="POST">
+    <fieldset>
+      <legend>Registration details</legend>
+      <div class="field">
+        <label for="company_name">Company name<span class="required-mark">*</span></label>
+        <input type="text" id="company_name" name="company_name" required>
+      </div>
+      <div class="field">
+        <label for="address">Address</label>
+        <textarea id="address" name="address" rows="3"></textarea>
+      </div>
+      <div class="form-row">
+        <div class="field"><label for="gstin">GSTIN</label><input type="text" id="gstin" name="gstin"></div>
+        <div class="field"><label for="pan_no">PAN No.</label><input type="text" id="pan_no" name="pan_no"></div>
+        <div class="field"><label for="iec">IEC</label><input type="text" id="iec" name="iec"></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Contact details <span class="text-soft text-sm">— optional; phone/email</span></legend>
+      <div id="detail-rows">
+        <div class="repeatable-row">
+          <div class="field" style="max-width:130px;">
+            <label>Type</label>
+            <select name="detail_type[]"><option value="phone">Phone</option><option value="email">Email</option></select>
+          </div>
+          <div class="field"><label>Value</label><input type="text" name="detail_value[]"></div>
+          <div class="radio-wrap"><input type="checkbox" name="detail_primary[]" value="0" id="dp-0"><label for="dp-0">Primary</label></div>
+        </div>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addDetailRow()">+ Add contact detail</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Contact person(s) <span class="text-soft text-sm">— optional</span></legend>
+      <div id="person-rows">
+        <div class="repeatable-row">
+          <div class="field"><label>Name</label><input type="text" name="person_name[]"></div>
+          <div class="radio-wrap"><input type="checkbox" name="person_primary[]" value="0" id="pp-0"><label for="pp-0">Primary</label></div>
+        </div>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addPersonRow()">+ Add contact person</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Bank details <span class="text-soft text-sm">— optional; every field is compulsory once a row is started</span></legend>
+      <div id="bank-rows">
+        <div class="repeatable-row repeatable-row-stacked">
+          <div class="form-row">
+            <div class="field"><label>Bank name</label><input type="text" name="bank_name[]"></div>
+            <div class="field"><label>Branch</label><input type="text" name="bank_branch[]"></div>
+          </div>
+          <div class="field"><label>Bank address</label><textarea name="bank_address[]" rows="2"></textarea></div>
+          <div class="form-row">
+            <div class="field"><label>Account number</label><input type="text" name="bank_account_number[]"></div>
+            <div class="field"><label>IFSC code</label><input type="text" name="bank_ifsc_code[]"></div>
+            <div class="field"><label>SWIFT code</label><input type="text" name="bank_swift_code[]"></div>
+          </div>
+          <div class="radio-wrap"><input type="checkbox" name="bank_primary[]" value="0" id="bp-0"><label for="bp-0">Primary</label></div>
+        </div>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addBankRow()">+ Add bank detail</button>
+    </fieldset>
+
+    <button type="submit" class="btn btn-primary">Add Supplier</button>
+    <a href="{{ url_for('suppliers.list_suppliers') }}" class="btn btn-ghost">Cancel</a>
+  </form>
+</div>
+
+<script>
+  let detailCount = 1;
+  function addDetailRow() {
+    const wrap = document.getElementById('detail-rows');
+    const row = document.createElement('div');
+    row.className = 'repeatable-row';
+    row.innerHTML = `
+      <div class="field" style="max-width:130px;"><label>Type</label><select name="detail_type[]"><option value="phone">Phone</option><option value="email">Email</option></select></div>
+      <div class="field"><label>Value</label><input type="text" name="detail_value[]"></div>
+      <div class="radio-wrap"><input type="checkbox" name="detail_primary[]" value="${detailCount}" id="dp-${detailCount}"><label for="dp-${detailCount}">Primary</label></div>`;
+    wrap.appendChild(row);
+    detailCount++;
+  }
+  let personCount = 1;
+  function addPersonRow() {
+    const wrap = document.getElementById('person-rows');
+    const row = document.createElement('div');
+    row.className = 'repeatable-row';
+    row.innerHTML = `
+      <div class="field"><label>Name</label><input type="text" name="person_name[]"></div>
+      <div class="radio-wrap"><input type="checkbox" name="person_primary[]" value="${personCount}" id="pp-${personCount}"><label for="pp-${personCount}">Primary</label></div>`;
+    wrap.appendChild(row);
+    personCount++;
+  }
+  let bankCount = 1;
+  function addBankRow() {
+    const wrap = document.getElementById('bank-rows');
+    const row = document.createElement('div');
+    row.className = 'repeatable-row repeatable-row-stacked';
+    row.innerHTML = `
+      <div class="form-row">
+        <div class="field"><label>Bank name</label><input type="text" name="bank_name[]"></div>
+        <div class="field"><label>Branch</label><input type="text" name="bank_branch[]"></div>
+      </div>
+      <div class="field"><label>Bank address</label><textarea name="bank_address[]" rows="2"></textarea></div>
+      <div class="form-row">
+        <div class="field"><label>Account number</label><input type="text" name="bank_account_number[]"></div>
+        <div class="field"><label>IFSC code</label><input type="text" name="bank_ifsc_code[]"></div>
+        <div class="field"><label>SWIFT code</label><input type="text" name="bank_swift_code[]"></div>
+      </div>
+      <div class="radio-wrap"><input type="checkbox" name="bank_primary[]" value="${bankCount}" id="bp-${bankCount}"><label for="bp-${bankCount}">Primary</label></div>`;
+    wrap.appendChild(row);
+    bankCount++;
+  }
+</script>
+
+{% endblock %}

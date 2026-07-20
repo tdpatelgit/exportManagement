@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Suppliers{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Accounts</div>
+    <h1>Suppliers</h1>
+  </div>
+  <div class="topbar-actions">
+    <a href="{{ url_for('suppliers.new_supplier') }}" class="btn btn-primary">+ New Supplier</a>
+  </div>
+</div>
+
+<div class="card">
+  {% if suppliers %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead><tr><th>Company</th><th>Status</th><th>GSTIN</th><th>Since</th><th></th></tr></thead>
+      <tbody>
+        {% for supplier in suppliers %}
+        <tr>
+          <td><strong>{{ supplier.company_name }}</strong></td>
+          <td><span class="stamp stamp-{{ supplier.status|status_css }}">{{ supplier.status_label }}</span></td>
+          <td class="text-sm">{{ supplier.gstin or '—' }}</td>
+          <td class="text-sm text-soft">{{ supplier.created_at|friendly_date }}</td>
+          <td><a href="{{ url_for('suppliers.view_supplier', supplier_id=supplier.id) }}" class="text-sm">Open →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No suppliers yet. Approve a lead to convert it, or <a href="{{ url_for('suppliers.new_supplier') }}">add one directly →</a></div>
+  {% endif %}
+</div>
+
+{% endblock %}

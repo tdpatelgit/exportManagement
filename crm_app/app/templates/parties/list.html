@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}{{ type_label }}s{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Accounts</div>
+    <h1>{{ type_label }}s</h1>
+  </div>
+  <div class="topbar-actions">
+    <a href="{{ url_for(endpoint_prefix ~ '.new_party') }}" class="btn btn-primary">+ New {{ type_label }}</a>
+  </div>
+</div>
+
+<div class="card">
+  {% if parties %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead><tr><th>Company</th><th>Status</th><th>Contact</th><th>Since</th><th></th></tr></thead>
+      <tbody>
+        {% for party in parties %}
+        <tr>
+          <td><strong>{{ party.company_name }}</strong></td>
+          <td><span class="stamp stamp-{{ party.status|status_css }}">{{ party.status_label }}</span></td>
+          <td class="text-sm">{{ party.phone }}</td>
+          <td class="text-sm text-soft">{{ party.created_at|friendly_date }}</td>
+          <td><a href="{{ url_for(endpoint_prefix ~ '.view_party', party_id=party.id) }}" class="text-sm">Open →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No {{ type_label.lower() }}s yet. Approve a lead to convert it, or <a href="{{ url_for(endpoint_prefix ~ '.new_party') }}">add one directly →</a></div>
+  {% endif %}
+</div>
+
+{% endblock %}

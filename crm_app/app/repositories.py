@@ -17,7 +17,7 @@ from typing import Optional, List
 
 from app.database import Database
 from app.models import (
-    Tenant, User, Lead, Client, ContactPerson, Communication,
+    Tenant, User, Lead, Party, Supplier, ContactPerson, Communication,
     PaymentEntry, DocumentEntry, OurCompany, Category, Product, ProductPalletType, ProductFolder, Design,
     Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
     PurchaseOrder, PurchaseOrderItem,
@@ -165,6 +165,44 @@ class ContactRepository:
             )
 
 
+class PartyContactRepository:
+    """Contact persons for a Buyer or Exporter (the `party_contacts` table) -
+    same shape/behaviour as ContactRepository above, but keyed by
+    (parent_type, parent_id) since buyers and exporters share one table
+    instead of each getting their own."""
+
+    def __init__(self, db: Database, parent_type: str):
+        self.db = db
+        self.parent_type = parent_type  # 'buyer' | 'exporter'
+
+    def list_for(self, parent_id: int) -> List[ContactPerson]:
+        rows = self.db.query(
+            "SELECT * FROM party_contacts WHERE parent_type = ? AND parent_id = ? ORDER BY is_primary DESC, id",
+            (self.parent_type, parent_id),
+        )
+        return [ContactPerson.from_row(r) for r in rows]
+
+    def add(self, parent_id: int, contact: ContactPerson) -> ContactPerson:
+        new_id = self.db.execute(
+            """INSERT INTO party_contacts (parent_type, parent_id, name, phone, email, is_primary)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (self.parent_type, parent_id, contact.name, contact.phone, contact.email, int(contact.is_primary)),
+        )
+        contact.id = new_id
+        return contact
+
+    def set_primary(self, parent_id: int, contact_id: int) -> None:
+        with self.db.get_connection() as conn:
+            conn.execute(
+                "UPDATE party_contacts SET is_primary = 0 WHERE parent_type = ? AND parent_id = ?",
+                (self.parent_type, parent_id),
+            )
+            conn.execute(
+                "UPDATE party_contacts SET is_primary = 1 WHERE parent_type = ? AND id = ? AND parent_id = ?",
+                (self.parent_type, contact_id, parent_id),
+            )
+
+
 # ============================================================
 # LEAD REPOSITORY
 # ============================================================
@@ -263,100 +301,261 @@ class SqliteLeadRepository(LeadRepositoryBase):
 
 
 # ============================================================
-# CLIENT REPOSITORY
+# PARTY REPOSITORY (Buyer / Exporter - identical shape; see models.Party.
+# One instance per type, parametrized by which table a row lives in - the
+# table name IS what says whether a row is a Buyer or an Exporter.)
 # ============================================================
-class ClientRepositoryBase(ABC):
+class PartyRepositoryBase(ABC):
     @abstractmethod
-    def get_by_id(self, client_id: int) -> Optional[Client]: ...
-
-    @abstractmethod
-    def list_all(self, company_id: int, client_type: Optional[str] = None,
-                 status: Optional[str] = None) -> List[Client]: ...
+    def get_by_id(self, party_id: int) -> Optional[Party]: ...
 
     @abstractmethod
-    def convert_from_lead(self, client: Client, lead_contacts: List[ContactPerson]) -> Client: ...
+    def list_all(self, company_id: int, status: Optional[str] = None) -> List[Party]: ...
 
     @abstractmethod
-    def update_status(self, client_id: int, status: str) -> None: ...
+    def convert_from_lead(self, party: Party, lead_contacts: List[ContactPerson]) -> Party: ...
 
     @abstractmethod
-    def update_compulsory_fields(self, client_id: int, fields: dict) -> None: ...
+    def create(self, party: Party) -> Party: ...
+
+    @abstractmethod
+    def update_status(self, party_id: int, status: str) -> None: ...
+
+    @abstractmethod
+    def update_compulsory_fields(self, party_id: int, fields: dict) -> None: ...
 
 
-class SqliteClientRepository(ClientRepositoryBase):
-    def __init__(self, db: Database):
+class SqlitePartyRepository(PartyRepositoryBase):
+    def __init__(self, db: Database, table: str, client_type: str):
         self.db = db
-        self.contacts = ContactRepository(db, "client_contacts", "client_id")
+        self.table = table                  # 'buyers' | 'exporters'
+        self.client_type = client_type      # 'Buyer' | 'Exporter' - only used to stamp leads.converted_client_type
+        self.contacts = PartyContactRepository(db, client_type.lower())
 
-    def get_by_id(self, client_id: int) -> Optional[Client]:
-        row = self.db.query_one("SELECT * FROM clients WHERE id = ?", (client_id,))
+    def get_by_id(self, party_id: int) -> Optional[Party]:
+        row = self.db.query_one(f"SELECT * FROM {self.table} WHERE id = ?", (party_id,))
         if not row:
             return None
-        client = Client.from_row(row)
-        client.contacts = self.contacts.list_for(client_id)
-        return client
+        party = Party.from_row(row)
+        party.contacts = self.contacts.list_for(party_id)
+        return party
 
-    def list_all(self, company_id: int, client_type: Optional[str] = None,
-                 status: Optional[str] = None) -> List[Client]:
-        sql = "SELECT * FROM clients WHERE company_id = ?"
+    def list_all(self, company_id: int, status: Optional[str] = None) -> List[Party]:
+        sql = f"SELECT * FROM {self.table} WHERE company_id = ?"
         params: list = [company_id]
-        if client_type:
-            sql += " AND client_type = ?"
-            params.append(client_type)
         if status:
             sql += " AND status = ?"
             params.append(status)
         sql += " ORDER BY created_at DESC"
-        return [Client.from_row(r) for r in self.db.query(sql, tuple(params))]
+        return [Party.from_row(r) for r in self.db.query(sql, tuple(params))]
 
-    def convert_from_lead(self, client: Client, lead_contacts: List[ContactPerson]) -> Client:
-        """Creates the client, copies every lead contact person across, and
+    def convert_from_lead(self, party: Party, lead_contacts: List[ContactPerson]) -> Party:
+        """Creates the party, copies every lead contact person across, and
         marks the originating lead as converted - all inside ONE transaction.
         This has to be atomic: previously the client row, its contacts, and
         the lead's converted flag were written in three separate
         transactions, so a failure on the last write (e.g. a status value
-        the DB didn't allow yet) left a client already created but the lead
-        still un-converted - and every retry created another duplicate
-        client."""
+        the DB didn't allow yet) left a row already created but the lead
+        still un-converted - and every retry created another duplicate."""
         with self.db.get_connection() as conn:
             cursor = conn.execute(
-                """INSERT INTO clients (company_id, lead_id, company_name, phone, email, facebook,
-                                         instagram, other_social, client_type, status, created_by)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (client.company_id, client.lead_id, client.company_name, client.phone, client.email,
-                 client.facebook, client.instagram, client.other_social, client.client_type,
-                 client.status, client.created_by),
+                f"""INSERT INTO {self.table} (company_id, lead_id, company_name, phone, email, facebook,
+                                               instagram, other_social, status, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (party.company_id, party.lead_id, party.company_name, party.phone, party.email,
+                 party.facebook, party.instagram, party.other_social, party.status, party.created_by),
             )
-            client.id = cursor.lastrowid
+            party.id = cursor.lastrowid
             for contact in lead_contacts:
                 conn.execute(
-                    """INSERT INTO client_contacts (name, phone, email, is_primary, client_id)
-                       VALUES (?, ?, ?, ?, ?)""",
-                    (contact.name, contact.phone, contact.email, int(contact.is_primary), client.id),
+                    """INSERT INTO party_contacts (parent_type, parent_id, name, phone, email, is_primary)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (self.client_type.lower(), party.id, contact.name, contact.phone, contact.email,
+                     int(contact.is_primary)),
                 )
             conn.execute(
-                "UPDATE leads SET is_converted = 1, converted_client_id = ?, status = 'in_client', "
-                "updated_at = datetime('now') WHERE id = ?",
-                (client.id, client.lead_id),
+                "UPDATE leads SET is_converted = 1, converted_client_type = ?, converted_client_id = ?, "
+                "status = 'in_client', updated_at = datetime('now') WHERE id = ?",
+                (self.client_type, party.id, party.lead_id),
             )
-        return client
+        return party
 
-    def update_status(self, client_id: int, status: str) -> None:
+    def create(self, party: Party) -> Party:
+        """Adds a party directly (no originating lead) - no lead to mark
+        converted, so this is a plain insert rather than the atomic
+        multi-table write convert_from_lead needs."""
+        new_id = self.db.execute(
+            f"""INSERT INTO {self.table} (company_id, lead_id, company_name, phone, email, facebook,
+                                           instagram, other_social, address, status, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (party.company_id, party.lead_id, party.company_name, party.phone, party.email,
+             party.facebook, party.instagram, party.other_social, party.address, party.status, party.created_by),
+        )
+        party.id = new_id
+        return party
+
+    def update_status(self, party_id: int, status: str) -> None:
         self.db.execute(
-            "UPDATE clients SET status = ?, updated_at = datetime('now') WHERE id = ?",
-            (status, client_id),
+            f"UPDATE {self.table} SET status = ?, updated_at = datetime('now') WHERE id = ?",
+            (status, party_id),
         )
 
-    def update_compulsory_fields(self, client_id: int, fields: dict) -> None:
+    def update_compulsory_fields(self, party_id: int, fields: dict) -> None:
         self.db.execute(
-            """UPDATE clients SET company_name = ?, phone = ?, email = ?,
-                                   facebook = ?, instagram = ?, other_social = ?,
-                                   address = ?, client_type = ?, updated_at = datetime('now')
-               WHERE id = ?""",
+            f"""UPDATE {self.table} SET company_name = ?, phone = ?, email = ?,
+                                        facebook = ?, instagram = ?, other_social = ?,
+                                        address = ?, updated_at = datetime('now')
+                WHERE id = ?""",
             (fields["company_name"], fields["phone"], fields["email"],
              fields.get("facebook"), fields.get("instagram"), fields.get("other_social"),
-             fields.get("address"), fields["client_type"], client_id),
+             fields.get("address"), party_id),
         )
+
+
+# ============================================================
+# SUPPLIER REPOSITORY (its own profile shape - GSTIN/PAN/IEC/bank/contacts,
+# modeled on CompanyRepository/OurCompany rather than on Party/Lead; see
+# models.Supplier.)
+# ============================================================
+class SupplierRepositoryBase(ABC):
+    @abstractmethod
+    def get_by_id(self, supplier_id: int) -> Optional[Supplier]: ...
+
+    @abstractmethod
+    def list_all(self, company_id: int, status: Optional[str] = None) -> List[Supplier]: ...
+
+    @abstractmethod
+    def convert_from_lead(self, supplier: Supplier) -> Supplier: ...
+
+    @abstractmethod
+    def create(self, supplier: Supplier) -> Supplier: ...
+
+    @abstractmethod
+    def update_status(self, supplier_id: int, status: str) -> None: ...
+
+    @abstractmethod
+    def update_profile(self, supplier_id: int, fields: dict) -> None: ...
+
+
+class SqliteSupplierRepository(SupplierRepositoryBase):
+    def __init__(self, db: Database):
+        self.db = db
+
+    def get_by_id(self, supplier_id: int) -> Optional[Supplier]:
+        row = self.db.query_one("SELECT * FROM suppliers WHERE id = ?", (supplier_id,))
+        if not row:
+            return None
+        supplier = Supplier.from_row(row)
+        supplier.contact_details = [
+            dict(r) for r in self.db.query(
+                "SELECT * FROM supplier_contact_details WHERE supplier_id = ? ORDER BY is_primary DESC, id",
+                (supplier.id,),
+            )
+        ]
+        supplier.contact_persons = [
+            dict(r) for r in self.db.query(
+                "SELECT * FROM supplier_contact_persons WHERE supplier_id = ? ORDER BY is_primary DESC, id",
+                (supplier.id,),
+            )
+        ]
+        supplier.bank_details = [
+            dict(r) for r in self.db.query(
+                "SELECT * FROM supplier_bank_details WHERE supplier_id = ? ORDER BY is_primary DESC, id",
+                (supplier.id,),
+            )
+        ]
+        return supplier
+
+    def list_all(self, company_id: int, status: Optional[str] = None) -> List[Supplier]:
+        sql = "SELECT * FROM suppliers WHERE company_id = ?"
+        params: list = [company_id]
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+        sql += " ORDER BY created_at DESC"
+        return [Supplier.from_row(r) for r in self.db.query(sql, tuple(params))]
+
+    def convert_from_lead(self, supplier: Supplier) -> Supplier:
+        """Creates the supplier (company name + lead link only - GSTIN/PAN/
+        IEC/bank/contacts are filled in afterward on the supplier record,
+        since a Lead doesn't capture them) and marks the originating lead as
+        converted, atomically (same reasoning as SqlitePartyRepository's)."""
+        with self.db.get_connection() as conn:
+            cursor = conn.execute(
+                """INSERT INTO suppliers (company_id, lead_id, company_name, status, created_by)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (supplier.company_id, supplier.lead_id, supplier.company_name, supplier.status, supplier.created_by),
+            )
+            supplier.id = cursor.lastrowid
+            conn.execute(
+                "UPDATE leads SET is_converted = 1, converted_client_type = 'Supplier', converted_client_id = ?, "
+                "status = 'in_client', updated_at = datetime('now') WHERE id = ?",
+                (supplier.id, supplier.lead_id),
+            )
+        return supplier
+
+    def create(self, supplier: Supplier) -> Supplier:
+        """Adds a supplier directly (no originating lead) - no lead to mark
+        converted, so this is a plain insert rather than the atomic write
+        convert_from_lead needs. GSTIN/PAN/IEC and contacts/bank details are
+        set separately via update_profile/replace_* right after."""
+        new_id = self.db.execute(
+            """INSERT INTO suppliers (company_id, lead_id, company_name, address, gstin, pan_no, iec, status, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (supplier.company_id, supplier.lead_id, supplier.company_name, supplier.address,
+             supplier.gstin, supplier.pan_no, supplier.iec, supplier.status, supplier.created_by),
+        )
+        supplier.id = new_id
+        return supplier
+
+    def update_status(self, supplier_id: int, status: str) -> None:
+        self.db.execute(
+            "UPDATE suppliers SET status = ?, updated_at = datetime('now') WHERE id = ?",
+            (status, supplier_id),
+        )
+
+    def update_profile(self, supplier_id: int, fields: dict) -> None:
+        self.db.execute(
+            """UPDATE suppliers SET company_name = ?, address = ?, gstin = ?, pan_no = ?, iec = ?,
+                                     updated_at = datetime('now') WHERE id = ?""",
+            (fields["company_name"], fields.get("address"), fields.get("gstin"),
+             fields.get("pan_no"), fields.get("iec"), supplier_id),
+        )
+
+    def replace_contact_details(self, supplier_id: int, details: list) -> None:
+        """details: [{'type': 'phone'|'email', 'value': str, 'is_primary': bool}]"""
+        with self.db.get_connection() as conn:
+            conn.execute("DELETE FROM supplier_contact_details WHERE supplier_id = ?", (supplier_id,))
+            for d in details:
+                conn.execute(
+                    "INSERT INTO supplier_contact_details (supplier_id, type, value, is_primary) VALUES (?, ?, ?, ?)",
+                    (supplier_id, d["type"], d["value"], int(d["is_primary"])),
+                )
+
+    def replace_contact_persons(self, supplier_id: int, persons: list) -> None:
+        """persons: [{'name': str, 'is_primary': bool}]"""
+        with self.db.get_connection() as conn:
+            conn.execute("DELETE FROM supplier_contact_persons WHERE supplier_id = ?", (supplier_id,))
+            for p in persons:
+                conn.execute(
+                    "INSERT INTO supplier_contact_persons (supplier_id, name, is_primary) VALUES (?, ?, ?)",
+                    (supplier_id, p["name"], int(p["is_primary"])),
+                )
+
+    def replace_bank_details(self, supplier_id: int, bank_details: list) -> None:
+        """bank_details: [{'bank_name': str, 'account_number': str, 'ifsc_code': str,
+        'swift_code': str, 'branch': str, 'bank_address': str, 'is_primary': bool}]"""
+        with self.db.get_connection() as conn:
+            conn.execute("DELETE FROM supplier_bank_details WHERE supplier_id = ?", (supplier_id,))
+            for b in bank_details:
+                conn.execute(
+                    """INSERT INTO supplier_bank_details
+                       (supplier_id, bank_name, account_number, ifsc_code, swift_code, branch, bank_address, is_primary)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (supplier_id, b["bank_name"], b["account_number"], b.get("ifsc_code") or None,
+                     b.get("swift_code") or None, b.get("branch") or None,
+                     b.get("bank_address") or None, int(b["is_primary"])),
+                )
 
 
 # ============================================================
@@ -424,22 +623,25 @@ class CommunicationRepository:
 # PAYMENT REPOSITORY
 # ============================================================
 class PaymentRepository:
+    """Shared by Buyer, Supplier and Exporter - parent_type/parent_id is the
+    same polymorphic pattern as CommunicationRepository below."""
+
     def __init__(self, db: Database):
         self.db = db
 
-    def list_for_client(self, client_id: int) -> List[PaymentEntry]:
+    def list_for(self, parent_type: str, parent_id: int) -> List[PaymentEntry]:
         rows = self.db.query(
-            "SELECT * FROM payment_history WHERE client_id = ? ORDER BY payment_datetime DESC",
-            (client_id,),
+            "SELECT * FROM payment_history WHERE parent_type = ? AND parent_id = ? ORDER BY payment_datetime DESC",
+            (parent_type, parent_id),
         )
         return [PaymentEntry.from_row(r) for r in rows]
 
     def add(self, payment: PaymentEntry) -> PaymentEntry:
         new_id = self.db.execute(
-            """INSERT INTO payment_history (client_id, account_name, payment_datetime,
+            """INSERT INTO payment_history (parent_type, parent_id, account_name, payment_datetime,
                                               amount_original, currency_code, conversion_rate, amount_inr)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (payment.client_id, payment.account_name, payment.payment_datetime,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (payment.parent_type, payment.parent_id, payment.account_name, payment.payment_datetime,
              payment.amount_original, payment.currency_code, payment.conversion_rate,
              payment.amount_inr),
         )
@@ -451,21 +653,24 @@ class PaymentRepository:
 # DOCUMENT REPOSITORY
 # ============================================================
 class DocumentRepository:
+    """Shared by Buyer, Supplier and Exporter - same parent_type/parent_id
+    pattern as PaymentRepository above."""
+
     def __init__(self, db: Database):
         self.db = db
 
-    def list_for_client(self, client_id: int) -> List[DocumentEntry]:
+    def list_for(self, parent_type: str, parent_id: int) -> List[DocumentEntry]:
         rows = self.db.query(
-            "SELECT * FROM documents WHERE client_id = ? ORDER BY document_date DESC",
-            (client_id,),
+            "SELECT * FROM documents WHERE parent_type = ? AND parent_id = ? ORDER BY document_date DESC",
+            (parent_type, parent_id),
         )
         return [DocumentEntry.from_row(r) for r in rows]
 
     def add(self, doc: DocumentEntry) -> DocumentEntry:
         new_id = self.db.execute(
-            """INSERT INTO documents (client_id, document_name, document_type, document_date, notes)
-               VALUES (?, ?, ?, ?, ?)""",
-            (doc.client_id, doc.document_name, doc.document_type, doc.document_date, doc.notes),
+            """INSERT INTO documents (parent_type, parent_id, document_name, document_type, document_date, notes)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (doc.parent_type, doc.parent_id, doc.document_name, doc.document_type, doc.document_date, doc.notes),
         )
         doc.id = new_id
         return doc
@@ -1232,6 +1437,17 @@ class PurchaseOrderRepository:
         )
         return [PurchaseOrder.from_row(r) for r in rows]
 
+    def list_for_seller(self, supplier_id: int) -> List[PurchaseOrder]:
+        """A Supplier's natural link to its purchase orders is
+        seller_supplier_id, not an originating lead - unlike Buyer/Exporter,
+        which see their documents through lead_id instead."""
+        rows = self.db.query(
+            self._SELECT.format(items_total=self._ITEMS_TOTAL) +
+            " WHERE po.seller_supplier_id = ? ORDER BY po.po_date DESC, po.id DESC",
+            (supplier_id,),
+        )
+        return [PurchaseOrder.from_row(r) for r in rows]
+
     def list_for_proforma(self, proforma_invoice_id: int) -> List[PurchaseOrder]:
         """Every purchase order generated from this proforma invoice, newest
         first - used to link back to an already-generated PO instead of
@@ -1258,14 +1474,14 @@ class PurchaseOrderRepository:
     def create(self, purchase_order: PurchaseOrder) -> PurchaseOrder:
         new_id = self.db.execute(
             """INSERT INTO purchase_orders
-               (company_id, po_number, po_date, lead_id, proforma_invoice_id, seller_client_id,
+               (company_id, po_number, po_date, lead_id, proforma_invoice_id, seller_supplier_id,
                 seller_name, seller_address, seller_pan, seller_gstin, seller_ref_no,
                 port_of_loading, port_of_discharge, container_details, delivery_time,
                 advance_percent, payment_terms, remarks, igst_percent, cgst_percent, sgst_percent,
                 created_by)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (purchase_order.company_id, purchase_order.po_number, purchase_order.po_date,
-             purchase_order.lead_id, purchase_order.proforma_invoice_id, purchase_order.seller_client_id,
+             purchase_order.lead_id, purchase_order.proforma_invoice_id, purchase_order.seller_supplier_id,
              purchase_order.seller_name, purchase_order.seller_address, purchase_order.seller_pan,
              purchase_order.seller_gstin, purchase_order.seller_ref_no, purchase_order.port_of_loading,
              purchase_order.port_of_discharge, purchase_order.container_details, purchase_order.delivery_time,
@@ -1279,7 +1495,7 @@ class PurchaseOrderRepository:
     def update(self, purchase_order_id: int, purchase_order: PurchaseOrder) -> None:
         self.db.execute(
             """UPDATE purchase_orders SET po_date = ?, lead_id = ?, proforma_invoice_id = ?,
-                                           seller_client_id = ?, seller_name = ?, seller_address = ?,
+                                           seller_supplier_id = ?, seller_name = ?, seller_address = ?,
                                            seller_pan = ?, seller_gstin = ?, seller_ref_no = ?,
                                            port_of_loading = ?, port_of_discharge = ?, container_details = ?,
                                            delivery_time = ?, advance_percent = ?, payment_terms = ?,
@@ -1287,7 +1503,7 @@ class PurchaseOrderRepository:
                                            updated_at = datetime('now')
                WHERE id = ?""",
             (purchase_order.po_date, purchase_order.lead_id, purchase_order.proforma_invoice_id,
-             purchase_order.seller_client_id, purchase_order.seller_name, purchase_order.seller_address,
+             purchase_order.seller_supplier_id, purchase_order.seller_name, purchase_order.seller_address,
              purchase_order.seller_pan, purchase_order.seller_gstin, purchase_order.seller_ref_no,
              purchase_order.port_of_loading, purchase_order.port_of_discharge, purchase_order.container_details,
              purchase_order.delivery_time, purchase_order.advance_percent, purchase_order.payment_terms,

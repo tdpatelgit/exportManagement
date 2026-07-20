@@ -61,8 +61,9 @@ CREATE TABLE IF NOT EXISTS leads (
     created_by          INTEGER NOT NULL REFERENCES users(id),  -- employee who filled it
     created_at          TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
-    is_converted         INTEGER NOT NULL DEFAULT 0,     -- becomes 1 once turned into a client
-    converted_client_id  INTEGER REFERENCES clients(id)
+    is_converted         INTEGER NOT NULL DEFAULT 0,     -- becomes 1 once turned into a buyer/supplier/exporter
+    converted_client_type TEXT CHECK (converted_client_type IN ('Buyer', 'Supplier', 'Exporter')),
+    converted_client_id  INTEGER   -- id in whichever of buyers/suppliers/exporters converted_client_type names
 );
 
 -- Contact persons for a lead. "Multiple allowed, one compulsory" is enforced
@@ -77,9 +78,13 @@ CREATE TABLE IF NOT EXISTS lead_contacts (
 );
 
 -- ============================================================
--- CLIENTS  (a lead "graduates" into a client once approved by an admin)
+-- BUYERS / EXPORTERS  (a lead "graduates" into one of these once approved
+-- by an admin. The two tables are deliberately identical in shape - Buyer
+-- and Exporter are treated as having the same data/documentation structure
+-- for now, per the same "generated from a lead" pattern as clients used to
+-- work; they may diverge later once exporter document types are defined.)
 -- ============================================================
-CREATE TABLE IF NOT EXISTS clients (
+CREATE TABLE IF NOT EXISTS buyers (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     company_id          INTEGER NOT NULL REFERENCES tenants(id),
     lead_id             INTEGER REFERENCES leads(id),   -- originating lead
@@ -90,8 +95,6 @@ CREATE TABLE IF NOT EXISTS clients (
     instagram           TEXT,
     other_social        TEXT,
     address             TEXT,
-    client_type         TEXT NOT NULL DEFAULT 'Buyer'
-                        CHECK (client_type IN ('Supplier', 'Exporter', 'Buyer')),
     status              TEXT NOT NULL DEFAULT 'proforma_invoice_submission_pending'
                         CHECK (status IN (
                             'proforma_invoice_submission_pending',
@@ -105,9 +108,37 @@ CREATE TABLE IF NOT EXISTS clients (
     updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS client_contacts (
+CREATE TABLE IF NOT EXISTS exporters (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id          INTEGER NOT NULL REFERENCES tenants(id),
+    lead_id             INTEGER REFERENCES leads(id),   -- originating lead
+    company_name        TEXT NOT NULL,
+    phone               TEXT NOT NULL,
+    email               TEXT NOT NULL,
+    facebook            TEXT,
+    instagram           TEXT,
+    other_social        TEXT,
+    address             TEXT,
+    status              TEXT NOT NULL DEFAULT 'proforma_invoice_submission_pending'
+                        CHECK (status IN (
+                            'proforma_invoice_submission_pending',
+                            'purchase_order_submission_pending',
+                            'purchase_invoice_submission_pending',
+                            'export_invoice_submission_pending',
+                            'commercial_invoice_submission_pending'
+                        )),
+    created_by          INTEGER NOT NULL REFERENCES users(id),  -- admin who approved conversion
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Contact persons for a Buyer or Exporter - identical shape, so one table
+-- (with a parent_type discriminator, same pattern as `communications` below)
+-- serves both instead of two near-identical tables.
+CREATE TABLE IF NOT EXISTS party_contacts (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    client_id   INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    parent_type TEXT NOT NULL CHECK (parent_type IN ('buyer', 'exporter')),
+    parent_id   INTEGER NOT NULL,
     name        TEXT NOT NULL,
     phone       TEXT,
     email       TEXT,
@@ -115,17 +146,74 @@ CREATE TABLE IF NOT EXISTS client_contacts (
 );
 
 -- ============================================================
+-- SUPPLIERS  (also "graduates" from an approved lead, but its data mirrors
+-- OUR COMPANY's own profile shape - GSTIN/PAN/IEC/bank/contacts - instead of
+-- a buyer/exporter's lead-shaped fields. Company logo, BIN and LUT are
+-- deliberately NOT carried (those are our_company-specific). Document types
+-- for suppliers aren't defined yet - status is borrowed from the buyer/
+-- exporter pipeline for now and may change once that's specified.)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS suppliers (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id          INTEGER NOT NULL REFERENCES tenants(id),
+    lead_id             INTEGER REFERENCES leads(id),   -- originating lead
+    company_name        TEXT NOT NULL,
+    address             TEXT,
+    gstin               TEXT,
+    pan_no              TEXT,
+    iec                 TEXT,
+    status              TEXT NOT NULL DEFAULT 'proforma_invoice_submission_pending'
+                        CHECK (status IN (
+                            'proforma_invoice_submission_pending',
+                            'purchase_order_submission_pending',
+                            'purchase_invoice_submission_pending',
+                            'export_invoice_submission_pending',
+                            'commercial_invoice_submission_pending'
+                        )),
+    created_by          INTEGER NOT NULL REFERENCES users(id),
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS supplier_contact_details (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    supplier_id     INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+    type            TEXT NOT NULL CHECK (type IN ('phone', 'email')),
+    value           TEXT NOT NULL,
+    is_primary      INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS supplier_contact_persons (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    supplier_id     INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+    name            TEXT NOT NULL,
+    is_primary      INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS supplier_bank_details (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    supplier_id     INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+    bank_name       TEXT NOT NULL,
+    account_number  TEXT NOT NULL,
+    ifsc_code       TEXT,
+    swift_code      TEXT,
+    branch          TEXT,
+    bank_address    TEXT,
+    is_primary      INTEGER NOT NULL DEFAULT 0
+);
+
+-- ============================================================
 -- COMMUNICATIONS
--- One shared table for BOTH lead communications and client communications.
--- `parent_type` + `parent_id` act as a polymorphic foreign key. This keeps
--- one CommunicationRepository usable for both entities (Liskov substitution:
--- a Lead and a Client are both "communicable" parents) instead of two
--- near-identical tables/classes. Scoped transitively via the parent lead/
--- client's own company_id - no company_id column here.
+-- One shared table for lead, buyer, supplier and exporter communications.
+-- `parent_type` + `parent_id` act as a polymorphic foreign key - this keeps
+-- one CommunicationRepository usable for every parent (Liskov substitution:
+-- a Lead, Buyer, Supplier and Exporter are all "communicable" parents)
+-- instead of four near-identical tables/classes. Scoped transitively via the
+-- parent's own company_id - no company_id column here.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS communications (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    parent_type     TEXT NOT NULL CHECK (parent_type IN ('lead', 'client')),
+    parent_type     TEXT NOT NULL CHECK (parent_type IN ('lead', 'buyer', 'supplier', 'exporter')),
     parent_id       INTEGER NOT NULL,
     employee_id     INTEGER NOT NULL REFERENCES users(id),
     comm_date       TEXT NOT NULL,              -- date/time of the communication
@@ -136,11 +224,16 @@ CREATE TABLE IF NOT EXISTS communications (
 );
 
 -- ============================================================
--- PAYMENT HISTORY (client only)
+-- PAYMENT HISTORY (buyer/supplier/exporter only)
+-- `parent_type` + `parent_id` is the same polymorphic pattern as
+-- `communications` - buyers/exporters/suppliers each have their own id
+-- space, so a plain client_id would be ambiguous once more than one type
+-- has data.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS payment_history (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    client_id           INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    parent_type         TEXT NOT NULL CHECK (parent_type IN ('buyer', 'supplier', 'exporter')),
+    parent_id           INTEGER NOT NULL,
     account_name        TEXT NOT NULL,          -- which of our accounts received/sent it
     payment_datetime    TEXT NOT NULL,
     amount_original     REAL NOT NULL,
@@ -151,12 +244,14 @@ CREATE TABLE IF NOT EXISTS payment_history (
 );
 
 -- ============================================================
--- DOCUMENTS (client only) - metadata for now; future plan will move this
--- to its own dedicated database once file storage is introduced.
+-- DOCUMENTS (buyer/supplier/exporter only) - metadata for now; future plan
+-- will move this to its own dedicated database once file storage is
+-- introduced. Same parent_type/parent_id pattern as payment_history above.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS documents (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    client_id       INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    parent_type     TEXT NOT NULL CHECK (parent_type IN ('buyer', 'supplier', 'exporter')),
+    parent_id       INTEGER NOT NULL,
     document_name   TEXT NOT NULL,
     document_type   TEXT NOT NULL,      -- e.g. Proforma Invoice, Purchase Order...
     document_date   TEXT NOT NULL,
@@ -441,7 +536,7 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
     po_date                 TEXT NOT NULL,
     lead_id                 INTEGER REFERENCES leads(id),               -- optional, prefill/reference only
     proforma_invoice_id     INTEGER REFERENCES proforma_invoices(id),   -- optional, "generated from" reference only
-    seller_client_id        INTEGER REFERENCES clients(id),             -- optional, the Supplier client picked as seller
+    seller_supplier_id      INTEGER REFERENCES suppliers(id),           -- optional, the Supplier picked as seller
     seller_name             TEXT NOT NULL,
     seller_address          TEXT,
     seller_pan              TEXT,
@@ -565,8 +660,13 @@ CREATE INDEX IF NOT EXISTS idx_leads_created_by ON leads(created_by);
 CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
 CREATE INDEX IF NOT EXISTS idx_comms_parent ON communications(parent_type, parent_id);
 CREATE INDEX IF NOT EXISTS idx_comms_employee ON communications(employee_id);
-CREATE INDEX IF NOT EXISTS idx_payments_client ON payment_history(client_id);
-CREATE INDEX IF NOT EXISTS idx_documents_client ON documents(client_id);
+-- idx_payments_parent / idx_documents_parent live in database.py's _migrate:
+-- on a pre-v13 DB, payment_history/documents don't have a parent_type
+-- column yet when this script runs (see the v13 rebuild there).
+CREATE INDEX IF NOT EXISTS idx_party_contacts_parent ON party_contacts(parent_type, parent_id);
+CREATE INDEX IF NOT EXISTS idx_buyers_company ON buyers(company_id);
+CREATE INDEX IF NOT EXISTS idx_exporters_company ON exporters(company_id);
+CREATE INDEX IF NOT EXISTS idx_suppliers_company ON suppliers(company_id);
 CREATE INDEX IF NOT EXISTS idx_categories_company ON categories(company_id);
 CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
 -- idx_products_category lives in database.py's _migrate: on a pre-v4 DB the

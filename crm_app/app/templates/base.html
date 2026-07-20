@@ -22,7 +22,9 @@
       <div class="nav-section-label">Workspace</div>
       <a class="nav-link {{ 'active' if request.endpoint == 'dashboard.home' }}" href="{{ url_for('dashboard.home') }}">📊 Dashboard</a>
       <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('leads.') }}" href="{{ url_for('leads.list_leads') }}">🧭 Leads</a>
-      <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('clients.') }}" href="{{ url_for('clients.list_clients') }}">🤝 Clients</a>
+      <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('buyers.') }}" href="{{ url_for('buyers.list_parties') }}">🤝 Buyer</a>
+      <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('suppliers.') }}" href="{{ url_for('suppliers.list_suppliers') }}">🏭 Supplier</a>
+      <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('exporters.') }}" href="{{ url_for('exporters.list_parties') }}">🚢 Exporter</a>
       <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('products.') }}" href="{{ url_for('products.list_products') }}">📦 Products</a>
       <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('quotations.') }}" href="{{ url_for('quotations.list_quotations') }}">🧾 Quotations</a>
       <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('proforma_invoices.') }}" href="{{ url_for('proforma_invoices.list_proforma_invoices') }}">📄 Proforma Invoices</a>

@@ -21,7 +21,7 @@ from app.utils import login_required, admin_required
 purchase_orders_bp = Blueprint("purchase_orders", __name__, url_prefix="/purchase-orders")
 
 _HEADER_FIELDS = [
-    "po_date", "lead_id", "proforma_invoice_id", "seller_client_id",
+    "po_date", "lead_id", "proforma_invoice_id", "seller_supplier_id",
     "seller_name", "seller_address", "seller_pan", "seller_gstin", "seller_ref_no",
     "port_of_loading", "port_of_discharge", "container_details", "delivery_time",
     "advance_percent", "payment_terms", "remarks",
@@ -58,14 +58,13 @@ def _extract_items(form) -> list:
 
 
 def _form_context():
-    """(leads, proforma invoices, supplier clients) for the form's Start-from
-    and Seller pickers. Every client is offered - the seller is usually a
-    'Supplier' client but nothing stops picking any other."""
+    """(leads, proforma invoices, suppliers) for the form's Start-from
+    and Seller pickers."""
     container = current_app.container
     leads = container.lead_service.list_for_dashboard(g.user)
     invoices = container.proforma_invoice_service.list_all(g.user.company_id)
-    clients = container.client_service.list_all(g.user.company_id)
-    return leads, invoices, clients
+    suppliers = container.supplier_service.list_all(g.user.company_id)
+    return leads, invoices, suppliers
 
 
 def _alt_qty_map(items) -> dict:
@@ -112,15 +111,15 @@ def new_purchase_order():
             return redirect(url_for("purchase_orders.view_purchase_order", purchase_order_id=purchase_order.id))
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
-            leads, invoices, clients = _form_context()
+            leads, invoices, suppliers = _form_context()
             items = _extract_items(request.form)
             return render_template(
                 "purchase_orders/form.html", purchase_order=None, leads=leads, invoices=invoices,
-                clients=clients, form_data=request.form, form_items=items,
+                suppliers=suppliers, form_data=request.form, form_items=items,
                 alt_qty_map=_alt_qty_map(items), today=date.today().isoformat(),
             ), 400
 
-    leads, invoices, clients = _form_context()
+    leads, invoices, suppliers = _form_context()
     prefill = None
     form_items = None
     proforma_invoice_id = request.args.get("proforma_invoice_id")
@@ -142,7 +141,7 @@ def new_purchase_order():
             pass
     return render_template(
         "purchase_orders/form.html", purchase_order=None, leads=leads, invoices=invoices,
-        clients=clients, form_data=prefill, form_items=form_items,
+        suppliers=suppliers, form_data=prefill, form_items=form_items,
         alt_qty_map=_alt_qty_map(form_items) if form_items else {},
         today=date.today().isoformat(),
     )
@@ -200,18 +199,18 @@ def edit_purchase_order(purchase_order_id):
             return redirect(url_for("purchase_orders.view_purchase_order", purchase_order_id=purchase_order_id))
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
-            leads, invoices, clients = _form_context()
+            leads, invoices, suppliers = _form_context()
             items = _extract_items(request.form)
             return render_template(
                 "purchase_orders/form.html", purchase_order=purchase_order, leads=leads, invoices=invoices,
-                clients=clients, form_data=request.form, form_items=items,
+                suppliers=suppliers, form_data=request.form, form_items=items,
                 alt_qty_map=_alt_qty_map(items), today=date.today().isoformat(),
             ), 400
 
-    leads, invoices, clients = _form_context()
+    leads, invoices, suppliers = _form_context()
     return render_template(
         "purchase_orders/form.html", purchase_order=purchase_order, leads=leads, invoices=invoices,
-        clients=clients, form_data=None, form_items=None,
+        suppliers=suppliers, form_data=None, form_items=None,
         alt_qty_map=_alt_qty_map(purchase_order.items), today=date.today().isoformat(),
     )
 
