@@ -16,3 +16,7 @@ python-dotenv==1.2.2
 # separate database driver is required. See README.md -> "Swapping the
 # database" for how to move to PostgreSQL/MySQL later without touching
 # services or routes (that's the point of the Repository pattern used here).
+
+# Test-only dependency (the regression suite under tests/). Not needed to run
+# the app itself. Run the suite with:  python -m pytest
+pytest==9.1.1
