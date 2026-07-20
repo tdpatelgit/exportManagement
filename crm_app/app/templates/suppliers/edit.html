@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ supplier.company_name }}{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Admin edit · supplier profile</div>
+    <h1>{{ supplier.company_name }}</h1>
+  </div>
+</div>
+
+<div class="card" style="max-width:760px;">
+  <form method="POST">
+    <fieldset>
+      <legend>Registration details</legend>
+      <div class="field">
+        <label for="company_name">Company name<span class="required-mark">*</span></label>
+        <input type="text" id="company_name" name="company_name" required value="{{ supplier.company_name }}">
+      </div>
+      <div class="field">
+        <label for="address">Address</label>
+        <textarea id="address" name="address" rows="3">{{ supplier.address or '' }}</textarea>
+      </div>
+      <div class="form-row">
+        <div class="field"><label for="gstin">GSTIN</label><input type="text" id="gstin" name="gstin" value="{{ supplier.gstin or '' }}"></div>
+        <div class="field"><label for="pan_no">PAN No.</label><input type="text" id="pan_no" name="pan_no" value="{{ supplier.pan_no or '' }}"></div>
+        <div class="field"><label for="iec">IEC</label><input type="text" id="iec" name="iec" value="{{ supplier.iec or '' }}"></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Contact details <span class="text-soft text-sm">— phone/email; value is compulsory for every row</span></legend>
+      <div id="detail-rows">
+        {% set details = supplier.contact_details %}
+        {% if details %}
+          {% for d in details %}
+          <div class="repeatable-row">
+            <div class="field" style="max-width:130px;">
+              <label>Type</label>
+              <select name="detail_type[]"><option value="phone" {{ 'selected' if d.type=='phone' }}>Phone</option><option value="email" {{ 'selected' if d.type=='email' }}>Email</option></select>
+            </div>
+            <div class="field"><label>Value</label><input type="text" name="detail_value[]" value="{{ d.value }}"></div>
+            <div class="radio-wrap"><input type="checkbox" name="detail_primary[]" value="{{ loop.index0 }}" id="dp-{{ loop.index0 }}" {{ 'checked' if d.is_primary }}><label for="dp-{{ loop.index0 }}">Primary</label></div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="repeatable-row">
+            <div class="field" style="max-width:130px;"><label>Type</label><select name="detail_type[]"><option value="phone">Phone</option><option value="email">Email</option></select></div>
+            <div class="field"><label>Value</label><input type="text" name="detail_value[]"></div>
+            <div class="radio-wrap"><input type="checkbox" name="detail_primary[]" value="0" id="dp-0"><label for="dp-0">Primary</label></div>
+          </div>
+        {% endif %}
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addDetailRow()">+ Add contact detail</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Contact person(s) <span class="text-soft text-sm">— name is compulsory for every row</span></legend>
+      <div id="person-rows">
+        {% set persons = supplier.contact_persons %}
+        {% if persons %}
+          {% for p in persons %}
+          <div class="repeatable-row">
+            <div class="field"><label>Name</label><input type="text" name="person_name[]" value="{{ p.name }}"></div>
+            <div class="radio-wrap"><input type="checkbox" name="person_primary[]" value="{{ loop.index0 }}" id="pp-{{ loop.index0 }}" {{ 'checked' if p.is_primary }}><label for="pp-{{ loop.index0 }}">Primary</label></div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="repeatable-row">
+            <div class="field"><label>Name</label><input type="text" name="person_name[]"></div>
+            <div class="radio-wrap"><input type="checkbox" name="person_primary[]" value="0" id="pp-0"><label for="pp-0">Primary</label></div>
+          </div>
+        {% endif %}
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addPersonRow()">+ Add contact person</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Bank details <span class="text-soft text-sm">— every field is compulsory once a row is started</span></legend>
+      <div id="bank-rows">
+        {% set banks = supplier.bank_details %}
+        {% if banks %}
+          {% for b in banks %}
+          <div class="repeatable-row repeatable-row-stacked">
+            <div class="form-row">
+              <div class="field"><label>Bank name</label><input type="text" name="bank_name[]" value="{{ b.bank_name }}"></div>
+              <div class="field"><label>Branch</label><input type="text" name="bank_branch[]" value="{{ b.branch or '' }}"></div>
+            </div>
+            <div class="field"><label>Bank address</label><textarea name="bank_address[]" rows="2">{{ b.bank_address or '' }}</textarea></div>
+            <div class="form-row">
+              <div class="field"><label>Account number</label><input type="text" name="bank_account_number[]" value="{{ b.account_number }}"></div>
+              <div class="field"><label>IFSC code</label><input type="text" name="bank_ifsc_code[]" value="{{ b.ifsc_code or '' }}"></div>
+              <div class="field"><label>SWIFT code</label><input type="text" name="bank_swift_code[]" value="{{ b.swift_code or '' }}"></div>
+            </div>
+            <div class="radio-wrap"><input type="checkbox" name="bank_primary[]" value="{{ loop.index0 }}" id="bp-{{ loop.index0 }}" {{ 'checked' if b.is_primary }}><label for="bp-{{ loop.index0 }}">Primary</label></div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="repeatable-row repeatable-row-stacked">
+            <div class="form-row">
+              <div class="field"><label>Bank name</label><input type="text" name="bank_name[]"></div>
+              <div class="field"><label>Branch</label><input type="text" name="bank_branch[]"></div>
+            </div>
+            <div class="field"><label>Bank address</label><textarea name="bank_address[]" rows="2"></textarea></div>
+            <div class="form-row">
+              <div class="field"><label>Account number</label><input type="text" name="bank_account_number[]"></div>
+              <div class="field"><label>IFSC code</label><input type="text" name="bank_ifsc_code[]"></div>
+              <div class="field"><label>SWIFT code</label><input type="text" name="bank_swift_code[]"></div>
+            </div>
+            <div class="radio-wrap"><input type="checkbox" name="bank_primary[]" value="0" id="bp-0"><label for="bp-0">Primary</label></div>
+          </div>
+        {% endif %}
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addBankRow()">+ Add bank detail</button>
+    </fieldset>
+
+    <button type="submit" class="btn btn-primary">Save changes</button>
+    <a href="{{ url_for('suppliers.view_supplier', supplier_id=supplier.id) }}" class="btn btn-ghost">Cancel</a>
+  </form>
+</div>
+
+<script>
+  let detailCount = {{ (details|length) if details else 1 }};
+  function addDetailRow() {
+    const wrap = document.getElementById('detail-rows');
+    const row = document.createElement('div');
+    row.className = 'repeatable-row';
+    row.innerHTML = `
+      <div class="field" style="max-width:130px;"><label>Type</label><select name="detail_type[]"><option value="phone">Phone</option><option value="email">Email</option></select></div>
+      <div class="field"><label>Value</label><input type="text" name="detail_value[]"></div>
+      <div class="radio-wrap"><input type="checkbox" name="detail_primary[]" value="${detailCount}" id="dp-${detailCount}"><label for="dp-${detailCount}">Primary</label></div>`;
+    wrap.appendChild(row);
+    detailCount++;
+  }
+  let personCount = {{ (persons|length) if persons else 1 }};
+  function addPersonRow() {
+    const wrap = document.getElementById('person-rows');
+    const row = document.createElement('div');
+    row.className = 'repeatable-row';
+    row.innerHTML = `
+      <div class="field"><label>Name</label><input type="text" name="person_name[]"></div>
+      <div class="radio-wrap"><input type="checkbox" name="person_primary[]" value="${personCount}" id="pp-${personCount}"><label for="pp-${personCount}">Primary</label></div>`;
+    wrap.appendChild(row);
+    personCount++;
+  }
+  let bankCount = {{ (banks|length) if banks else 1 }};
+  function addBankRow() {
+    const wrap = document.getElementById('bank-rows');
+    const row = document.createElement('div');
+    row.className = 'repeatable-row repeatable-row-stacked';
+    row.innerHTML = `
+      <div class="form-row">
+        <div class="field"><label>Bank name</label><input type="text" name="bank_name[]"></div>
+        <div class="field"><label>Branch</label><input type="text" name="bank_branch[]"></div>
+      </div>
+      <div class="field"><label>Bank address</label><textarea name="bank_address[]" rows="2"></textarea></div>
+      <div class="form-row">
+        <div class="field"><label>Account number</label><input type="text" name="bank_account_number[]"></div>
+        <div class="field"><label>IFSC code</label><input type="text" name="bank_ifsc_code[]"></div>
+        <div class="field"><label>SWIFT code</label><input type="text" name="bank_swift_code[]"></div>
+      </div>
+      <div class="radio-wrap"><input type="checkbox" name="bank_primary[]" value="${bankCount}" id="bp-${bankCount}"><label for="bp-${bankCount}">Primary</label></div>`;
+    wrap.appendChild(row);
+    bankCount++;
+  }
+</script>
+
+{% endblock %}

@@ -60,18 +60,19 @@
   <div class="card">
     <div class="card-header"><h3>Seller</h3></div>
     <div class="field">
-      <label for="seller_select">Prefill from an existing client <span class="text-soft text-sm">(optional — usually a Supplier)</span></label>
+      <label for="seller_select">Prefill from an existing supplier <span class="text-soft text-sm">(optional)</span></label>
       <select id="seller_select">
-        <option value="">— Select a client —</option>
-        {% for c in clients %}
-          <option value="{{ c.id }}" data-name="{{ c.company_name }}" data-address="{{ c.address or '' }}"
-                  {{ 'selected' if data and data.seller_client_id | string == c.id | string }}>
-            {{ c.company_name }} ({{ c.client_type }})
+        <option value="">— Select a supplier —</option>
+        {% for s in suppliers %}
+          <option value="{{ s.id }}" data-name="{{ s.company_name }}" data-address="{{ s.address or '' }}"
+                  data-pan="{{ s.pan_no or '' }}" data-gstin="{{ s.gstin or '' }}"
+                  {{ 'selected' if data and data.seller_supplier_id | string == s.id | string }}>
+            {{ s.company_name }}
           </option>
         {% endfor %}
       </select>
     </div>
-    <input type="hidden" name="seller_client_id" id="seller_client_id" value="{{ data.seller_client_id | default('', true) }}">
+    <input type="hidden" name="seller_supplier_id" id="seller_supplier_id" value="{{ data.seller_supplier_id | default('', true) }}">
     <div class="field"><label for="seller_name">Seller name<span class="required-mark">*</span></label><input type="text" id="seller_name" name="seller_name" required value="{{ data.seller_name | default('', true) }}"></div>
     <div class="field"><label for="seller_address">Seller address</label><textarea id="seller_address" name="seller_address" rows="3">{{ data.seller_address | default('', true) }}</textarea></div>
     <div class="form-row">
@@ -304,10 +305,12 @@
   // ---- seller dropdown prefill --------------------------------------------------
   document.getElementById('seller_select').addEventListener('change', (e) => {
     const opt = e.target.selectedOptions[0];
-    document.getElementById('seller_client_id').value = opt.value || '';
+    document.getElementById('seller_supplier_id').value = opt.value || '';
     if (!opt.value) return;
     document.getElementById('seller_name').value = opt.dataset.name || '';
     document.getElementById('seller_address').value = opt.dataset.address || '';
+    document.getElementById('seller_pan').value = opt.dataset.pan || '';
+    document.getElementById('seller_gstin').value = opt.dataset.gstin || '';
   });
 
   // ---- product picker modal (flat searchable product list) --------------------------------------------------

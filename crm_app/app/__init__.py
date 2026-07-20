@@ -16,14 +16,15 @@ from flask import Flask, g, session, render_template
 from config import Config
 from app.database import Database
 from app.repositories import (
-    TenantRepository, SqliteUserRepository, SqliteLeadRepository, SqliteClientRepository,
+    TenantRepository, SqliteUserRepository, SqliteLeadRepository,
+    SqlitePartyRepository, SqliteSupplierRepository,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
     CategoryRepository, ProductRepository, ProductPalletTypeRepository, ProductFolderRepository, DesignRepository,
     QuotationRepository, ProformaInvoiceRepository, PurchaseOrderRepository, PackingListRepository,
     DocumentVersionRepository,
 )
 from app.services import (
-    AuthService, LeadService, ClientService, CurrencyService,
+    AuthService, LeadService, PartyService, SupplierService, CurrencyService,
     CommunicationService, StatsService, CompanyService, ReportService, ProductService,
     QuotationService, ProformaInvoiceService, PurchaseOrderService, PackingListService, BackupService,
     DocumentVersionService,
@@ -44,7 +45,9 @@ class ServiceContainer:
         self.tenant_repo = TenantRepository(db)
         self.user_repo = SqliteUserRepository(db)
         self.lead_repo = SqliteLeadRepository(db)
-        self.client_repo = SqliteClientRepository(db)
+        self.buyer_repo = SqlitePartyRepository(db, table="buyers", client_type="Buyer")
+        self.exporter_repo = SqlitePartyRepository(db, table="exporters", client_type="Exporter")
+        self.supplier_repo = SqliteSupplierRepository(db)
         self.comm_repo = CommunicationRepository(db)
         self.payment_repo = PaymentRepository(db)
         self.document_repo = DocumentRepository(db)
@@ -65,13 +68,30 @@ class ServiceContainer:
         self.currency_service = CurrencyService(Config.EXCHANGE_RATE_API_URL, Config.FALLBACK_RATES_TO_INR)
         self.communication_service = CommunicationService(self.comm_repo)
         self.lead_service = LeadService(self.lead_repo, self.communication_service)
-        self.client_service = ClientService(
-            self.client_repo, self.lead_repo, self.communication_service,
+        self.buyer_service = PartyService(
+            self.buyer_repo, "buyer", self.lead_repo, self.communication_service,
             self.payment_repo, self.document_repo, self.currency_service,
             self.quotation_repo, self.proforma_invoice_repo, self.packing_list_repo,
             self.purchase_order_repo,
         )
-        self.stats_service = StatsService(self.user_repo, self.lead_repo, self.comm_repo, self.client_repo)
+        self.exporter_service = PartyService(
+            self.exporter_repo, "exporter", self.lead_repo, self.communication_service,
+            self.payment_repo, self.document_repo, self.currency_service,
+            self.quotation_repo, self.proforma_invoice_repo, self.packing_list_repo,
+            self.purchase_order_repo,
+        )
+        self.supplier_service = SupplierService(
+            self.supplier_repo, self.lead_repo, self.communication_service,
+            self.payment_repo, self.document_repo, self.currency_service,
+            self.purchase_order_repo,
+        )
+        # Keyed by leads.converted_client_type - advance_client_status looks
+        # up the right repo once it knows which type a lead converted to.
+        self.party_repos = {"Buyer": self.buyer_repo, "Exporter": self.exporter_repo, "Supplier": self.supplier_repo}
+        self.stats_service = StatsService(
+            self.user_repo, self.lead_repo, self.comm_repo,
+            self.buyer_repo, self.exporter_repo, self.supplier_repo,
+        )
         self.company_service = CompanyService(
             self.company_repo, Config.PRODUCT_UPLOAD_FOLDER, Config.ALLOWED_IMAGE_EXTENSIONS,
         )
@@ -87,11 +107,11 @@ class ServiceContainer:
         )
         self.proforma_invoice_service = ProformaInvoiceService(
             self.proforma_invoice_repo, self.product_repo, self.lead_repo, self.quotation_repo,
-            self.document_version_service, self.client_repo,
+            self.document_version_service, self.party_repos,
         )
         self.purchase_order_service = PurchaseOrderService(
             self.purchase_order_repo, self.product_repo, self.lead_repo, self.proforma_invoice_repo,
-            self.document_version_service, self.client_repo,
+            self.document_version_service, self.party_repos, self.supplier_repo,
         )
         self.packing_list_service = PackingListService(
             self.packing_list_repo, self.product_repo, self.design_repo,
@@ -149,7 +169,8 @@ def create_app(config_class=Config) -> Flask:
     from app.routes.auth import auth_bp
     from app.routes.dashboard import dashboard_bp
     from app.routes.leads import leads_bp
-    from app.routes.clients import clients_bp
+    from app.routes.parties import build_party_blueprint
+    from app.routes.suppliers import suppliers_bp
     from app.routes.admin import admin_bp
     from app.routes.company import company_bp
     from app.routes.reports import reports_bp
@@ -161,10 +182,15 @@ def create_app(config_class=Config) -> Flask:
     from app.routes.profile import profile_bp
     from app.routes.backup import backup_bp
 
+    buyers_bp = build_party_blueprint("buyers", "buyer_service")
+    exporters_bp = build_party_blueprint("exporters", "exporter_service")
+
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(leads_bp)
-    app.register_blueprint(clients_bp)
+    app.register_blueprint(buyers_bp)
+    app.register_blueprint(suppliers_bp)
+    app.register_blueprint(exporters_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(company_bp)
     app.register_blueprint(reports_bp)

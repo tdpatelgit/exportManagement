@@ -93,7 +93,7 @@ class ContactPerson:
 @dataclass
 class Communication:
     id: Optional[int]
-    parent_type: str  # 'lead' | 'client'
+    parent_type: str  # 'lead' | 'buyer' | 'supplier' | 'exporter'
     parent_id: int
     employee_id: int
     comm_date: str
@@ -150,7 +150,7 @@ CLIENT_STATUS_ADVANCE_ON = {
     "export_invoice": "commercial_invoice_submission_pending",
 }
 
-CLIENT_TYPES = ["Supplier", "Exporter", "Buyer"]
+CLIENT_TYPES = ["Supplier", "Exporter", "Buyer"]  # the lead-conversion picker only; each type now lives in its own table
 
 COMMUNICATION_MODES = ["WhatsApp", "WeChat", "Call", "Email", "In Person", "Other"]
 
@@ -175,6 +175,7 @@ class Lead:
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     is_converted: bool = False
+    converted_client_type: Optional[str] = None  # 'Buyer' | 'Supplier' | 'Exporter' - says which table converted_client_id names
     converted_client_id: Optional[int] = None
     # populated by joins / repository convenience methods, not stored columns
     created_by_name: Optional[str] = None
@@ -196,6 +197,7 @@ class Lead:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             is_converted=bool(row["is_converted"]),
+            converted_client_type=row["converted_client_type"] if "converted_client_type" in row.keys() else None,
             converted_client_id=row["converted_client_id"],
             created_by_name=row["created_by_name"] if "created_by_name" in row.keys() else None,
         )
@@ -206,7 +208,13 @@ class Lead:
 
 
 @dataclass
-class Client:
+class Party:
+    """A Buyer or Exporter record - the two are treated as having identical
+    data/documentation structure for now (see CLIENT_TYPES), so one
+    dataclass and one table shape serves both; only which table a row lives
+    in (`buyers` vs `exporters`) says which type it is. Supplier has since
+    diverged into its own shape (see Supplier below), modeled on OurCompany
+    instead of on a lead."""
     id: Optional[int]
     company_id: int
     lead_id: Optional[int]
@@ -216,7 +224,6 @@ class Client:
     facebook: Optional[str]
     instagram: Optional[str]
     other_social: Optional[str]
-    client_type: str
     status: str
     created_by: int
     address: Optional[str] = None
@@ -225,8 +232,8 @@ class Client:
     contacts: List[ContactPerson] = field(default_factory=list)
 
     @staticmethod
-    def from_row(row) -> "Client":
-        return Client(
+    def from_row(row) -> "Party":
+        return Party(
             id=row["id"],
             company_id=row["company_id"],
             lead_id=row["lead_id"],
@@ -236,7 +243,6 @@ class Client:
             facebook=row["facebook"],
             instagram=row["instagram"],
             other_social=row["other_social"],
-            client_type=row["client_type"],
             status=row["status"],
             created_by=row["created_by"],
             address=row["address"] if "address" in row.keys() else None,
@@ -250,9 +256,56 @@ class Client:
 
 
 @dataclass
+class Supplier:
+    """Also "graduates" from an approved lead, but its data mirrors
+    OurCompany's own profile shape (GSTIN/PAN/IEC/bank/contacts) instead of
+    a Party's lead-shaped fields - company logo, BIN and LUT are
+    deliberately not carried. Document types for suppliers aren't defined
+    yet; `status` is borrowed from the same CLIENT_STATUSES pipeline as
+    Buyer/Exporter for now and may change once that's specified."""
+    id: Optional[int]
+    company_id: int
+    lead_id: Optional[int]
+    company_name: str
+    status: str
+    created_by: int
+    address: Optional[str] = None
+    gstin: Optional[str] = None
+    pan_no: Optional[str] = None
+    iec: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    contact_details: List[dict] = field(default_factory=list)  # [{type, value, is_primary}]
+    contact_persons: List[dict] = field(default_factory=list)  # [{name, is_primary}]
+    bank_details: List[dict] = field(default_factory=list)  # [{bank_name, account_number, ifsc_code, swift_code, branch, bank_address, is_primary}]
+
+    @staticmethod
+    def from_row(row) -> "Supplier":
+        return Supplier(
+            id=row["id"],
+            company_id=row["company_id"],
+            lead_id=row["lead_id"],
+            company_name=row["company_name"],
+            status=row["status"],
+            created_by=row["created_by"],
+            address=row["address"],
+            gstin=row["gstin"],
+            pan_no=row["pan_no"],
+            iec=row["iec"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    @property
+    def status_label(self) -> str:
+        return dict(CLIENT_STATUSES).get(self.status, self.status)
+
+
+@dataclass
 class PaymentEntry:
     id: Optional[int]
-    client_id: int
+    parent_type: str  # 'buyer' | 'supplier' | 'exporter'
+    parent_id: int
     account_name: str
     payment_datetime: str
     amount_original: float
@@ -265,7 +318,8 @@ class PaymentEntry:
     def from_row(row) -> "PaymentEntry":
         return PaymentEntry(
             id=row["id"],
-            client_id=row["client_id"],
+            parent_type=row["parent_type"],
+            parent_id=row["parent_id"],
             account_name=row["account_name"],
             payment_datetime=row["payment_datetime"],
             amount_original=row["amount_original"],
@@ -278,17 +332,18 @@ class PaymentEntry:
 
 @dataclass
 class DocumentEntry:
-    """Metadata-only placeholder for now (see the hint on the client detail
-    page) - a future update will auto-generate and file-store these the
-    same way Quotation already works. When that happens, give the new
-    document type its own optional `lead_id` (like Quotation.lead_id)
-    instead of a `client_id` - a client has no document link of its own;
-    QuotationRepository.list_for_lead shows the pattern: a converted
-    client's documents are found via `client.lead_id`, so anything created
-    against the lead (before OR after conversion) stays visible on the
-    client automatically, with nothing to copy or keep in sync by hand."""
+    """Metadata-only placeholder for now (see the hint on the buyer/
+    supplier/exporter detail page) - a future update will auto-generate and
+    file-store these the same way Quotation already works. When that
+    happens, give the new document type its own optional `lead_id` (like
+    Quotation.lead_id) instead of a parent link - a party has no document
+    link of its own; QuotationRepository.list_for_lead shows the pattern: a
+    converted party's documents are found via `party.lead_id`, so anything
+    created against the lead (before OR after conversion) stays visible on
+    the party automatically, with nothing to copy or keep in sync by hand."""
     id: Optional[int]
-    client_id: int
+    parent_type: str  # 'buyer' | 'supplier' | 'exporter'
+    parent_id: int
     document_name: str
     document_type: str
     document_date: str
@@ -299,7 +354,8 @@ class DocumentEntry:
     def from_row(row) -> "DocumentEntry":
         return DocumentEntry(
             id=row["id"],
-            client_id=row["client_id"],
+            parent_type=row["parent_type"],
+            parent_id=row["parent_id"],
             document_name=row["document_name"],
             document_type=row["document_type"],
             document_date=row["document_date"],
@@ -682,7 +738,7 @@ class PurchaseOrder:
     created_by: int
     lead_id: Optional[int] = None
     proforma_invoice_id: Optional[int] = None
-    seller_client_id: Optional[int] = None
+    seller_supplier_id: Optional[int] = None
     seller_address: Optional[str] = None
     seller_pan: Optional[str] = None
     seller_gstin: Optional[str] = None
@@ -713,7 +769,7 @@ class PurchaseOrder:
             po_date=row["po_date"],
             lead_id=row["lead_id"],
             proforma_invoice_id=row["proforma_invoice_id"],
-            seller_client_id=row["seller_client_id"],
+            seller_supplier_id=row["seller_supplier_id"],
             seller_name=row["seller_name"],
             seller_address=row["seller_address"],
             seller_pan=row["seller_pan"],
