@@ -380,6 +380,7 @@ class OurCompany:
     contact_persons: List[dict] = field(default_factory=list)  # [{name, is_primary}]
     bank_details: List[dict] = field(default_factory=list)  # [{bank_name, account_number, ifsc_code, branch, is_primary}]
     lut_details: List[dict] = field(default_factory=list)  # [{lut_number, financial_year, is_primary}]
+    rcmc_details: List[dict] = field(default_factory=list)  # [{registration_number, registration_date, valid_until, organisation_name, organisation_address, contact_number, email_address, is_primary}]
 
     @staticmethod
     def from_row(row) -> "OurCompany":
@@ -1147,3 +1148,30 @@ class DocumentVersion:
             changed_by_name=row["changed_by_name"] if "changed_by_name" in row.keys() else None,
         )
 
+
+# ============================================================
+# RCMC (Rebate Certificate Management)
+# ============================================================
+@dataclass
+class RCMC:
+    id: int
+    company_id: int
+    rcmc_number: str
+    rcmc_date: str
+    rcmc_value: float
+    created_by: int
+    updated_at: Optional[str] = None
+    created_at: Optional[str] = None
+
+    @staticmethod
+    def from_row(row) -> "RCMC":
+        return RCMC(
+            id=row["id"],
+            company_id=row["company_id"],
+            rcmc_number=row["rcmc_number"],
+            rcmc_date=row["rcmc_date"],
+            rcmc_value=row["rcmc_value"],
+            created_by=row["created_by"],
+            updated_at=row["updated_at"],
+            created_at=row["created_at"],
+        )
