@@ -34,7 +34,7 @@ from app.models import (
     ProductPalletType, ProductFolder,
     Design, Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
     PurchaseOrder, PurchaseOrderItem, PackingList, PackingListItem,
-    DocumentVersion,
+    DocumentVersion, RCMC,
 )
 from app.repositories import (
     TenantRepository, UserRepositoryBase, LeadRepositoryBase, PartyRepositoryBase, SupplierRepositoryBase,
