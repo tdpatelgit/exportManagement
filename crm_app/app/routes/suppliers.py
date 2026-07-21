@@ -10,7 +10,7 @@ mechanism as Buyer/Exporter (parent_type='supplier').
 """
 
 from flask import (
-    Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort
+    Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort, jsonify
 )
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
@@ -70,6 +70,39 @@ def list_suppliers():
     status = request.args.get("status") or None
     suppliers = current_app.container.supplier_service.list_all(g.user.company_id, status=status)
     return render_template("suppliers/list.html", suppliers=suppliers, status_filter=status)
+
+
+def _supplier_json(supplier) -> dict:
+    """Just the fields the purchase order form's Seller picker needs to
+    prefill its inline fields - same idea as products.py's _product_json."""
+    return {
+        "id": supplier.id, "company_name": supplier.company_name,
+        "address": supplier.address or "", "pan_no": supplier.pan_no or "",
+        "gstin": supplier.gstin or "",
+    }
+
+
+@suppliers_bp.route("/api/quick-create", methods=["POST"])
+@admin_required
+def api_quick_create():
+    """Lets an admin add a brand new supplier without leaving the purchase
+    order form's Seller picker (mirrors products.api_quick_create) - full
+    contact/bank details can be filled in later from the supplier's own
+    edit page."""
+    container = current_app.container
+    try:
+        supplier = container.supplier_service.create(
+            g.user,
+            company_name=request.form.get("company_name", ""),
+            address=request.form.get("address", ""),
+            gstin=request.form.get("gstin", ""),
+            pan_no=request.form.get("pan_no", ""),
+            iec=request.form.get("iec", ""),
+            contact_details=[], contact_persons=[], bank_details=[],
+        )
+    except ValidationError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(_supplier_json(supplier))
 
 
 @suppliers_bp.route("/new", methods=["GET", "POST"])

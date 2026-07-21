@@ -58,7 +58,30 @@
   </div>
 
   <div class="card">
-    <div class="card-header"><h3>Seller</h3></div>
+    <div class="card-header">
+      <h3>Seller</h3>
+      {% if current_user.is_admin %}
+      <button type="button" class="btn btn-ghost btn-sm" id="seller-add-new-toggle">+ Add new supplier</button>
+      {% endif %}
+    </div>
+
+    {% if current_user.is_admin %}
+    <div id="seller-add-new-panel" class="card" hidden style="margin-bottom:14px;">
+      <div class="card-header"><h3>Add new supplier</h3></div>
+      <form id="seller-add-new-form">
+        <div class="field"><label>Company name<span class="required-mark">*</span></label><input type="text" name="company_name" required></div>
+        <div class="field"><label>Address</label><textarea name="address" rows="2"></textarea></div>
+        <div class="form-row">
+          <div class="field"><label>PAN no.</label><input type="text" name="pan_no"></div>
+          <div class="field"><label>GSTIN</label><input type="text" name="gstin"></div>
+        </div>
+        <div class="hint">IEC and bank/contact details can be filled in later from the supplier's own page.</div>
+        <button type="submit" class="btn btn-primary btn-sm">Save &amp; select</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="seller-add-new-cancel">Cancel</button>
+      </form>
+    </div>
+    {% endif %}
+
     <div class="field">
       <label for="seller_select">Prefill from an existing supplier <span class="text-soft text-sm">(optional)</span></label>
       <select id="seller_select">
@@ -303,15 +326,51 @@
   });
 
   // ---- seller dropdown prefill --------------------------------------------------
-  document.getElementById('seller_select').addEventListener('change', (e) => {
+  const sellerSelect = document.getElementById('seller_select');
+  function applySeller(id, name, address, pan, gstin) {
+    document.getElementById('seller_supplier_id').value = id || '';
+    document.getElementById('seller_name').value = name || '';
+    document.getElementById('seller_address').value = address || '';
+    document.getElementById('seller_pan').value = pan || '';
+    document.getElementById('seller_gstin').value = gstin || '';
+  }
+  sellerSelect.addEventListener('change', (e) => {
     const opt = e.target.selectedOptions[0];
-    document.getElementById('seller_supplier_id').value = opt.value || '';
-    if (!opt.value) return;
-    document.getElementById('seller_name').value = opt.dataset.name || '';
-    document.getElementById('seller_address').value = opt.dataset.address || '';
-    document.getElementById('seller_pan').value = opt.dataset.pan || '';
-    document.getElementById('seller_gstin').value = opt.dataset.gstin || '';
+    if (!opt.value) { applySeller('', '', '', '', ''); return; }
+    applySeller(opt.value, opt.dataset.name, opt.dataset.address, opt.dataset.pan, opt.dataset.gstin);
   });
+
+  // ---- add new supplier (admin only) --------------------------------------------------
+  const sellerAddPanel = document.getElementById('seller-add-new-panel');
+  const sellerAddToggle = document.getElementById('seller-add-new-toggle');
+  const sellerAddForm = document.getElementById('seller-add-new-form');
+  if (sellerAddToggle) {
+    sellerAddToggle.addEventListener('click', () => { sellerAddPanel.hidden = !sellerAddPanel.hidden; });
+    document.getElementById('seller-add-new-cancel').addEventListener('click', () => {
+      sellerAddPanel.hidden = true;
+      sellerAddForm.reset();
+    });
+    sellerAddForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const formData = new FormData(sellerAddForm);
+      fetch('/suppliers/api/quick-create', { method: 'POST', body: formData })
+        .then(r => r.json().then(data => ({ ok: r.ok, data })))
+        .then(({ ok, data }) => {
+          if (!ok) { alert(data.error || 'Could not create the supplier.'); return; }
+          const opt = new Option(data.company_name, data.id, true, true);
+          opt.dataset.name = data.company_name;
+          opt.dataset.address = data.address || '';
+          opt.dataset.pan = data.pan_no || '';
+          opt.dataset.gstin = data.gstin || '';
+          sellerSelect.appendChild(opt);
+          sellerSelect.value = data.id;
+          applySeller(data.id, data.company_name, data.address, data.pan_no, data.gstin);
+          sellerAddPanel.hidden = true;
+          sellerAddForm.reset();
+        })
+        .catch(() => alert('Something went wrong creating the supplier.'));
+    });
+  }
 
   // ---- product picker modal (flat searchable product list) --------------------------------------------------
   const overlay = document.getElementById('product-picker-overlay');
