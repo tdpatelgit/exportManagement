@@ -18,7 +18,7 @@ from typing import Optional, List
 from app.database import Database
 from app.models import (
     Tenant, User, Lead, Party, Supplier, ContactPerson, Communication,
-    PaymentEntry, DocumentEntry, OurCompany, Category, Product, ProductPalletType, ProductFolder, Design,
+    PaymentEntry, DocumentEntry, OurCompany, RCMC, Category, Product, ProductPalletType, ProductFolder, Design,
     Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
     PurchaseOrder, PurchaseOrderItem,
     PackingList, PackingListItem, DocumentVersion,
