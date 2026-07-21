@@ -78,13 +78,6 @@
     </tr>
   </table>
 
-  {% if quotation.remarks %}
-  <div class="quote-remarks">
-    <strong>REMARKS:</strong>
-    <div>{{ quotation.remarks|replace('\n', '<br>')|safe }}</div>
-  </div>
-  {% endif %}
-
   <table class="quote-items-table">
     <colgroup>
       <col style="width:4%"><col style="width:28%"><col style="width:12%"><col style="width:8%">
@@ -185,6 +178,13 @@
       </td>
     </tr>
   </table>
+
+  {% if quotation.remarks %}
+  <div class="quote-remarks">
+    <strong>REMARKS:</strong>
+    <div>{{ quotation.remarks|replace('\n', '<br>')|safe }}</div>
+  </div>
+  {% endif %}
 
   <div class="quote-signature">
     <div></div>
