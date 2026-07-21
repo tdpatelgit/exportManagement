@@ -37,16 +37,30 @@ from app import create_app, ServiceContainer
 # Config + database
 # --------------------------------------------------------------------------
 @pytest.fixture
-def tmp_config(tmp_path):
-    """A Config clone whose DB and upload paths live under a per-test tmp dir."""
+def tmp_config(tmp_path, monkeypatch):
+    """A Config clone whose DB and upload paths live under a per-test tmp dir.
+
+    IMPORTANT: this also monkeypatches the *real* `Config` class attributes.
+    `ServiceContainer` reads `Config.PRODUCT_UPLOAD_FOLDER` from the module-level
+    import rather than from the config object passed to `create_app`, so without
+    this patch a test that uploads an image would write into the developer's
+    real `app/static/uploads/products/` folder. Patching the class attribute
+    keeps every code path - however it reaches Config - pointed at the tmp dir.
+    monkeypatch restores the originals after each test.
+    """
     schema_path = os.path.join(CRM_APP_DIR, "app", "schema.sql")
+    db_path = str(tmp_path / "instance" / "test.db")
+    uploads = str(tmp_path / "uploads" / "products")
+
+    monkeypatch.setattr(Config, "DATABASE_PATH", db_path)
+    monkeypatch.setattr(Config, "PRODUCT_UPLOAD_FOLDER", uploads)
 
     class TestConfig(Config):
         TESTING = True
         SECRET_KEY = "test-secret-key"
-        DATABASE_PATH = str(tmp_path / "instance" / "test.db")
+        DATABASE_PATH = db_path
         SCHEMA_PATH = schema_path
-        PRODUCT_UPLOAD_FOLDER = str(tmp_path / "uploads" / "products")
+        PRODUCT_UPLOAD_FOLDER = uploads
         WTF_CSRF_ENABLED = False
 
     return TestConfig

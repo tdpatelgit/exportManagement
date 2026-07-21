@@ -35,6 +35,23 @@ class TestConfig:
         assert Config.SCHEMA_PATH.endswith("schema.sql")
 
 
+class TestTestIsolation:
+    """Guards the suite itself: if these fail, tests are writing into the
+    developer's real database / upload folder."""
+
+    def test_container_uploads_point_at_the_tmp_folder(self, container, tmp_config):
+        assert container.product_service.upload_folder == tmp_config.PRODUCT_UPLOAD_FOLDER
+        assert "uploads/products" in container.product_service.upload_folder
+        assert "app/static" not in container.product_service.upload_folder
+
+    def test_company_service_uploads_point_at_the_tmp_folder(self, container, tmp_config):
+        assert container.company_service.upload_folder == tmp_config.PRODUCT_UPLOAD_FOLDER
+
+    def test_database_path_is_a_tmp_file(self, db, tmp_config):
+        assert db.db_path == tmp_config.DATABASE_PATH
+        assert "instance/crm.db" not in db.db_path
+
+
 class TestExceptions:
     def test_all_are_exception_subclasses(self):
         for exc in (ValidationError, PermissionDeniedError, NotFoundError):

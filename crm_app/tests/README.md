@@ -20,6 +20,14 @@ Every test runs against a **throwaway SQLite database in a temp folder** — the
 real `instance/crm.db` and the real product-upload folder are never touched. No
 network is used either: the live exchange-rate API call is monkeypatched.
 
+> **Why `tmp_config` patches the real `Config` class:** `ServiceContainer` reads
+> `Config.PRODUCT_UPLOAD_FOLDER` from its module-level import rather than from
+> the config passed to `create_app`. Without patching the class attribute, a
+> test that uploads an image would write into the developer's real
+> `app/static/uploads/products/`. `TestTestIsolation` in
+> `test_config_and_exceptions.py` guards this — if those tests ever fail, stop
+> and fix the fixture before running the rest of the suite.
+
 ## Layout
 
 | File | What it covers |
@@ -34,7 +42,14 @@ network is used either: the live exchange-rate API call is monkeypatched.
 | `test_services_leads_clients.py` | Lead rules, permission split, lead→client conversion, payments |
 | `test_services_products.py` | Product parse helpers, IGST tax split, pallet-type rules, catalog CRUD |
 | `test_services_documents.py` | Quotation/PO/PI/packing-list number generation, line-item math, versioning |
+| `test_services_proforma_po.py` | Proforma & Purchase Order flows, quotation→PI→PO prefills, client document feed |
+| `test_services_packing_lists.py` | Packing-list arithmetic: boxes/pallets/pcs/qty/weight derivation rules |
+| `test_services_catalog_tree.py` | Sub-category nesting, designs, image upload/replace/delete on disk |
+| `test_services_company_stats_reports.py` | Our Company profile rules, dashboard stats, reports, client-status pipeline |
+| `test_services_backup.py` | Backup ZIP round-trip + every restore rejection path (zip-slip, bad signature, newer schema) |
+| `test_decorators_and_seed.py` | `login_required` / `admin_required` decorators, `seed.py` slugify |
 | `test_routes.py` | Flask wiring, auth guards, login/logout, admin-only 403, error pages |
+| `test_routes_pages.py` | Every major page renders, key POST flows, JSON APIs, tenant isolation over HTTP |
 
 ## Adding tests when you add code
 
