@@ -39,7 +39,7 @@
     <tr class="pi-goods">
       <td class="pi-val pi-center">{% if mode == 'index' %}{{ gs.sr }}{% endif %}</td>
       <td class="pi-val">{{ rest|upper|e|replace('\n', '<br>')|safe }}</td>
-      <td class="pi-val pi-center">{{ '{:,.0f}'.format(item.pallets) if item.pallets else '' }}</td>
+      <td class="pi-val pi-center">{{ '{:,.2f}'.format(item.pallets) if item.pallets else '' }}</td>
       <td class="pi-val pi-center">{{ '{:,.0f}'.format(item.quantity_boxes) if item.quantity_boxes else '' }}</td>
       <td class="pi-val pi-right">{{ '{:,.2f}'.format(item.quantity_value or 0) }}</td>
       <td class="pi-val pi-right">${{ '{:,.2f}'.format(item.price_usd or 0) }}</td>

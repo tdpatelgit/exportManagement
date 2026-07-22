@@ -2372,15 +2372,12 @@ class PackingListService:
                 else:
                     raise ValidationError(f"Row {i} ('{product_name}'): boxes is compulsory.")
 
-            # Pallets only auto-derives from Boxes when it divides evenly -
-            # a partial last pallet (Boxes not a perfect multiple of
-            # Box-per-pallet) can't be expressed as a clean quotient, so in
-            # that case Pallets is left as whatever the user typed by hand.
+            # Pallets always auto-derives from Boxes / Box-per-pallet, kept
+            # to 2 decimals so a partial last pallet (e.g. 3.5) is expressed
+            # exactly rather than rounded to a whole pallet.
             # No pallet type selected ('loose') means zero pallets, full stop.
             if box_per_pallet:
-                exact_pallets = quantity_boxes / box_per_pallet
-                if abs(exact_pallets - round(exact_pallets)) < 1e-9:
-                    pallets = round(exact_pallets, 2)
+                pallets = round(quantity_boxes / box_per_pallet, 2)
             else:
                 pallets = None
 

@@ -367,9 +367,9 @@
   }
 
   // With Loose selected there are no pallets (Plts locks empty); with a
-  // pallet type selected Plts derives from Boxes / that pallet's capacity -
-  // locked when it divides evenly, editable otherwise (a partial last
-  // pallet has no clean quotient); Manual leaves Plts entirely to the user.
+  // pallet type selected Plts always derives from Boxes / that pallet's
+  // capacity, kept to 2 decimals so a partial last pallet like 3.5 shows
+  // exactly, and locks read-only; Manual leaves Plts entirely to the user.
   function recalcRowPallets(tr) {
     const sel = tr.querySelector('.js-pallet-type');
     const palletsEl = tr.querySelector('.js-pallets');
@@ -385,12 +385,9 @@
     const perPallet = parseFloat(sel.value) || 0;
     const boxes = parseFloat(tr.querySelector('.js-boxes').value) || 0;
     if (perPallet && boxes) {
-      const q = boxes / perPallet;
-      if (Math.abs(q - Math.round(q)) < 1e-6) {
-        palletsEl.value = +q.toFixed(2);
-        palletsEl.readOnly = true;
-        return;
-      }
+      palletsEl.value = +(boxes / perPallet).toFixed(2);
+      palletsEl.readOnly = true;
+      return;
     }
     palletsEl.readOnly = false;
   }
