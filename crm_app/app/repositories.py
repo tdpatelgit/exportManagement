@@ -18,7 +18,7 @@ from typing import Optional, List
 from app.database import Database
 from app.models import (
     Tenant, User, Lead, Party, Supplier, ContactPerson, Communication,
-    PaymentEntry, DocumentEntry, OurCompany, RCMC, Category, Product, ProductPalletType, ProductFolder, Design,
+    PaymentEntry, DocumentEntry, OurCompany, Category, Product, ProductPalletType, ProductFolder, Design,
     Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
     PurchaseOrder, PurchaseOrderItem,
     PackingList, PackingListItem, DocumentVersion,
@@ -1784,46 +1784,3 @@ class DocumentVersionRepository:
             (document_type, document_id, version_number),
         )
         return DocumentVersion.from_row(row) if row else None
-
-# ============================================================
-# RCMC (Rebate Certificate Management)
-# ============================================================
-class RCMCRepository:
-    def __init__(self, db: Database):
-        self.db = db
-
-    def get(self, rcmc_id: int) -> Optional[RCMC]:
-        row = self.db.query_one("SELECT * FROM rcmc WHERE id = ?", (rcmc_id,))
-        return RCMC.from_row(row) if row else None
-
-    def get_by_number(self, company_id: int, rcmc_number: str) -> Optional[RCMC]:
-        row = self.db.query_one(
-            "SELECT * FROM rcmc WHERE company_id = ? AND rcmc_number = ?",
-            (company_id, rcmc_number)
-        )
-        return RCMC.from_row(row) if row else None
-
-    def list_all(self, company_id: int) -> List[RCMC]:
-        rows = self.db.query(
-            "SELECT * FROM rcmc WHERE company_id = ? ORDER BY rcmc_date DESC",
-            (company_id,)
-        )
-        return [RCMC.from_row(r) for r in rows]
-
-    def create(self, company_id: int, rcmc_number: str, rcmc_date: str, rcmc_value: float,
-               created_by: int) -> int:
-        return self.db.execute(
-            "INSERT INTO rcmc (company_id, rcmc_number, rcmc_date, rcmc_value, created_by) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (company_id, rcmc_number, rcmc_date, rcmc_value, created_by)
-        )
-
-    def update(self, rcmc_id: int, rcmc_number: str, rcmc_date: str, rcmc_value: float) -> None:
-        self.db.execute(
-            "UPDATE rcmc SET rcmc_number = ?, rcmc_date = ?, rcmc_value = ?, updated_at = datetime('now') "
-            "WHERE id = ?",
-            (rcmc_number, rcmc_date, rcmc_value, rcmc_id)
-        )
-
-    def delete(self, rcmc_id: int) -> None:
-        self.db.execute("DELETE FROM rcmc WHERE id = ?", (rcmc_id,))
