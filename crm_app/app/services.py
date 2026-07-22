@@ -34,7 +34,7 @@ from app.models import (
     ProductPalletType, ProductFolder,
     Design, Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
     PurchaseOrder, PurchaseOrderItem, PackingList, PackingListItem,
-    DocumentVersion, RCMC,
+    DocumentVersion,
 )
 from app.repositories import (
     TenantRepository, UserRepositoryBase, LeadRepositoryBase, PartyRepositoryBase, SupplierRepositoryBase,
@@ -2760,43 +2760,3 @@ class BackupService:
     def _not_our_backup_msg() -> str:
         return ("This file doesn't look like a backup created by this app. Please upload a "
                 ".zip you downloaded from the Database Backup page.")
-
-# ============================================================
-# RCMC (Rebate Certificate Management)
-# ============================================================
-class RCMCService:
-    def __init__(self, db: Database):
-        self.db = db
-        self.rcmc_repo = RCMCRepository(db)
-
-    def get(self, rcmc_id: int) -> Optional[RCMC]:
-        return self.rcmc_repo.get(rcmc_id)
-
-    def get_by_number(self, company_id: int, rcmc_number: str) -> Optional[RCMC]:
-        return self.rcmc_repo.get_by_number(company_id, rcmc_number)
-
-    def list_all(self, company_id: int) -> List[RCMC]:
-        return self.rcmc_repo.list_all(company_id)
-
-    def create(self, company_id: int, rcmc_number: str, rcmc_date: str, rcmc_value: float,
-               created_by: int) -> int:
-        # Check if RCMC with same number already exists
-        existing = self.rcmc_repo.get_by_number(company_id, rcmc_number)
-        if existing:
-            raise ValidationError(f"RCMC with number {rcmc_number} already exists")
-        
-        return self.rcmc_repo.create(company_id, rcmc_number, rcmc_date, rcmc_value, created_by)
-
-    def update(self, rcmc_id: int, rcmc_number: str, rcmc_date: str, rcmc_value: float) -> None:
-        # Check if another RCMC with same number exists
-        existing = self.rcmc_repo.get(rcmc_id)
-        if existing and existing.rcmc_number != rcmc_number:
-            # If we're changing the number, check if new number already exists
-            other_rcmc = self.rcmc_repo.get_by_number(existing.company_id, rcmc_number)
-            if other_rcmc:
-                raise ValidationError(f"RCMC with number {rcmc_number} already exists")
-        
-        self.rcmc_repo.update(rcmc_id, rcmc_number, rcmc_date, rcmc_value)
-
-    def delete(self, rcmc_id: int) -> None:
-        self.rcmc_repo.delete(rcmc_id)
