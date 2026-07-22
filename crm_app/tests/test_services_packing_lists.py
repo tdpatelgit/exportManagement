@@ -193,6 +193,75 @@ class TestPackingListCrud:
         assert line["quantity_boxes"] == ""
         assert line["is_placeholder"] is True
 
+    def test_prefill_from_proforma_imports_quotations_packing_list(self, container, seed):
+        # Quotation -> PL, then a proforma invoice is linked to that quotation.
+        # Generating the PI's PL must carry over the quotation's PL rows in
+        # full (designs, boxes, weights), not start from blank placeholders.
+        q = container.quotation_service.create(
+            seed.admin, {"buyer_name": "B", "quotation_date": "2026-01-01"},
+            [{"product_name": "P", "quantity_value": "10", "price_usd": "2", "hsn_code": "6907"}])
+        container.packing_list_service.create(
+            seed.admin, {"packing_list_date": "2026-01-02", "quotation_id": q.id, "remarks": "PACKED"},
+            [{"product_name": "P", "design_name": "D1", "quantity_boxes": "8",
+              "box_per_pallet": "4", "net_weight_kg": "16"}])
+        pi = container.proforma_invoice_service.create(
+            seed.admin, {"consignee_name": "B", "invoice_date": "2026-02-01", "quotation_id": q.id},
+            [{"product_name": "P", "quantity_value": "10", "price_usd": "2"}])
+
+        prefill = container.packing_list_service.build_prefill_from_proforma(pi)
+        assert prefill["fields"]["proforma_invoice_id"] == pi.id
+        assert prefill["fields"]["remarks"] == "PACKED"
+        assert len(prefill["items"]) == 1
+        line = prefill["items"][0]
+        assert line["design_name"] == "D1"
+        assert line["quantity_boxes"] == 8
+        assert line["net_weight_kg"] == 16
+        assert "is_placeholder" not in line
+
+    def test_prefill_from_purchase_order_walks_to_quotation_packing_list(self, container, seed):
+        # PO -> PI (no PL on the PI) -> quotation (has a PL). The PO's PL must
+        # reach past the intermediate invoice to the quotation's PL.
+        q = container.quotation_service.create(
+            seed.admin, {"buyer_name": "B", "quotation_date": "2026-01-01"},
+            [{"product_name": "P", "quantity_value": "10", "price_usd": "2"}])
+        container.packing_list_service.create(
+            seed.admin, {"packing_list_date": "2026-01-02", "quotation_id": q.id},
+            [{"product_name": "P", "design_name": "D9", "quantity_boxes": "5"}])
+        pi = container.proforma_invoice_service.create(
+            seed.admin, {"consignee_name": "B", "invoice_date": "2026-02-01", "quotation_id": q.id},
+            [{"product_name": "P", "quantity_value": "10", "price_usd": "2"}])
+        po = container.purchase_order_service.create(
+            seed.admin, {"seller_name": "S", "po_date": "2026-03-01", "proforma_invoice_id": pi.id},
+            [{"product_name": "P", "quantity_boxes": "10", "quantity_value": "100", "price_inr": "500", "price_per": "BOX"}])
+
+        prefill = container.packing_list_service.build_prefill_from_purchase_order(po)
+        assert len(prefill["items"]) == 1
+        assert prefill["items"][0]["design_name"] == "D9"
+        assert prefill["items"][0]["quantity_boxes"] == 5
+        assert "is_placeholder" not in prefill["items"][0]
+
+    def test_prefill_prefers_nearer_ancestor_packing_list(self, container, seed):
+        # Both the quotation and the proforma invoice have a PL - the PO's PL
+        # must import the nearer one (the proforma invoice's).
+        q = container.quotation_service.create(
+            seed.admin, {"buyer_name": "B", "quotation_date": "2026-01-01"},
+            [{"product_name": "P", "quantity_value": "10", "price_usd": "2"}])
+        container.packing_list_service.create(
+            seed.admin, {"packing_list_date": "2026-01-02", "quotation_id": q.id},
+            [{"product_name": "P", "design_name": "FROM_QUOTE", "quantity_boxes": "5"}])
+        pi = container.proforma_invoice_service.create(
+            seed.admin, {"consignee_name": "B", "invoice_date": "2026-02-01", "quotation_id": q.id},
+            [{"product_name": "P", "quantity_value": "10", "price_usd": "2"}])
+        container.packing_list_service.create(
+            seed.admin, {"packing_list_date": "2026-02-02", "proforma_invoice_id": pi.id},
+            [{"product_name": "P", "design_name": "FROM_PI", "quantity_boxes": "7"}])
+        po = container.purchase_order_service.create(
+            seed.admin, {"seller_name": "S", "po_date": "2026-03-01", "proforma_invoice_id": pi.id},
+            [{"product_name": "P", "quantity_boxes": "10", "quantity_value": "100", "price_inr": "500", "price_per": "BOX"}])
+
+        prefill = container.packing_list_service.build_prefill_from_purchase_order(po)
+        assert prefill["items"][0]["design_name"] == "FROM_PI"
+
     def test_list_for_quotation_finds_generated_list(self, container, seed):
         q = container.quotation_service.create(
             seed.admin, {"buyer_name": "B", "quotation_date": "2026-01-01"},
