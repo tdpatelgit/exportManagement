@@ -160,9 +160,16 @@
   <div class="quote-footnote">Price validity: {{ quotation.price_validity_days }} days from date of quotation.</div>
 
   <table class="quote-bank-table">
+    <colgroup><col style="width:32%"><col style="width:40%"><col style="width:28%"></colgroup>
     <tr>
       <th>BENEFICIARY</th>
       <th>BANK NAME &amp; ADDRESS</th>
+      <td rowspan="2" class="quote-sign-cell">
+        <div class="quote-sign-flex">
+          <div>FOR&nbsp;{{ company.company_name|upper if company else '' }}</div>
+          <div>AUTHORISED SIGNATORY</div>
+        </div>
+      </td>
     </tr>
     <tr>
       <td>
@@ -185,12 +192,4 @@
     <div>{{ quotation.remarks|replace('\n', '<br>')|safe }}</div>
   </div>
   {% endif %}
-
-  <div class="quote-signature">
-    <div></div>
-    <div class="quote-signature-box">
-      <div>{{ company.company_name if company else '' }}</div>
-      <div class="text-sm text-soft">Authorised Signatory</div>
-    </div>
-  </div>
 </div>
