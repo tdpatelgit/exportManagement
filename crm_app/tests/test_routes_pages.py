@@ -245,6 +245,28 @@ class TestDocumentRoutes:
         client.post(f"/quotations/{q.id}/delete", follow_redirects=True)
         assert container.quotation_repo.get_by_id(q.id) is None
 
+    def test_purchase_order_form_has_no_nested_form(self, admin_ctx):
+        """The admin-only "Add new supplier" panel once shipped as a <form>
+        nested inside the purchase order's own form. Browsers drop the inner
+        tag, which handed its `required` company_name to the PO form - and a
+        required control inside a `hidden` panel can't be focused, so Chrome
+        refused to submit the PO at all, silently. Nothing server-side broke,
+        so only a markup assertion catches it."""
+        import re
+
+        client, *_ = admin_ctx
+        html = client.get("/purchase-orders/new").get_data(as_text=True)
+        body = html[html.find('<form method="POST" id="po-form"'):]
+        body = body[:body.find("</form>")]
+        markup = re.sub(r"<!--.*?-->", "", body, flags=re.S)  # comments mention <form> in prose
+        assert "<form" not in markup[1:]
+        # The panel's controls must not become the PO form's controls.
+        assert 'name="company_name"' not in markup
+        panel = markup[markup.find("seller-add-new-panel"):markup.find("seller_select")]
+        assert not re.search(r"\srequired[\s>]", panel)  # the attribute, not the required-mark class
+        # ...and the submit button still lives inside the PO form.
+        assert "Create purchase order" in markup
+
 
 # ==========================================================================
 # Reports
