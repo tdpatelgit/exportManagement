@@ -1,2 +1,9 @@
-.
+# Editor / tooling settings - local to each developer's machine.
+.vscode/
+.claude/
+
+# Test + tooling run logs. Generated output, not source.
 logs/
+
+# pytest's cache of last-run results (regenerated on every run).
+.pytest_cache/

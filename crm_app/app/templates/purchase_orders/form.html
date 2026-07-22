@@ -342,8 +342,22 @@
   }
   sellerSelect.addEventListener('change', (e) => {
     const opt = e.target.selectedOptions[0];
+<<<<<<< HEAD
+<<<<<<< HEAD
     if (!opt.value) { applySeller('', '', '', '', ''); return; }
     applySeller(opt.value, opt.dataset.name, opt.dataset.address, opt.dataset.pan, opt.dataset.gstin);
+=======
+    document.getElementById('seller_supplier_id').value = opt.value || '';
+    if (!opt.value) return;
+    document.getElementById('seller_name').value = opt.dataset.name || '';
+    document.getElementById('seller_address').value = opt.dataset.address || '';
+    document.getElementById('seller_pan').value = opt.dataset.pan || '';
+    document.getElementById('seller_gstin').value = opt.dataset.gstin || '';
+>>>>>>> c703baf (feat: seperate client types into their own seperate tabs with their own seprate data and document structure.)
+=======
+    if (!opt.value) { applySeller('', '', '', '', ''); return; }
+    applySeller(opt.value, opt.dataset.name, opt.dataset.address, opt.dataset.pan, opt.dataset.gstin);
+>>>>>>> 6e9dcbf (feature: can add supplier from PO)
   });
 
   // ---- add new supplier (admin only) --------------------------------------------------
