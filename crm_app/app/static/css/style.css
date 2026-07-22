@@ -531,9 +531,19 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
 
 .quote-footnote { font-size: .6175rem; color: var(--color-text-soft); margin-bottom: 16px; }
 
-.quote-bank-table { width: 100%; border-collapse: collapse; border: 1px solid var(--color-ink); margin-bottom: 30px; }
+.quote-bank-table { width: 100%; table-layout: fixed; border-collapse: collapse; border: 1px solid var(--color-ink); margin-bottom: 30px; }
 .quote-bank-table th { border: 1px solid var(--color-line-dark); background: var(--color-paper); padding: 6px 8px; font-size: .6175rem; }
-.quote-bank-table td { border: 1px solid var(--color-line-dark); padding: 8px 10px; vertical-align: top; width: 50%; }
+.quote-bank-table td { border: 1px solid var(--color-line-dark); padding: 8px 10px; vertical-align: top; overflow-wrap: break-word; }
+
+/* Signature cell sits to the right of the bank name/address cell, sized to
+   leave room for both a physical signature and a rubber stamp - mirrors the
+   purchase order's po-sign-cell/po-sign-flex pattern instead of a separate
+   full-width signature row. */
+.quote-sign-cell { height: 110px; padding: 4px 6px; }
+.quote-sign-flex {
+  display: flex; flex-direction: column; justify-content: space-between;
+  height: 100%; text-align: right; font-weight: 600; font-size: .6175rem;
+}
 
 .quote-signature { display: flex; justify-content: space-between; align-items: flex-end; }
 .quote-signature-box { text-align: center; min-width: 220px; border-top: 1px solid var(--color-line-dark); padding-top: 6px; }
