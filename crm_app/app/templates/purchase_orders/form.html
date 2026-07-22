@@ -66,19 +66,25 @@
     </div>
 
     {% if current_user.is_admin %}
+    <!-- Deliberately a plain div, not a form element: this panel sits
+         inside the purchase order's own form, and nesting forms is invalid
+         HTML - the browser drops the inner tag, which hands its `required`
+         fields to the PO form and blocks the PO from ever submitting.
+         Plain inputs + type="button" + a manual fetch keep the two
+         independent. -->
     <div id="seller-add-new-panel" class="card" hidden style="margin-bottom:14px;">
       <div class="card-header"><h3>Add new supplier</h3></div>
-      <form id="seller-add-new-form">
-        <div class="field"><label>Company name<span class="required-mark">*</span></label><input type="text" name="company_name" required></div>
-        <div class="field"><label>Address</label><textarea name="address" rows="2"></textarea></div>
+      <div id="seller-add-new-form">
+        <div class="field"><label for="new_supplier_company_name">Company name<span class="required-mark">*</span></label><input type="text" id="new_supplier_company_name"></div>
+        <div class="field"><label for="new_supplier_address">Address</label><textarea id="new_supplier_address" rows="2"></textarea></div>
         <div class="form-row">
-          <div class="field"><label>PAN no.</label><input type="text" name="pan_no"></div>
-          <div class="field"><label>GSTIN</label><input type="text" name="gstin"></div>
+          <div class="field"><label for="new_supplier_pan_no">PAN no.</label><input type="text" id="new_supplier_pan_no"></div>
+          <div class="field"><label for="new_supplier_gstin">GSTIN</label><input type="text" id="new_supplier_gstin"></div>
         </div>
         <div class="hint">IEC and bank/contact details can be filled in later from the supplier's own page.</div>
-        <button type="submit" class="btn btn-primary btn-sm">Save &amp; select</button>
+        <button type="button" class="btn btn-primary btn-sm" id="seller-add-new-save">Save &amp; select</button>
         <button type="button" class="btn btn-ghost btn-sm" id="seller-add-new-cancel">Cancel</button>
-      </form>
+      </div>
     </div>
     {% endif %}
 
@@ -357,16 +363,27 @@
   // ---- add new supplier (admin only) --------------------------------------------------
   const sellerAddPanel = document.getElementById('seller-add-new-panel');
   const sellerAddToggle = document.getElementById('seller-add-new-toggle');
-  const sellerAddForm = document.getElementById('seller-add-new-form');
+  const sellerAddFields = ['company_name', 'address', 'pan_no', 'gstin'];
+  const sellerAddInput = (name) => document.getElementById('new_supplier_' + name);
+  function resetSellerAdd() {
+    sellerAddFields.forEach((name) => { sellerAddInput(name).value = ''; });
+  }
   if (sellerAddToggle) {
     sellerAddToggle.addEventListener('click', () => { sellerAddPanel.hidden = !sellerAddPanel.hidden; });
     document.getElementById('seller-add-new-cancel').addEventListener('click', () => {
       sellerAddPanel.hidden = true;
-      sellerAddForm.reset();
+      resetSellerAdd();
     });
-    sellerAddForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const formData = new FormData(sellerAddForm);
+    document.getElementById('seller-add-new-save').addEventListener('click', () => {
+      // The panel's inputs are validated here rather than by the browser -
+      // they're plain inputs, not a form's controls.
+      if (!sellerAddInput('company_name').value.trim()) {
+        alert('Company name is compulsory.');
+        sellerAddInput('company_name').focus();
+        return;
+      }
+      const formData = new FormData();
+      sellerAddFields.forEach((name) => formData.append(name, sellerAddInput(name).value));
       fetch('/suppliers/api/quick-create', { method: 'POST', body: formData })
         .then(r => r.json().then(data => ({ ok: r.ok, data })))
         .then(({ ok, data }) => {
@@ -380,7 +397,7 @@
           sellerSelect.value = data.id;
           applySeller(data.id, data.company_name, data.address, data.pan_no, data.gstin);
           sellerAddPanel.hidden = true;
-          sellerAddForm.reset();
+          resetSellerAdd();
         })
         .catch(() => alert('Something went wrong creating the supplier.'));
     });
