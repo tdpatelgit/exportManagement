@@ -2211,15 +2211,81 @@ class PackingListService:
         seq = self.packing_list_repo.count_for_date_prefix(company_id, prefix) + 1
         return f"{prefix}{seq:03d}"
 
+    # ---- importing an ancestor document's packing list --------------------------------------------------
+    def _newest_packing_list(self, packing_lists: list, company_id: int) -> Optional[PackingList]:
+        """Newest company-scoped packing list from a repo list (which orders
+        by id), or None."""
+        scoped = [pl for pl in packing_lists if pl.company_id == company_id]
+        return scoped[-1] if scoped else None
+
+    def _ancestor_packing_list(self, company_id: int, *, proforma_invoice_id: Optional[int] = None,
+                               quotation_id: Optional[int] = None) -> Optional[PackingList]:
+        """Newest packing list found on an ancestor document, walking up the
+        link chain Purchase Order -> Proforma Invoice -> Quotation. A nearer
+        ancestor wins: a PL already generated from the proforma invoice is
+        preferred over one from the quotation the invoice itself came from.
+        Returns the PackingList (items loaded) or None so the goods on the
+        latest document's PL start from whatever was last shipped/packed
+        upstream instead of an empty sheet."""
+        if proforma_invoice_id:
+            found = self._newest_packing_list(
+                self.packing_list_repo.list_for_proforma(proforma_invoice_id), company_id)
+            if found:
+                return found
+            # No PL on the proforma invoice itself - fall through to the
+            # quotation it was generated from, if any.
+            invoice = self.proforma_invoice_repo.get_by_id(proforma_invoice_id)
+            if invoice and invoice.company_id == company_id and invoice.quotation_id:
+                quotation_id = invoice.quotation_id
+        if quotation_id and self.quotation_repo is not None:
+            return self._newest_packing_list(
+                self.packing_list_repo.list_for_quotation(quotation_id), company_id)
+        return None
+
+    def _items_from_packing_list(self, source_pl: PackingList) -> list:
+        """Full design-level rows copied from an existing packing list, so the
+        new PL starts pre-filled with the same designs, boxes, pallets, pcs,
+        quantities and weights."""
+        return [
+            {
+                "product_id": item.product_id, "product_name": item.product_name,
+                "design_id": item.design_id, "design_name": item.design_name or "",
+                "hsn_code": item.hsn_code, "box_per_pallet": item.box_per_pallet or "",
+                "pallets": item.pallets or "",
+                "quantity_boxes": item.quantity_boxes or "", "pcs": item.pcs or "",
+                "quantity_value": item.quantity_value or "", "unit": item.unit,
+                "net_weight_kg": item.net_weight_kg or "", "gross_weight_kg": item.gross_weight_kg or "",
+            }
+            for item in source_pl.items
+        ]
+
+    def _placeholder_items(self, source_items: list) -> list:
+        """One empty product block per source line (header only, marked
+        is_placeholder so the form doesn't render a blank design row) - used
+        when no upstream packing list exists to import, so the user picks
+        designs and per-design box counts themselves."""
+        return [
+            {
+                "product_id": item.product_id, "product_name": item.product_name,
+                "design_id": None, "design_name": "",
+                "hsn_code": item.hsn_code, "box_per_pallet": "", "pallets": "",
+                "quantity_boxes": "", "pcs": "",
+                "quantity_value": "", "unit": item.unit,
+                "net_weight_kg": "", "gross_weight_kg": "",
+                "is_placeholder": True,
+            }
+            for item in source_items
+        ]
+
     # ---- prefill from an existing proforma invoice --------------------------------------------------
     def build_prefill_from_proforma(self, invoice: ProformaInvoice) -> dict:
         """Caller must have already loaded `invoice` via
         ProformaInvoiceService.get(invoice_id, current_user.company_id) so
-        cross-company ownership is already verified. Each proforma product
-        line becomes one empty product block (header only, marked
-        is_placeholder so the form doesn't render a blank design row) - the
-        user picks designs and fills in per-design box counts themselves,
-        with as many design rows per product as they need."""
+        cross-company ownership is already verified. When the invoice was
+        generated from a quotation that already has a packing list, that PL's
+        full design-level rows are imported as the starting point; otherwise
+        each proforma product line becomes one empty product block (marked
+        is_placeholder) and the user fills in designs and box counts."""
         fields = {
             "proforma_invoice_id": invoice.id,
             "lead_id": invoice.lead_id,
@@ -2228,18 +2294,12 @@ class PackingListService:
             "other_reference": invoice.other_reference,
             "remarks": "MADE IN INDIA",
         }
-        items = [
-            {
-                "product_id": item.product_id, "product_name": item.product_name,
-                "design_id": None, "design_name": "",
-                "hsn_code": item.hsn_code, "box_per_pallet": "", "pallets": "",
-                "quantity_boxes": "", "pcs": "",
-                "quantity_value": "", "unit": item.unit,
-                "net_weight_kg": "", "gross_weight_kg": "",
-                "is_placeholder": True,
-            }
-            for item in invoice.items
-        ]
+        source_pl = self._ancestor_packing_list(invoice.company_id, quotation_id=invoice.quotation_id)
+        if source_pl:
+            items = self._items_from_packing_list(source_pl)
+            fields["remarks"] = source_pl.remarks or fields["remarks"]
+        else:
+            items = self._placeholder_items(invoice.items)
         return {"fields": fields, "items": items}
 
     # ---- prefill from an existing quotation (skips the PI step) --------------------------------------------------
@@ -2248,75 +2308,41 @@ class PackingListService:
         from a Quotation - lets a packing list be generated without an
         intermediate proforma invoice. Caller must have already loaded
         `quotation` via QuotationService.get(quotation_id, current_user.company_id)
-        so cross-company ownership is already verified."""
+        so cross-company ownership is already verified. A quotation is the top
+        of the document chain, so there is no upstream PL to import - each
+        product line becomes one empty product block."""
         fields = {
             "quotation_id": quotation.id,
             "lead_id": quotation.lead_id,
             "buyer_order_no": quotation.buyer_reference_no,
             "remarks": "MADE IN INDIA",
         }
-        items = [
-            {
-                "product_id": item.product_id, "product_name": item.product_name,
-                "design_id": None, "design_name": "",
-                "hsn_code": item.hsn_code, "box_per_pallet": "", "pallets": "",
-                "quantity_boxes": "", "pcs": "",
-                "quantity_value": "", "unit": item.unit,
-                "net_weight_kg": "", "gross_weight_kg": "",
-                "is_placeholder": True,
-            }
-            for item in quotation.items
-        ]
+        items = self._placeholder_items(quotation.items)
         return {"fields": fields, "items": items}
 
     # ---- prefill from an existing purchase order --------------------------------------------------
     def build_prefill_from_purchase_order(self, purchase_order: PurchaseOrder) -> dict:
         """The PO's own packing list. Caller must have already loaded
         `purchase_order` via PurchaseOrderService.get(...) so cross-company
-        ownership is already verified. When the PO was generated from a
-        proforma invoice that already has a packing list, that PL's full
-        design-level rows are imported as the starting point (the goods
-        being ordered are the goods being shipped); otherwise each PO
-        product line becomes one empty product block, same as
-        build_prefill_from_proforma."""
+        ownership is already verified. When an ancestor document already has a
+        packing list - the proforma invoice the PO came from, or failing that
+        the quotation that invoice came from - that PL's full design-level
+        rows are imported as the starting point (the goods being ordered are
+        the goods being shipped); otherwise each PO product line becomes one
+        empty product block, same as build_prefill_from_proforma."""
         fields = {
             "purchase_order_id": purchase_order.id,
             "lead_id": purchase_order.lead_id,
             "buyer_order_no": purchase_order.seller_ref_no,
             "remarks": "MADE IN INDIA",
         }
-        source_pl = None
-        if purchase_order.proforma_invoice_id:
-            existing = self.packing_list_repo.list_for_proforma(purchase_order.proforma_invoice_id)
-            existing = [pl for pl in existing if pl.company_id == purchase_order.company_id]
-            source_pl = existing[-1] if existing else None  # newest (list_for_proforma orders by id)
+        source_pl = self._ancestor_packing_list(
+            purchase_order.company_id, proforma_invoice_id=purchase_order.proforma_invoice_id)
         if source_pl:
-            items = [
-                {
-                    "product_id": item.product_id, "product_name": item.product_name,
-                    "design_id": item.design_id, "design_name": item.design_name or "",
-                    "hsn_code": item.hsn_code, "box_per_pallet": item.box_per_pallet or "",
-                    "pallets": item.pallets or "",
-                    "quantity_boxes": item.quantity_boxes or "", "pcs": item.pcs or "",
-                    "quantity_value": item.quantity_value or "", "unit": item.unit,
-                    "net_weight_kg": item.net_weight_kg or "", "gross_weight_kg": item.gross_weight_kg or "",
-                }
-                for item in source_pl.items
-            ]
+            items = self._items_from_packing_list(source_pl)
             fields["remarks"] = source_pl.remarks or fields["remarks"]
         else:
-            items = [
-                {
-                    "product_id": item.product_id, "product_name": item.product_name,
-                    "design_id": None, "design_name": "",
-                    "hsn_code": item.hsn_code, "box_per_pallet": "", "pallets": "",
-                    "quantity_boxes": "", "pcs": "",
-                    "quantity_value": "", "unit": item.unit,
-                    "net_weight_kg": "", "gross_weight_kg": "",
-                    "is_placeholder": True,
-                }
-                for item in purchase_order.items
-            ]
+            items = self._placeholder_items(purchase_order.items)
         return {"fields": fields, "items": items}
 
     # ---- validation --------------------------------------------------
