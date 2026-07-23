@@ -159,6 +159,17 @@ COMMUNICATION_MODES = ["WhatsApp", "WeChat", "Call", "Email", "In Person", "Othe
 # and the service-side fallback - so the choices can't drift apart.
 PRODUCT_UNITS = ["SQM", "LM", "PCS", "KG", "SET"]
 
+# What a purchase order is bought under - it decides the GST rate applied to
+# the whole order (see PurchaseOrderService._tax_percentages):
+#   full_tax  - the ordinary rate, taken from the catalog products on the lines
+#   exemption - the concessional rate for supplies meant for export (0.1% total)
+PURCHASE_TYPES = {"full_tax": "Full Tax Purchase", "exemption": "Exemption"}
+DEFAULT_PURCHASE_TYPE = "full_tax"
+# The whole-order rate under Exemption: 0.1% inter-state, split into
+# 0.05% + 0.05% when it's an intra-state purchase (same halving rule the
+# catalog products follow for their own rates).
+EXEMPTION_IGST_PERCENT = 0.1
+
 
 @dataclass
 class Lead:
@@ -730,7 +741,9 @@ class PurchaseOrder:
     Unlike the other documents, OUR company is the BUYER here and a supplier
     is the SELLER - so the header carries seller details instead of a
     consignee, and amounts are INR. Tax percentages are stored; every amount
-    (tax, round-off, order value) is derived, never stored."""
+    (tax, round-off, order value) is derived, never stored. The percentages
+    themselves aren't typed in either - they follow from `purchase_type` plus
+    the seller's GSTIN state code (see PurchaseOrderService._tax_percentages)."""
     id: Optional[int]
     company_id: int
     po_number: str
@@ -754,6 +767,7 @@ class PurchaseOrder:
     igst_percent: float = 0
     cgst_percent: float = 0
     sgst_percent: float = 0
+    purchase_type: str = DEFAULT_PURCHASE_TYPE  # key of PURCHASE_TYPES
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     created_by_name: Optional[str] = None  # populated by joined queries only
@@ -786,6 +800,7 @@ class PurchaseOrder:
             igst_percent=row["igst_percent"],
             cgst_percent=row["cgst_percent"],
             sgst_percent=row["sgst_percent"],
+            purchase_type=(row["purchase_type"] if "purchase_type" in row.keys() else None) or DEFAULT_PURCHASE_TYPE,
             created_by=row["created_by"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],

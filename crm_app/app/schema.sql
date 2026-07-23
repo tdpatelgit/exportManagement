@@ -565,6 +565,7 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
     igst_percent            REAL NOT NULL DEFAULT 0,
     cgst_percent            REAL NOT NULL DEFAULT 0,
     sgst_percent            REAL NOT NULL DEFAULT 0,
+    purchase_type           TEXT NOT NULL DEFAULT 'full_tax',   -- 'full_tax' | 'exemption'; drives the three percentages above
     created_by              INTEGER NOT NULL REFERENCES users(id),
     created_at              TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at              TEXT NOT NULL DEFAULT (datetime('now')),

@@ -25,7 +25,7 @@ _HEADER_FIELDS = [
     "seller_name", "seller_address", "seller_pan", "seller_gstin", "seller_ref_no",
     "port_of_loading", "port_of_discharge", "container_details", "delivery_time",
     "advance_percent", "payment_terms", "remarks",
-    "igst_percent", "cgst_percent", "sgst_percent",
+    "purchase_type",
 ]
 
 
@@ -67,10 +67,12 @@ def _form_context():
     return leads, invoices, suppliers
 
 
-def _alt_qty_map(items) -> dict:
-    """Same purpose as proforma_invoices._alt_qty_map - reproduces the Boxes
-    x Alternate Quantity auto-calc for rows already tied to a catalog
-    product."""
+def _product_meta_map(items) -> dict:
+    """product_id -> {'alt_qty', 'igst'} for rows already tied to a catalog
+    product: `alt_qty` reproduces proforma_invoices._alt_qty_map's Boxes x
+    Alternate Quantity auto-calc, `igst` lets the form preview the tax a
+    Full Tax Purchase will be charged (the figure the service derives on
+    save - see PurchaseOrderService.base_igst_percent)."""
     container = current_app.container
     result = {}
     for item in items:
@@ -85,7 +87,7 @@ def _alt_qty_map(items) -> dict:
             continue
         try:
             product = container.product_service.get_product(product_id, g.user.company_id)
-            result[product_id] = product.alternate_quantity or ""
+            result[product_id] = {"alt_qty": product.alternate_quantity or "", "igst": product.igst_percent or ""}
         except NotFoundError:
             pass
     return result
@@ -116,7 +118,7 @@ def new_purchase_order():
             return render_template(
                 "purchase_orders/form.html", purchase_order=None, leads=leads, invoices=invoices,
                 suppliers=suppliers, form_data=request.form, form_items=items,
-                alt_qty_map=_alt_qty_map(items), today=date.today().isoformat(),
+                product_meta_map=_product_meta_map(items), today=date.today().isoformat(),
             ), 400
 
     leads, invoices, suppliers = _form_context()
@@ -142,7 +144,7 @@ def new_purchase_order():
     return render_template(
         "purchase_orders/form.html", purchase_order=None, leads=leads, invoices=invoices,
         suppliers=suppliers, form_data=prefill, form_items=form_items,
-        alt_qty_map=_alt_qty_map(form_items) if form_items else {},
+        product_meta_map=_product_meta_map(form_items) if form_items else {},
         today=date.today().isoformat(),
     )
 
@@ -204,14 +206,14 @@ def edit_purchase_order(purchase_order_id):
             return render_template(
                 "purchase_orders/form.html", purchase_order=purchase_order, leads=leads, invoices=invoices,
                 suppliers=suppliers, form_data=request.form, form_items=items,
-                alt_qty_map=_alt_qty_map(items), today=date.today().isoformat(),
+                product_meta_map=_product_meta_map(items), today=date.today().isoformat(),
             ), 400
 
     leads, invoices, suppliers = _form_context()
     return render_template(
         "purchase_orders/form.html", purchase_order=purchase_order, leads=leads, invoices=invoices,
         suppliers=suppliers, form_data=None, form_items=None,
-        alt_qty_map=_alt_qty_map(purchase_order.items), today=date.today().isoformat(),
+        product_meta_map=_product_meta_map(purchase_order.items), today=date.today().isoformat(),
     )
 
 
