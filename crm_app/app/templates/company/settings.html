@@ -73,6 +73,47 @@
     </fieldset>
 
     <fieldset>
+      <legend>RCMC (Registration-cum-Membership Certificate) <span class="text-soft text-sm">— one row per registration; leave empty if not applicable</span></legend>
+      <div id="rcmc-rows">
+        {% set rcmcs = company.rcmc_details if company and company.rcmc_details else [] %}
+        {% if rcmcs %}
+          {% for r in rcmcs %}
+          <div class="repeatable-row repeatable-row-stacked">
+            <div class="form-row">
+              <div class="field"><label>Registration number</label><input type="text" name="rcmc_registration_number[]" value="{{ r.registration_number }}"></div>
+              <div class="field"><label>Registration date</label><input type="date" name="rcmc_registration_date[]" value="{{ r.registration_date }}"></div>
+              <div class="field"><label>Valid until</label><input type="date" name="rcmc_valid_until[]" value="{{ r.valid_until }}"></div>
+            </div>
+            <div class="form-row">
+              <div class="field"><label>Organisation name</label><input type="text" name="rcmc_organisation_name[]" value="{{ r.organisation_name or '' }}"></div>
+              <div class="field"><label>Contact number</label><input type="text" name="rcmc_contact_number[]" value="{{ r.contact_number or '' }}"></div>
+              <div class="field"><label>Email address</label><input type="text" name="rcmc_email_address[]" value="{{ r.email_address or '' }}"></div>
+            </div>
+            <div class="field"><label>Organisation address</label><textarea name="rcmc_organisation_address[]" rows="2">{{ r.organisation_address or '' }}</textarea></div>
+            <div class="radio-wrap"><input type="checkbox" name="rcmc_primary[]" value="{{ loop.index0 }}" id="rp-{{ loop.index0 }}" {{ 'checked' if r.is_primary }}><label for="rp-{{ loop.index0 }}">Current</label></div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="repeatable-row repeatable-row-stacked">
+            <div class="form-row">
+              <div class="field"><label>Registration number</label><input type="text" name="rcmc_registration_number[]"></div>
+              <div class="field"><label>Registration date</label><input type="date" name="rcmc_registration_date[]"></div>
+              <div class="field"><label>Valid until</label><input type="date" name="rcmc_valid_until[]"></div>
+            </div>
+            <div class="form-row">
+              <div class="field"><label>Organisation name</label><input type="text" name="rcmc_organisation_name[]"></div>
+              <div class="field"><label>Contact number</label><input type="text" name="rcmc_contact_number[]"></div>
+              <div class="field"><label>Email address</label><input type="text" name="rcmc_email_address[]"></div>
+            </div>
+            <div class="field"><label>Organisation address</label><textarea name="rcmc_organisation_address[]" rows="2"></textarea></div>
+            <div class="radio-wrap"><input type="checkbox" name="rcmc_primary[]" value="0" id="rp-0"><label for="rp-0">Current</label></div>
+          </div>
+        {% endif %}
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addRcmcRow()">+ Add RCMC</button>
+    </fieldset>
+
+    <fieldset>
       <legend>Contact details <span class="text-soft text-sm">— at least one phone and one email required; value is compulsory for every row</span></legend>
       <div id="detail-rows">
         {% set details = company.contact_details if company and company.contact_details else [] %}
@@ -197,6 +238,27 @@
       <div class="radio-wrap"><input type="checkbox" name="lut_primary[]" value="${lutCount}" id="lp-${lutCount}"><label for="lp-${lutCount}">Current</label></div>`;
     wrap.appendChild(row);
     lutCount++;
+  }
+  let rcmcCount = {{ (rcmcs|length) if rcmcs else 1 }};
+  function addRcmcRow() {
+    const wrap = document.getElementById('rcmc-rows');
+    const row = document.createElement('div');
+    row.className = 'repeatable-row repeatable-row-stacked';
+    row.innerHTML = `
+      <div class="form-row">
+        <div class="field"><label>Registration number</label><input type="text" name="rcmc_registration_number[]"></div>
+        <div class="field"><label>Registration date</label><input type="date" name="rcmc_registration_date[]"></div>
+        <div class="field"><label>Valid until</label><input type="date" name="rcmc_valid_until[]"></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>Organisation name</label><input type="text" name="rcmc_organisation_name[]"></div>
+        <div class="field"><label>Contact number</label><input type="text" name="rcmc_contact_number[]"></div>
+        <div class="field"><label>Email address</label><input type="text" name="rcmc_email_address[]"></div>
+      </div>
+      <div class="field"><label>Organisation address</label><textarea name="rcmc_organisation_address[]" rows="2"></textarea></div>
+      <div class="radio-wrap"><input type="checkbox" name="rcmc_primary[]" value="${rcmcCount}" id="rp-${rcmcCount}"><label for="rp-${rcmcCount}">Current</label></div>`;
+    wrap.appendChild(row);
+    rcmcCount++;
   }
   let bankCount = {{ (banks|length) if banks else 1 }};
   function addBankRow() {

@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}{{ purchase_invoice.purchase_invoice_number }}{% endblock %}
+{% block content %}
+
+{% if historical_version %}
+<div class="card" style="background:#fff4d6;">
+  <div>Viewing <strong>version {{ historical_version.version_number }}</strong> of {{ purchase_invoice.purchase_invoice_number }} - saved {{ historical_version.created_at | friendly_date }} by {{ historical_version.changed_by_name }}. Read-only.</div>
+  <a href="{{ url_for('purchase_invoices.view_purchase_invoice', purchase_invoice_id=purchase_invoice.id) }}" class="btn btn-ghost btn-sm">View current version →</a>
+</div>
+{% endif %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Sales documents</div>
+    <h1>{{ purchase_invoice.purchase_invoice_number }}</h1>
+    <div class="text-sm text-soft">Supplier invoice no. {{ purchase_invoice.invoice_number }} · {{ purchase_invoice.invoice_date }}</div>
+  </div>
+  {% if not historical_version %}
+  <div class="topbar-actions">
+    <a href="{{ url_for('purchase_invoices.list_purchase_invoices') }}" class="btn btn-ghost btn-sm">← All purchase invoices</a>
+    {% if purchase_invoice.purchase_order_id %}
+    <a href="{{ url_for('purchase_orders.view_purchase_order', purchase_order_id=purchase_invoice.purchase_order_id) }}" class="btn btn-ghost btn-sm">View purchase order</a>
+    {% endif %}
+    {% if packing_lists %}
+    <a href="{{ url_for('packing_lists.view_packing_list', packing_list_id=packing_lists[0].id) }}" class="btn btn-ghost btn-sm">📦 View packing list</a>
+    {% else %}
+    <a href="{{ url_for('packing_lists.new_packing_list', purchase_invoice_id=purchase_invoice.id) }}" class="btn btn-ghost btn-sm">📦 Create packing list</a>
+    {% endif %}
+    <a href="{{ url_for('purchase_invoices.edit_purchase_invoice', purchase_invoice_id=purchase_invoice.id) }}" class="btn btn-ghost btn-sm">Edit</a>
+    {% if current_user.is_admin %}
+    <a href="{{ url_for('purchase_invoices.purchase_invoice_versions', purchase_invoice_id=purchase_invoice.id) }}" class="btn btn-ghost btn-sm">Version history</a>
+    {% endif %}
+    <form method="POST" action="{{ url_for('purchase_invoices.delete_purchase_invoice', purchase_invoice_id=purchase_invoice.id) }}" onsubmit="return confirmDeleteWithPassword(this, 'Delete this purchase invoice? Any packing lists generated from it will also be deleted.');">
+      <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-header"><h3>Invoice details</h3></div>
+  <div class="form-row">
+    <div class="field"><label>Transporter name</label><div>{{ purchase_invoice.transporter_name or '—' }}</div></div>
+    <div class="field"><label>EPCG number</label><div>{{ purchase_invoice.epcg_number or '—' }}</div></div>
+    <div class="field"><label>EPCG date</label><div>{{ purchase_invoice.epcg_date or '—' }}</div></div>
+  </div>
+  {% if purchase_invoice.vehicle_numbers %}
+  <div class="field">
+    <label>Vehicle numbers</label>
+    <div>{{ purchase_invoice.vehicle_numbers | join(', ') }}</div>
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-header"><h3>Seller</h3></div>
+  <div><strong>{{ purchase_invoice.seller_name }}</strong></div>
+  {% if purchase_invoice.seller_address %}<div class="text-sm">{{ purchase_invoice.seller_address }}</div>{% endif %}
+  <div class="form-row" style="margin-top:8px;">
+    <div class="field"><label>PAN</label><div>{{ purchase_invoice.seller_pan or '—' }}</div></div>
+    <div class="field"><label>GSTIN</label><div>{{ purchase_invoice.seller_gstin or '—' }}</div></div>
+    <div class="field"><label>Ref. no.</label><div>{{ purchase_invoice.seller_ref_no or '—' }}</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h3>Products</h3></div>
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th>Sr</th><th>Product</th><th>HSN code</th><th>Boxes</th><th>Qty</th><th>Unit</th>
+          <th>Price (INR)</th><th>Per</th><th class="num">Total (INR)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in purchase_invoice.items %}
+        <tr>
+          <td>{{ item.sr_no }}</td>
+          <td>{{ item.product_name }}</td>
+          <td>{{ item.hsn_code or '—' }}</td>
+          <td>{{ item.quantity_boxes or '—' }}</td>
+          <td>{{ item.quantity_value }}</td>
+          <td>{{ item.unit }}</td>
+          <td>{{ '{:,.2f}'.format(item.price_inr) }}</td>
+          <td>{{ item.price_per }}</td>
+          <td class="num">{{ '{:,.2f}'.format(item.total_inr) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="flex-between" style="margin-top:14px;">
+    <div></div>
+    <div class="text-sm">
+      <strong>Products subtotal:</strong> ₹ {{ '{:,.2f}'.format(purchase_invoice.subtotal_inr) }}
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h3>Charges &amp; taxes</h3></div>
+  <div class="form-row">
+    <div class="field"><label>Discount</label><div>₹ {{ '{:,.2f}'.format(purchase_invoice.discount_amount) }}</div></div>
+    <div class="field"><label>Insurance and Other</label><div>₹ {{ '{:,.2f}'.format(purchase_invoice.insurance_other) }}</div></div>
+    <div class="field"><label>Freight</label><div>₹ {{ '{:,.2f}'.format(purchase_invoice.freight) }}</div></div>
+  </div>
+  <div class="form-row">
+    <div class="field"><label>IGST</label><div>₹ {{ '{:,.2f}'.format(purchase_invoice.igst_amount) }}</div></div>
+    <div class="field"><label>CGST</label><div>₹ {{ '{:,.2f}'.format(purchase_invoice.cgst_amount) }}</div></div>
+    <div class="field"><label>SGST</label><div>₹ {{ '{:,.2f}'.format(purchase_invoice.sgst_amount) }}</div></div>
+    <div class="field"><label>Round off</label><div>₹ {{ '{:,.2f}'.format(purchase_invoice.round_off) }}</div></div>
+  </div>
+  <div class="flex-between" style="margin-top:14px;">
+    <div></div>
+    <div class="text-sm"><strong>Invoice value:</strong> ₹ {{ '{:,.2f}'.format(purchase_invoice.invoice_value_inr) }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h3>Supplier's Purchase Invoice PDF</h3></div>
+  {% if purchase_invoice.supplier_pdf_path %}
+  <a href="{{ url_for('static', filename=purchase_invoice.supplier_pdf_path) }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">📄 View / download PDF</a>
+  {% else %}
+  <div class="empty-state">No file uploaded.</div>
+  {% endif %}
+</div>
+
+{% if purchase_invoice.remarks %}
+<div class="card">
+  <div class="card-header"><h3>Remarks</h3></div>
+  <div class="text-sm">{{ purchase_invoice.remarks }}</div>
+</div>
+{% endif %}
+
+{% endblock %}

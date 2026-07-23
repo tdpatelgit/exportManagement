@@ -16,16 +16,15 @@ from datetime import date
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
-from app.utils import login_required, admin_required
+from app.utils import login_required, admin_required, verify_delete_password
 
 purchase_orders_bp = Blueprint("purchase_orders", __name__, url_prefix="/purchase-orders")
 
 _HEADER_FIELDS = [
     "po_date", "lead_id", "proforma_invoice_id", "seller_supplier_id",
     "seller_name", "seller_address", "seller_pan", "seller_gstin", "seller_ref_no",
-    "port_of_loading", "port_of_discharge", "container_details", "delivery_time",
-    "advance_percent", "payment_terms", "remarks",
-    "igst_percent", "cgst_percent", "sgst_percent",
+    "delivery_time", "advance_percent", "payment_terms", "remarks",
+    "purchase_type",
 ]
 
 
@@ -67,10 +66,60 @@ def _form_context():
     return leads, invoices, suppliers
 
 
-def _alt_qty_map(items) -> dict:
-    """Same purpose as proforma_invoices._alt_qty_map - reproduces the Boxes
-    x Alternate Quantity auto-calc for rows already tied to a catalog
-    product."""
+def _flash_if_over_ordered(container, purchase_order) -> None:
+    """A product line need not be ordered from a single PO - it can be split
+    across several, and nothing stops their quantities adding up to MORE
+    boxes than the proforma invoice actually called for. Checked right after
+    saving a PO that's linked to one, flagging every product currently over
+    its requirement (the whole picture across every PO on that invoice, not
+    just this one - an earlier PO could be the one now pushed over)."""
+    if not purchase_order.proforma_invoice_id:
+        return
+    try:
+        invoice = container.proforma_invoice_service.get(purchase_order.proforma_invoice_id, g.user.company_id)
+    except NotFoundError:
+        return
+    over_ordered = container.proforma_fulfilment_service.product_status(g.user.company_id, invoice)["over_ordered"]
+    if not over_ordered:
+        return
+    parts = []
+    for p in over_ordered:
+        if p["required_boxes"] or p["placed_boxes"]:
+            excess, unit = p["excess_boxes"], "boxes"
+        else:
+            excess, unit = p["excess_quantity"], p["unit"]
+        parts.append(f"{p['product_name']} (+{excess:,.2f} {unit})")
+    flash(
+        "Ordered more than the proforma invoice calls for: " + ", ".join(parts) + ".", "error",
+    )
+
+
+def _packing_details_rows(purchase_order, pi_packing_lists) -> list:
+    """Rows for the 'PACKING DETAILS' block embedded in the PO's own print
+    sheet: restricted to the products actually selected on this PO (not
+    whatever the PO's separately-maintained packing list happens to hold),
+    with each product's design breakdown pulled from the linked proforma
+    invoice's own packing list - that's where designs are actually chosen,
+    the PO only orders by product."""
+    def key(product_id, product_name):
+        return product_id or (product_name or "").strip().upper()
+
+    po_keys = {key(item.product_id, item.product_name) for item in purchase_order.items}
+    rows = []
+    for packing_list in pi_packing_lists:
+        for item in packing_list.items:
+            if key(item.product_id, item.product_name) not in po_keys:
+                continue
+            rows.append(item)
+    return rows
+
+
+def _product_meta_map(items) -> dict:
+    """product_id -> {'alt_qty', 'igst'} for rows already tied to a catalog
+    product: `alt_qty` reproduces proforma_invoices._alt_qty_map's Boxes x
+    Alternate Quantity auto-calc, `igst` lets the form preview the tax a
+    Full Tax Purchase will be charged (the figure the service derives on
+    save - see PurchaseOrderService.base_igst_percent)."""
     container = current_app.container
     result = {}
     for item in items:
@@ -85,7 +134,7 @@ def _alt_qty_map(items) -> dict:
             continue
         try:
             product = container.product_service.get_product(product_id, g.user.company_id)
-            result[product_id] = product.alternate_quantity or ""
+            result[product_id] = {"alt_qty": product.alternate_quantity or "", "igst": product.igst_percent or ""}
         except NotFoundError:
             pass
     return result
@@ -108,6 +157,7 @@ def new_purchase_order():
                 current_user=g.user, fields=_extract_header(request.form), raw_items=_extract_items(request.form),
             )
             flash(f"Purchase order {purchase_order.po_number} created.", "success")
+            _flash_if_over_ordered(container, purchase_order)
             return redirect(url_for("purchase_orders.view_purchase_order", purchase_order_id=purchase_order.id))
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
@@ -116,7 +166,7 @@ def new_purchase_order():
             return render_template(
                 "purchase_orders/form.html", purchase_order=None, leads=leads, invoices=invoices,
                 suppliers=suppliers, form_data=request.form, form_items=items,
-                alt_qty_map=_alt_qty_map(items), today=date.today().isoformat(),
+                product_meta_map=_product_meta_map(items), today=date.today().isoformat(),
             ), 400
 
     leads, invoices, suppliers = _form_context()
@@ -142,7 +192,7 @@ def new_purchase_order():
     return render_template(
         "purchase_orders/form.html", purchase_order=None, leads=leads, invoices=invoices,
         suppliers=suppliers, form_data=prefill, form_items=form_items,
-        alt_qty_map=_alt_qty_map(form_items) if form_items else {},
+        product_meta_map=_product_meta_map(form_items) if form_items else {},
         today=date.today().isoformat(),
     )
 
@@ -157,8 +207,15 @@ def view_purchase_order(purchase_order_id):
         abort(404)
     company = container.company_service.get(g.user.company_id)
     packing_lists = container.packing_list_service.list_for_purchase_order(purchase_order_id, g.user.company_id)
+    purchase_invoices = container.purchase_invoice_service.list_for_purchase_order(purchase_order_id, g.user.company_id)
+    pi_packing_lists = (
+        container.packing_list_service.list_for_proforma(purchase_order.proforma_invoice_id, g.user.company_id)
+        if purchase_order.proforma_invoice_id else []
+    )
+    packing_details_items = _packing_details_rows(purchase_order, pi_packing_lists)
     return render_template("purchase_orders/print.html", purchase_order=purchase_order, company=company,
-                           packing_lists=packing_lists)
+                           packing_lists=packing_lists, purchase_invoices=purchase_invoices,
+                           packing_details_items=packing_details_items)
 
 
 @purchase_orders_bp.route("/<int:purchase_order_id>/combined")
@@ -174,10 +231,16 @@ def combined_purchase_order(purchase_order_id):
         abort(404)
     company = container.company_service.get(g.user.company_id)
     packing_lists = container.packing_list_service.list_for_purchase_order(purchase_order_id, g.user.company_id)
+    pi_packing_lists = (
+        container.packing_list_service.list_for_proforma(purchase_order.proforma_invoice_id, g.user.company_id)
+        if purchase_order.proforma_invoice_id else []
+    )
+    packing_details_items = _packing_details_rows(purchase_order, pi_packing_lists)
     from app.routes.packing_lists import catalog_maps
     product_map, design_map = catalog_maps(packing_lists)
     return render_template("purchase_orders/print_combined.html", purchase_order=purchase_order, company=company,
-                           packing_lists=packing_lists, product_map=product_map, design_map=design_map)
+                           packing_lists=packing_lists, product_map=product_map, design_map=design_map,
+                           packing_details_items=packing_details_items)
 
 
 @purchase_orders_bp.route("/<int:purchase_order_id>/edit", methods=["GET", "POST"])
@@ -191,11 +254,12 @@ def edit_purchase_order(purchase_order_id):
 
     if request.method == "POST":
         try:
-            container.purchase_order_service.update(
+            updated = container.purchase_order_service.update(
                 current_user=g.user, purchase_order_id=purchase_order_id,
                 fields=_extract_header(request.form), raw_items=_extract_items(request.form),
             )
             flash(f"Purchase order {purchase_order.po_number} updated.", "success")
+            _flash_if_over_ordered(container, updated)
             return redirect(url_for("purchase_orders.view_purchase_order", purchase_order_id=purchase_order_id))
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
@@ -204,20 +268,23 @@ def edit_purchase_order(purchase_order_id):
             return render_template(
                 "purchase_orders/form.html", purchase_order=purchase_order, leads=leads, invoices=invoices,
                 suppliers=suppliers, form_data=request.form, form_items=items,
-                alt_qty_map=_alt_qty_map(items), today=date.today().isoformat(),
+                product_meta_map=_product_meta_map(items), today=date.today().isoformat(),
             ), 400
 
     leads, invoices, suppliers = _form_context()
     return render_template(
         "purchase_orders/form.html", purchase_order=purchase_order, leads=leads, invoices=invoices,
         suppliers=suppliers, form_data=None, form_items=None,
-        alt_qty_map=_alt_qty_map(purchase_order.items), today=date.today().isoformat(),
+        product_meta_map=_product_meta_map(purchase_order.items), today=date.today().isoformat(),
     )
 
 
 @purchase_orders_bp.route("/<int:purchase_order_id>/delete", methods=["POST"])
 @login_required
 def delete_purchase_order(purchase_order_id):
+    if not verify_delete_password(g.user, request.form):
+        flash("Incorrect password. Purchase order not deleted.", "error")
+        return redirect(url_for("purchase_orders.view_purchase_order", purchase_order_id=purchase_order_id))
     try:
         purchase_order = current_app.container.purchase_order_service.get(purchase_order_id, g.user.company_id)
         current_app.container.purchase_order_service.delete(g.user, purchase_order_id)
@@ -269,5 +336,5 @@ def view_purchase_order_version(purchase_order_id, version_number):
     company = container.company_service.get(g.user.company_id)
     return render_template(
         "purchase_orders/print.html", purchase_order=historical_purchase_order, company=company,
-        packing_lists=[], historical_version=version,
+        packing_lists=[], packing_details_items=[], historical_version=version,
     )

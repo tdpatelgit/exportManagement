@@ -287,6 +287,19 @@ CREATE TABLE IF NOT EXISTS our_company_lut_details (
     is_primary      INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS our_company_rcmc_details (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    our_company_id         INTEGER NOT NULL REFERENCES our_company(id) ON DELETE CASCADE,
+    registration_number    TEXT NOT NULL,
+    registration_date      TEXT NOT NULL,
+    valid_until            TEXT NOT NULL,
+    organisation_name      TEXT,
+    organisation_address   TEXT,
+    contact_number         TEXT,
+    email_address          TEXT,
+    is_primary             INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS our_company_contact_details (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     our_company_id  INTEGER NOT NULL REFERENCES our_company(id) ON DELETE CASCADE,
@@ -444,6 +457,7 @@ CREATE TABLE IF NOT EXISTS quotation_items (
     dimension_mm        TEXT,
     hsn_code            TEXT,
     quantity_boxes      REAL,
+    pallets             REAL,      -- "Plts" column - same derived-from-boxes pattern as proforma_invoice_items.pallets
     quantity_value       REAL NOT NULL DEFAULT 0,
     unit                TEXT NOT NULL DEFAULT 'SQM',
     price_usd           REAL NOT NULL DEFAULT 0,
@@ -497,6 +511,7 @@ CREATE TABLE IF NOT EXISTS proforma_invoices (
     bank_branch               TEXT,
     bank_address               TEXT,
     display_mode              TEXT NOT NULL DEFAULT 'index',  -- goods layout: 'index' (numbered) | 'surface' (grouped by category + surface)
+    status                    TEXT NOT NULL DEFAULT 'draft',  -- 'draft' | 'confirmed'; a confirmed PI is locked for editing and reminds until every design on its packing list is placed on a linked PO
     created_by                 INTEGER NOT NULL REFERENCES users(id),
     created_at                  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at                  TEXT NOT NULL DEFAULT (datetime('now')),
@@ -527,7 +542,10 @@ CREATE TABLE IF NOT EXISTS proforma_invoice_items (
 -- supplier is the SELLER, prices are in INR (typically ex-factory per box).
 -- Can be started from an existing proforma invoice - proforma_invoice_id is
 -- a "generated from" reference only, same pattern as
--- proforma_invoices.quotation_id. Tax percentages are stored; the amounts,
+-- proforma_invoices.quotation_id. ONE PI CAN HAVE MANY POs: a single order is
+-- normally split across several suppliers, so the PI page lists every PO
+-- pointing at it and tracks which of its packing-list designs are still
+-- unplaced. Tax percentages are stored; the amounts,
 -- round-off and final order value are always derived from the items.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS purchase_orders (
@@ -553,6 +571,7 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
     igst_percent            REAL NOT NULL DEFAULT 0,
     cgst_percent            REAL NOT NULL DEFAULT 0,
     sgst_percent            REAL NOT NULL DEFAULT 0,
+    purchase_type           TEXT NOT NULL DEFAULT 'full_tax',   -- 'full_tax' | 'exemption'; drives the three percentages above
     created_by              INTEGER NOT NULL REFERENCES users(id),
     created_at              TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at              TEXT NOT NULL DEFAULT (datetime('now')),
@@ -575,13 +594,93 @@ CREATE TABLE IF NOT EXISTS purchase_order_items (
 );
 
 -- ============================================================
+-- PURCHASE INVOICES  (header + line items + vehicle numbers, number
+-- generated as PINV{YYYYMMDD}{seq-of-that-day} per company. The last
+-- document in the pipeline: raised once a supplier's goods (against one of
+-- our purchase orders) actually arrive, carrying the supplier's own
+-- invoice/transport details. purchase_order_id is a "generated from"
+-- reference only, same pattern as purchase_orders.proforma_invoice_id -
+-- one supplier, one PO, one purchase invoice. Unlike every other document
+-- type there is nothing to print here: the supplier already sent their own
+-- invoice as a PDF (supplier_pdf_path), we just record its numbers
+-- alongside it. invoice_number/invoice_date are the SUPPLIER's own values
+-- as printed on that PDF - purchase_invoice_number is our own internal,
+-- auto-generated identifier (kept for consistency with every other
+-- document type's numbering/version-history machinery). Discount/
+-- insurance/freight/tax/round-off are typed in directly from the supplier's
+-- invoice rather than derived, since they must match what the supplier
+-- actually charged, not what our own tax rules would compute.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS purchase_invoices (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id              INTEGER NOT NULL REFERENCES tenants(id),
+    purchase_invoice_number TEXT NOT NULL,
+    invoice_number          TEXT NOT NULL,   -- the supplier's own invoice number, printed on their PDF
+    invoice_date            TEXT NOT NULL,
+    purchase_order_id       INTEGER REFERENCES purchase_orders(id),   -- optional, "generated from" reference only
+    lead_id                 INTEGER REFERENCES leads(id),             -- optional, prefill/reference only
+    seller_supplier_id      INTEGER REFERENCES suppliers(id),
+    seller_name             TEXT NOT NULL,
+    seller_address          TEXT,
+    seller_pan              TEXT,
+    seller_gstin            TEXT,
+    seller_ref_no           TEXT,
+    port_of_loading         TEXT,
+    port_of_discharge       TEXT,
+    container_details       TEXT,
+    transporter_name        TEXT,
+    epcg_number             TEXT,
+    epcg_date               TEXT,
+    supplier_pdf_path       TEXT,   -- the supplier's own Purchase Invoice PDF, relative to static/
+    discount_amount         REAL NOT NULL DEFAULT 0,
+    insurance_other         REAL NOT NULL DEFAULT 0,
+    freight                 REAL NOT NULL DEFAULT 0,
+    igst_amount             REAL NOT NULL DEFAULT 0,
+    cgst_amount             REAL NOT NULL DEFAULT 0,
+    sgst_amount             REAL NOT NULL DEFAULT 0,
+    round_off               REAL NOT NULL DEFAULT 0,
+    remarks                 TEXT,
+    created_by              INTEGER NOT NULL REFERENCES users(id),
+    created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (company_id, purchase_invoice_number)
+);
+
+CREATE TABLE IF NOT EXISTS purchase_invoice_items (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_invoice_id    INTEGER NOT NULL REFERENCES purchase_invoices(id) ON DELETE CASCADE,
+    sr_no                  INTEGER NOT NULL,
+    product_id             INTEGER REFERENCES products(id) ON DELETE SET NULL,   -- optional, just for prefill/reference
+    product_name           TEXT NOT NULL,
+    hsn_code               TEXT,
+    quantity_boxes         REAL,
+    quantity_value         REAL NOT NULL DEFAULT 0,
+    unit                   TEXT NOT NULL DEFAULT 'SQM',
+    price_inr              REAL NOT NULL DEFAULT 0,
+    price_per              TEXT NOT NULL DEFAULT 'BOX',
+    total_inr              REAL NOT NULL DEFAULT 0
+);
+
+-- Vehicle numbers are a plain repeatable list of values (a supplier's
+-- shipment can arrive split across several trucks) - no other columns, so
+-- no separate model class, just a sr_no-ordered list of strings.
+CREATE TABLE IF NOT EXISTS purchase_invoice_vehicles (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_invoice_id    INTEGER NOT NULL REFERENCES purchase_invoices(id) ON DELETE CASCADE,
+    sr_no                  INTEGER NOT NULL,
+    vehicle_number         TEXT NOT NULL
+);
+
+-- ============================================================
 -- PACKING LISTS  (header + line items, number generated as
 -- PL{YYYYMMDD}{seq-of-that-day} per company. Normally started from an
 -- existing proforma invoice, but can also be started directly from a
--- Quotation (skipping the PI step) - proforma_invoice_id/quotation_id are
--- both "generated from" reference only, same pattern as
--- proforma_invoices.quotation_id. Each line breaks a product's quantity down
--- into a specific DESIGN in smaller quantities.)
+-- Quotation (skipping the PI step), from a Purchase Order (the PO's own
+-- PL), or from a Purchase Invoice (that invoice's own PL, importing the
+-- linked PO's PL wholesale) - proforma_invoice_id/quotation_id/
+-- purchase_order_id/purchase_invoice_id are all "generated from" reference
+-- only, same pattern as proforma_invoices.quotation_id. Each line breaks a
+-- product's quantity down into a specific DESIGN in smaller quantities.)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS packing_lists (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -592,6 +691,7 @@ CREATE TABLE IF NOT EXISTS packing_lists (
     proforma_invoice_id     INTEGER REFERENCES proforma_invoices(id),   -- optional, "generated from" reference only
     quotation_id            INTEGER REFERENCES quotations(id),         -- optional, "generated from" reference only (skips the PI step)
     purchase_order_id       INTEGER REFERENCES purchase_orders(id),    -- optional, "generated from" reference only (the PO's own PL)
+    purchase_invoice_id     INTEGER REFERENCES purchase_invoices(id),  -- optional, "generated from" reference only (the Purchase Invoice's own PL)
     export_ref_no           TEXT,
     buyer_order_no          TEXT,
     other_reference         TEXT,
@@ -645,7 +745,7 @@ CREATE TABLE IF NOT EXISTS packing_list_items (
 CREATE TABLE IF NOT EXISTS document_versions (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     company_id          INTEGER NOT NULL REFERENCES tenants(id),
-    document_type       TEXT NOT NULL,   -- 'quotation' | 'proforma_invoice' | 'purchase_order' | 'packing_list'
+    document_type       TEXT NOT NULL,   -- 'quotation' | 'proforma_invoice' | 'purchase_order' | 'packing_list' | 'purchase_invoice'
     document_id         INTEGER NOT NULL,
     version_number      INTEGER NOT NULL,
     document_number     TEXT NOT NULL,   -- snapshot of quotation_number/invoice_number/packing_list_number, for display
@@ -689,6 +789,12 @@ CREATE INDEX IF NOT EXISTS idx_purchase_orders_company ON purchase_orders(compan
 CREATE INDEX IF NOT EXISTS idx_purchase_orders_created_by ON purchase_orders(created_by);
 CREATE INDEX IF NOT EXISTS idx_purchase_orders_date ON purchase_orders(po_date);
 CREATE INDEX IF NOT EXISTS idx_purchase_order_items_po ON purchase_order_items(purchase_order_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_invoices_company ON purchase_invoices(company_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_invoices_created_by ON purchase_invoices(created_by);
+CREATE INDEX IF NOT EXISTS idx_purchase_invoices_date ON purchase_invoices(invoice_date);
+CREATE INDEX IF NOT EXISTS idx_purchase_invoices_po ON purchase_invoices(purchase_order_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_invoice_items_pi ON purchase_invoice_items(purchase_invoice_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_invoice_vehicles_pi ON purchase_invoice_vehicles(purchase_invoice_id);
 CREATE INDEX IF NOT EXISTS idx_packing_lists_company ON packing_lists(company_id);
 CREATE INDEX IF NOT EXISTS idx_packing_lists_created_by ON packing_lists(created_by);
 CREATE INDEX IF NOT EXISTS idx_packing_lists_date ON packing_lists(packing_list_date);

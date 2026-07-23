@@ -15,7 +15,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
 from app.services import pallet_alt_quantity
-from app.utils import login_required, admin_required
+from app.utils import login_required, admin_required, verify_delete_password
 
 proforma_invoices_bp = Blueprint("proforma_invoices", __name__, url_prefix="/proforma-invoices")
 
@@ -40,7 +40,6 @@ def _extract_items(form) -> list:
     product_ids = form.getlist("item_product_id[]")
     product_names = form.getlist("item_product_name[]")
     hsn_codes = form.getlist("item_hsn_code[]")
-    surfaces = form.getlist("item_surface[]")
     pallets = form.getlist("item_pallets[]")
     boxes = form.getlist("item_quantity_boxes[]")
     values = form.getlist("item_quantity_value[]")
@@ -52,7 +51,6 @@ def _extract_items(form) -> list:
             "product_id": product_ids[i] if i < len(product_ids) else "",
             "product_name": product_names[i],
             "hsn_code": hsn_codes[i] if i < len(hsn_codes) else "",
-            "surface": surfaces[i] if i < len(surfaces) else "",
             "pallets": pallets[i] if i < len(pallets) else "",
             "quantity_boxes": boxes[i] if i < len(boxes) else "",
             "quantity_value": values[i] if i < len(values) else "",
@@ -126,8 +124,15 @@ def _pallet_types_map(items) -> dict:
 @proforma_invoices_bp.route("/")
 @login_required
 def list_proforma_invoices():
-    invoices = current_app.container.proforma_invoice_service.list_all(g.user.company_id)
-    return render_template("proforma_invoices/list.html", invoices=invoices)
+    container = current_app.container
+    invoices = container.proforma_invoice_service.list_all(g.user.company_id)
+    # Two flat maps rather than per-row queries: how many POs each invoice
+    # has, and which confirmed invoices are still waiting on some of them.
+    po_counts = container.purchase_order_service.count_map_by_proforma(g.user.company_id)
+    reminders = container.proforma_fulfilment_service.pending_purchase_order_reminders(g.user.company_id)
+    reminder_map = {r["invoice"].id: r for r in reminders}
+    return render_template("proforma_invoices/list.html", invoices=invoices,
+                           po_counts=po_counts, reminder_map=reminder_map)
 
 
 @proforma_invoices_bp.route("/new", methods=["GET", "POST"])
@@ -194,9 +199,14 @@ def view_proforma_invoice(proforma_invoice_id):
         abort(404)
     company = container.company_service.get(g.user.company_id)
     packing_lists = container.packing_list_service.list_for_proforma(proforma_invoice_id, g.user.company_id)
-    purchase_order = container.purchase_order_service.get_for_proforma(proforma_invoice_id)
+    # An invoice is ordered from several suppliers, so the page lists every
+    # PO placed against it and which of its packing-list designs are still
+    # unplaced, rather than linking to a single "the" purchase order.
+    purchase_orders = container.purchase_order_service.list_for_proforma(proforma_invoice_id, g.user.company_id)
+    design_status = container.proforma_fulfilment_service.design_status(g.user.company_id, proforma_invoice_id)
     return render_template("proforma_invoices/print.html", invoice=invoice, company=company,
-                           packing_lists=packing_lists, purchase_order=purchase_order)
+                           packing_lists=packing_lists, purchase_orders=purchase_orders,
+                           design_status=design_status)
 
 
 @proforma_invoices_bp.route("/<int:proforma_invoice_id>/combined")
@@ -225,6 +235,12 @@ def edit_proforma_invoice(proforma_invoice_id):
         invoice = container.proforma_invoice_service.get(proforma_invoice_id, g.user.company_id)
     except NotFoundError:
         abort(404)
+    if invoice.is_confirmed:
+        # The service refuses the save anyway - stopping here means the user
+        # never fills in a form that can't be submitted.
+        flash(f"Proforma invoice {invoice.invoice_number} is confirmed and locked. "
+              "An admin has to move it back to draft before it can be edited.", "error")
+        return redirect(url_for("proforma_invoices.view_proforma_invoice", proforma_invoice_id=proforma_invoice_id))
 
     if request.method == "POST":
         try:
@@ -254,9 +270,34 @@ def edit_proforma_invoice(proforma_invoice_id):
     )
 
 
+@proforma_invoices_bp.route("/<int:proforma_invoice_id>/status", methods=["POST"])
+@login_required
+def set_proforma_invoice_status(proforma_invoice_id):
+    """Confirm an invoice, or (admin only) send it back to draft. Confirming
+    locks the document and starts the reminder to keep placing purchase
+    orders until every design on its packing list is covered."""
+    try:
+        invoice = current_app.container.proforma_invoice_service.set_status(
+            g.user, proforma_invoice_id, request.form.get("status", "")
+        )
+        if invoice.is_confirmed:
+            flash(f"Proforma invoice {invoice.invoice_number} confirmed - "
+                  "it is now locked for editing and will remind you until every design is ordered.", "success")
+        else:
+            flash(f"Proforma invoice {invoice.invoice_number} moved back to draft.", "success")
+    except (ValidationError, PermissionDeniedError) as e:
+        flash(str(e), "error")
+    except NotFoundError:
+        abort(404)
+    return redirect(url_for("proforma_invoices.view_proforma_invoice", proforma_invoice_id=proforma_invoice_id))
+
+
 @proforma_invoices_bp.route("/<int:proforma_invoice_id>/delete", methods=["POST"])
 @login_required
 def delete_proforma_invoice(proforma_invoice_id):
+    if not verify_delete_password(g.user, request.form):
+        flash("Incorrect password. Proforma invoice not deleted.", "error")
+        return redirect(url_for("proforma_invoices.view_proforma_invoice", proforma_invoice_id=proforma_invoice_id))
     try:
         invoice = current_app.container.proforma_invoice_service.get(proforma_invoice_id, g.user.company_id)
         current_app.container.proforma_invoice_service.delete(g.user, proforma_invoice_id)
@@ -308,5 +349,5 @@ def view_proforma_invoice_version(proforma_invoice_id, version_number):
     company = container.company_service.get(g.user.company_id)
     return render_template(
         "proforma_invoices/print.html", invoice=historical_invoice, company=company,
-        packing_lists=[], historical_version=version,
+        packing_lists=[], purchase_orders=[], design_status=None, historical_version=version,
     )

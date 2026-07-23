@@ -1,0 +1,47 @@
+{# Confirmed proforma invoices that still need purchase orders placed.
+   Shared by both dashboards; `po_reminders` comes from
+   ProformaFulfilmentService.pending_purchase_order_reminders (company-wide
+   for an admin, the employee's own invoices otherwise). Derived on every
+   page load, so a row disappears the moment the last design is ordered -
+   nothing to dismiss and nothing that can go stale. #}
+{% if po_reminders %}
+<div class="card">
+  <div class="card-header">
+    <h2>Purchase orders still to place</h2>
+    <a href="{{ url_for('proforma_invoices.list_proforma_invoices') }}" class="text-sm">All proforma invoices →</a>
+  </div>
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th>Invoice no.</th>
+          <th>Consignee</th>
+          <th class="num">POs placed</th>
+          <th>Designs still to order</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for reminder in po_reminders %}
+        <tr>
+          <td class="mono">{{ reminder.invoice.invoice_number }}</td>
+          <td><strong>{{ reminder.invoice.consignee_name }}</strong></td>
+          <td class="num">{{ reminder.purchase_order_count }}</td>
+          <td class="text-sm">
+            {% if not reminder.has_packing_list %}
+            <span class="stamp stamp-amber">No packing list yet</span>
+            {% else %}
+            <span class="stamp stamp-amber">{{ reminder.pending_count }} of {{ reminder.pending_count + reminder.placed_count }}</span>
+            {{ reminder.pending[:3] | map(attribute='design_name') | select | join(', ') }}{{ '…' if reminder.pending_count > 3 }}
+            {% endif %}
+          </td>
+          <td>
+            <a href="{{ url_for('purchase_orders.new_purchase_order', proforma_invoice_id=reminder.invoice.id) }}" class="text-sm">Place PO →</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}

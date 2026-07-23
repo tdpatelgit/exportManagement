@@ -34,10 +34,15 @@
     padding: 3px 0;
   }
   .pi-sheet table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: -1px; }
-  .pi-sheet td { border: 1px solid #000; padding: 3px 5px; vertical-align: top; word-wrap: break-word; }
+  .pi-sheet td { border: 1px solid #000; padding: 3px 5px; vertical-align: middle; text-align: center; word-wrap: break-word; }
   .pi-label { font-size: 9px; }
   .pi-val { font-weight: bold; }
   .pi-center { text-align: center; }
+  /* Multi-line paragraph cells (exporter/consignee/bank addresses) - no
+     sibling in the same row to vertically line up with, so keep them
+     reading from the top like a letterhead rather than centering a short
+     block in a tall cell. */
+  .pi-left { text-align: left; vertical-align: top; }
   .pi-right { text-align: right; }
   .pi-mid { vertical-align: middle !important; }
   .pi-side {
@@ -50,6 +55,16 @@
     padding: 2px 1px;
     vertical-align: middle;
   }
+  {# Exporter logo: absolutely positioned within its own rowspan'd cell
+     (same fix as purchase_orders/_sheet.html's .po-buyer-*) rather than a
+     plain float:right on the <img> - a float isn't bound by the cell's
+     rowspan height, so a logo taller than the exporter's own text used to
+     spill down into the CONSIGNEE row underneath. #}
+  .pi-exporter-cell { position: relative; }
+  .pi-exporter-text { padding-right: 100px; }
+  .pi-exporter-text.no-logo { padding-right: 0; }
+  .pi-exporter-logo { position: absolute; top: 1px; right: 6px; bottom: 1px; display: flex; align-items: center; }
+  .pi-exporter-logo img { max-height: 100%; width: auto; max-width: 90px; object-fit: contain; }
   .pi-email-bar { padding: 0; }
   .pi-email-flex { display: flex; align-items: stretch; }
   .pi-email-flex > div { padding: 3px 5px; }
@@ -90,15 +105,18 @@
     </colgroup>
     <tr>
       <td class="pi-side" rowspan="4">EXPORTER</td>
-      <td rowspan="3" style="border-bottom:none;">
+      <td rowspan="3" class="pi-exporter-cell pi-left" style="border-bottom:none;">
+        <div class="pi-exporter-text {{ '' if company and company.logo_path else 'no-logo' }}">
+          <span class="pi-val">{{ company.company_name|upper if company else '' }}</span><br>
+          <span class="pi-val">{{ (company.address or '')|upper|replace('\n', '<br>')|safe if company else '' }}</span>
+          {% if company and company.gstin %}<br><span class="pi-val">GSTIN : {{ company.gstin }}</span>{% endif %}
+          {% if company and company.iec %}<br><span class="pi-val">IEC : {{ company.iec }}</span>{% endif %}
+        </div>
         {% if company and company.logo_path %}
-        <img src="{{ url_for('static', filename=company.logo_path) }}" alt="{{ company.company_name }} logo"
-             style="float:right; max-width:90px; max-height:48px; object-fit:contain; margin-left:6px;">
+        <div class="pi-exporter-logo">
+          <img src="{{ url_for('static', filename=company.logo_path) }}" alt="{{ company.company_name }} logo">
+        </div>
         {% endif %}
-        <span class="pi-val">{{ company.company_name|upper if company else '' }}</span><br>
-        <span class="pi-val">{{ (company.address or '')|upper|replace('\n', '<br>')|safe if company else '' }}</span>
-        {% if company and company.gstin %}<br><span class="pi-val">GSTIN : {{ company.gstin }}</span>{% endif %}
-        {% if company and company.iec %}<br><span class="pi-val">IEC : {{ company.iec }}</span>{% endif %}
       </td>
       <td class="pi-label">Invoice No</td>
       <td class="pi-val">{{ invoice.invoice_number }}</td>
@@ -130,12 +148,12 @@
     </tr>
     <tr>
       <td class="pi-side">CONSIGNEE</td>
-      <td>
+      <td class="pi-left">
         <span class="pi-val">{{ (invoice.consignee_name or '')|upper }}</span><br>
         <span class="pi-val">{{ (invoice.consignee_address or '')|upper|replace('\n', '<br>')|safe }}</span>
       </td>
       <td class="pi-label pi-mid">Buyer If Other<br>Then<br>Consignee<br>[Notify]</td>
-      <td class="pi-mid" colspan="3">
+      <td class="pi-mid pi-left" colspan="3">
         {% if invoice.notify_name or invoice.notify_address %}
           <span class="pi-val">{{ (invoice.notify_name or '')|upper }}</span><br>
           <span class="pi-val">{{ (invoice.notify_address or '')|upper|replace('\n', '<br>')|safe }}</span>
@@ -238,7 +256,7 @@
       <tr>
         <td></td>
         <td class="pi-val pi-center">TOTAL</td>
-        <td class="pi-val pi-center">{{ '{:,.0f}'.format(ns.pallets) if ns.pallets else '' }}</td>
+        <td class="pi-val pi-center">{{ '{:,.2f}'.format(ns.pallets) if ns.pallets else '' }}</td>
         <td class="pi-val pi-center">{{ '{:,.0f}'.format(ns.boxes) if ns.boxes else '' }}</td>
         <td class="pi-val pi-right">{{ '{:,.2f}'.format(ns.qty) }}</td>
         <td></td>
@@ -297,12 +315,12 @@
     </colgroup>
     <tr>
       <td class="pi-side">BANK DETAILS</td>
-      <td>
+      <td class="pi-left">
         <span class="pi-val">BENEFICIARY</span><br><br>
         <span class="pi-val">{{ company.company_name|upper if company else '' }}</span><br>
         <span class="pi-val">{{ (company.address or '')|upper|replace('\n', '<br>')|safe if company else '' }}</span>
       </td>
-      <td>
+      <td class="pi-left">
         <span class="pi-val">BANK DETAILS</span><br><br>
         <span class="pi-val">{{ (invoice.bank_name or '-')|upper }}</span><br>
         <span class="pi-val">{{ (invoice.bank_address or '')|upper|replace('\n', '<br>')|safe }}</span>
@@ -320,12 +338,12 @@
       <td colspan="2" style="border-bottom:none; height:26px;"></td>
     </tr>
     <tr>
-      <td colspan="2" style="border-top:none; border-bottom:none;">
+      <td colspan="2" class="pi-left" style="border-top:none; border-bottom:none;">
         ALL BANKING CHARGES OUTSIDE INDIA WILL BE IN ACCOUNT OF APPLICANT
       </td>
     </tr>
     <tr>
-      <td colspan="2" style="border-top:none;">
+      <td colspan="2" class="pi-left" style="border-top:none;">
         ABOVE OFFER IS VALID 10 DAYS OF ISSUE OF THIS PROFORMA INVOICE
       </td>
     </tr>

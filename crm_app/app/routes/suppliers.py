@@ -10,7 +10,7 @@ mechanism as Buyer/Exporter (parent_type='supplier').
 """
 
 from flask import (
-    Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort
+    Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort, jsonify
 )
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError

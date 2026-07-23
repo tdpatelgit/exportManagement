@@ -43,9 +43,8 @@
 
   <div class="combined-page">
     {% include 'proforma_invoices/_sheet.html' %}
-    {# the combined document always carries the annexure page - when nothing
-       overflowed the invoice page, it lists the full goods detail instead #}
-    {% set annex_force = true %}
+    {# Same rule as the single invoice view: only overflow items get an
+       annexure page. Nothing to add here when everything already fit. #}
     {% include 'proforma_invoices/_annexure.html' %}
   </div>
 

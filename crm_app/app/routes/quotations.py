@@ -11,7 +11,8 @@ from datetime import date
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
-from app.utils import login_required, admin_required
+from app.services import pallet_alt_quantity
+from app.utils import login_required, admin_required, verify_delete_password
 
 quotations_bp = Blueprint("quotations", __name__, url_prefix="/quotations")
 
@@ -34,6 +35,7 @@ def _extract_items(form) -> list:
     product_names = form.getlist("item_product_name[]")
     hsn_codes = form.getlist("item_hsn_code[]")
     boxes = form.getlist("item_quantity_boxes[]")
+    pallets = form.getlist("item_pallets[]")
     values = form.getlist("item_quantity_value[]")
     units = form.getlist("item_unit[]")
     prices = form.getlist("item_price_usd[]")
@@ -44,6 +46,7 @@ def _extract_items(form) -> list:
             "product_name": product_names[i],
             "hsn_code": hsn_codes[i] if i < len(hsn_codes) else "",
             "quantity_boxes": boxes[i] if i < len(boxes) else "",
+            "pallets": pallets[i] if i < len(pallets) else "",
             "quantity_value": values[i] if i < len(values) else "",
             "unit": units[i] if i < len(units) else "SQM",
             "price_usd": prices[i] if i < len(prices) else "",
@@ -84,6 +87,35 @@ def _alt_qty_map(items) -> dict:
     return result
 
 
+def _pallet_types_map(items) -> dict:
+    """product_id -> plain dicts of that product's pallet types, for rows
+    already tied to a catalog product - fills each row's Pallet type
+    dropdown ('loose', the built-in no-pallet default, is added by the form
+    itself). Same walk as _alt_qty_map above."""
+    container = current_app.container
+    result = {}
+    for item in items:
+        raw_id = item.get("product_id") if isinstance(item, dict) else item.product_id
+        if not raw_id:
+            continue
+        try:
+            product_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if product_id in result:
+            continue
+        try:
+            product = container.product_service.get_product(product_id, g.user.company_id)
+        except NotFoundError:
+            continue
+        result[product_id] = [
+            {"name": pt.name, "boxes_per_pallet": pt.boxes_per_pallet,
+             "alt_qty_per_pallet": pallet_alt_quantity(pt, product)}
+            for pt in container.product_service.pallet_types_for_product(product_id)
+        ]
+    return result
+
+
 @quotations_bp.route("/")
 @login_required
 def list_quotations():
@@ -111,6 +143,7 @@ def new_quotation():
             return render_template(
                 "quotations/form.html", quotation=None, leads=leads, bank_options=bank_options,
                 form_data=request.form, form_items=items, alt_qty_map=_alt_qty_map(items),
+                pallet_types_map=_pallet_types_map(items),
                 today=date.today().isoformat(),
             ), 400
 
@@ -128,7 +161,8 @@ def new_quotation():
             pass
     return render_template(
         "quotations/form.html", quotation=None, leads=leads, bank_options=bank_options,
-        form_data=prefill, form_items=None, alt_qty_map={}, today=date.today().isoformat(),
+        form_data=prefill, form_items=None, alt_qty_map={}, pallet_types_map={},
+        today=date.today().isoformat(),
     )
 
 
@@ -191,19 +225,24 @@ def edit_quotation(quotation_id):
             return render_template(
                 "quotations/form.html", quotation=quotation, leads=leads, bank_options=bank_options,
                 form_data=request.form, form_items=items, alt_qty_map=_alt_qty_map(items),
+                pallet_types_map=_pallet_types_map(items),
                 today=date.today().isoformat(),
             ), 400
 
     leads, bank_options = _form_context()
     return render_template(
         "quotations/form.html", quotation=quotation, leads=leads, bank_options=bank_options,
-        form_data=None, form_items=None, alt_qty_map=_alt_qty_map(quotation.items), today=date.today().isoformat(),
+        form_data=None, form_items=None, alt_qty_map=_alt_qty_map(quotation.items),
+        pallet_types_map=_pallet_types_map(quotation.items), today=date.today().isoformat(),
     )
 
 
 @quotations_bp.route("/<int:quotation_id>/delete", methods=["POST"])
 @login_required
 def delete_quotation(quotation_id):
+    if not verify_delete_password(g.user, request.form):
+        flash("Incorrect password. Quotation not deleted.", "error")
+        return redirect(url_for("quotations.view_quotation", quotation_id=quotation_id))
     try:
         quotation = current_app.container.quotation_service.get(quotation_id, g.user.company_id)
         current_app.container.quotation_service.delete(g.user, quotation_id)

@@ -47,18 +47,47 @@
       <div class="field"><label for="delivery_time">Delivery time</label><input type="text" id="delivery_time" name="delivery_time" placeholder="e.g. 20 DAY FROM PO DATE" value="{{ data.delivery_time | default('', true) }}"></div>
     </div>
     <div class="form-row">
-      <div class="field"><label for="port_of_loading">Port of loading</label><input type="text" id="port_of_loading" name="port_of_loading" value="{{ data.port_of_loading | default('', true) }}"></div>
-      <div class="field"><label for="port_of_discharge">Port of discharge</label><input type="text" id="port_of_discharge" name="port_of_discharge" value="{{ data.port_of_discharge | default('', true) }}"></div>
-      <div class="field"><label for="container_details">Container details</label><input type="text" id="container_details" name="container_details" placeholder="e.g. 1 X 20 FT STANDARD DRY" value="{{ data.container_details | default('', true) }}"></div>
-    </div>
-    <div class="form-row">
       <div class="field" style="max-width:220px;"><label for="advance_percent">Advance</label><input type="text" id="advance_percent" name="advance_percent" placeholder="e.g. 0%" value="{{ data.advance_percent | default('', true) }}"></div>
       <div class="field"><label for="payment_terms">Payment terms</label><input type="text" id="payment_terms" name="payment_terms" placeholder="e.g. 40 DAYS AGAINST INVOICE DATE 100%" value="{{ data.payment_terms | default('', true) }}"></div>
     </div>
   </div>
 
   <div class="card">
-    <div class="card-header"><h3>Seller</h3></div>
+    <div class="card-header">
+      <h3>Seller</h3>
+      {% if current_user.is_admin %}
+      <button type="button" class="btn btn-ghost btn-sm" id="seller-add-new-toggle">+ Add new supplier</button>
+      {% endif %}
+    </div>
+
+    {% if current_user.is_admin %}
+    <!-- Deliberately a plain div, not a form element: this panel sits
+         inside the purchase order's own form, and nesting forms is invalid
+         HTML - the browser drops the inner tag, which throws when the
+         script wires its submit handler and kills every script statement
+         after it in this file, including the product-picker modal's setup
+         (openPicker() then fails on an uninitialized `overlay` const,
+         which is what breaks "Choose product" for a newly added line -
+         and since a row's HSN code field is only ever set by that picker,
+         a fresh product line could never be completed). Plain inputs +
+         type="button" + a manual fetch keep this panel independent of the
+         PO form instead. -->
+    <div id="seller-add-new-panel" class="card" hidden style="margin-bottom:14px;">
+      <div class="card-header"><h3>Add new supplier</h3></div>
+      <div id="seller-add-new-form">
+        <div class="field"><label for="new_supplier_company_name">Company name<span class="required-mark">*</span></label><input type="text" id="new_supplier_company_name"></div>
+        <div class="field"><label for="new_supplier_address">Address</label><textarea id="new_supplier_address" rows="2"></textarea></div>
+        <div class="form-row">
+          <div class="field"><label for="new_supplier_pan_no">PAN no.</label><input type="text" id="new_supplier_pan_no"></div>
+          <div class="field"><label for="new_supplier_gstin">GSTIN</label><input type="text" id="new_supplier_gstin"></div>
+        </div>
+        <div class="hint">IEC and bank/contact details can be filled in later from the supplier's own page.</div>
+        <button type="button" class="btn btn-primary btn-sm" id="seller-add-new-save">Save &amp; select</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="seller-add-new-cancel">Cancel</button>
+      </div>
+    </div>
+    {% endif %}
+
     <div class="field">
       <label for="seller_select">Prefill from an existing supplier <span class="text-soft text-sm">(optional)</span></label>
       <select id="seller_select">
@@ -102,7 +131,8 @@
         <tbody id="items-body">
           {% set rows = form_items if form_items is not none else (purchase_order.items if purchase_order else []) %}
           {% for row in rows %}
-          <tr class="item-row" data-alt-qty="{{ alt_qty_map.get(row.product_id | int, '') if row.product_id else '' }}">
+          {% set meta = product_meta_map.get(row.product_id | int, {}) if row.product_id else {} %}
+          <tr class="item-row" data-alt-qty="{{ meta.get('alt_qty', '') }}" data-igst="{{ meta.get('igst', '') }}">
             <td class="js-sr">{{ loop.index }}</td>
             <td>
               <input type="hidden" name="item_product_id[]" class="js-product-id" value="{{ row.product_id or '' }}">
@@ -135,11 +165,30 @@
       </table>
     </div>
     <button type="button" class="btn btn-ghost btn-sm" id="add-row-btn">+ Add product line</button>
-    <p class="hint">Choosing a catalog product prefills its name, HSN code and unit. Qty auto-fills from Boxes × the product's Alternate Quantity when known, but stays editable. Price is the seller's ex-factory rate in INR — per BOX (the usual basis) or per the row's quantity unit.</p>
+    <p class="hint">Choosing a catalog product prefills its name, HSN code and unit. Qty auto-fills from Boxes × the product's Alternate Quantity when known, but stays editable. Price is the seller's ex-factory rate in INR — per BOX (the usual basis) or per the row's quantity unit. A catalog product also carries the tax rate used below for a Full Tax Purchase.</p>
     <div class="form-row" style="margin-top:14px;">
-      <div class="field" style="max-width:160px;"><label for="igst_percent">IGST %</label><input type="number" step="0.01" min="0" max="100" id="igst_percent" name="igst_percent" value="{{ data.igst_percent | default(0, true) }}"></div>
-      <div class="field" style="max-width:160px;"><label for="cgst_percent">CGST %</label><input type="number" step="0.01" min="0" max="100" id="cgst_percent" name="cgst_percent" value="{{ data.cgst_percent | default(0, true) }}"></div>
-      <div class="field" style="max-width:160px;"><label for="sgst_percent">SGST %</label><input type="number" step="0.01" min="0" max="100" id="sgst_percent" name="sgst_percent" value="{{ data.sgst_percent | default(0, true) }}"></div>
+      <div class="field" style="max-width:260px;">
+        <label for="purchase_type">Purchase under<span class="required-mark">*</span></label>
+        {% set selected_purchase_type = data.purchase_type | default('full_tax', true) if data else 'full_tax' %}
+        <select id="purchase_type" name="purchase_type">
+          {% for key, label in PURCHASE_TYPES.items() %}
+            <option value="{{ key }}" {{ 'selected' if selected_purchase_type == key }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <!-- The three rates are derived, never typed: the purchase type sets
+           the rate, the seller's GSTIN decides whether it lands on IGST or
+           on CGST+SGST. Shown here as a read-only preview of what the
+           server will store on save. -->
+      <div class="field">
+        <label>Taxes applied</label>
+        <div class="text-sm" style="padding-top:8px;">
+          <strong>IGST:</strong> <span id="igst-display">0.00</span>%
+          &nbsp;·&nbsp; <strong>CGST:</strong> <span id="cgst-display">0.00</span>%
+          &nbsp;·&nbsp; <strong>SGST:</strong> <span id="sgst-display">0.00</span>%
+        </div>
+        <div class="hint" id="tax-basis-hint"></div>
+      </div>
     </div>
     <div class="flex-between" style="margin-top:14px;">
       <div></div>
@@ -234,6 +283,61 @@
     return (perBox ? boxes : qty) * price;
   }
 
+  // ---- taxes (derived, never typed) --------------------------------------------------
+  // Mirrors PurchaseOrderService._tax_percentages exactly - this is only the
+  // live preview, the server derives the stored figures the same way on save.
+  const OUR_GSTIN = {{ (our_company.gstin if our_company else '') | default('', true) | tojson }};
+  const EXEMPTION_IGST_PERCENT = {{ EXEMPTION_IGST_PERCENT }};
+
+  // The first two digits of a GSTIN are its state code: same state is taxed
+  // CGST + SGST, different states IGST alone. An unknown GSTIN on either
+  // side counts as inter-state.
+  function stateCode(gstin) { return (gstin || '').trim().slice(0, 2); }
+  function isIntraState(a, b) {
+    const x = stateCode(a);
+    return /^\d{2}$/.test(x) && x === stateCode(b);
+  }
+
+  function currentTaxes() {
+    const purchaseType = document.getElementById('purchase_type').value;
+    let rate = 0;
+    if (purchaseType === 'exemption') {
+      rate = EXEMPTION_IGST_PERCENT;
+    } else {
+      // Full Tax Purchase: the rate comes from the catalog products on the
+      // lines - the highest of them, so the order is never under-taxed.
+      itemsBody.querySelectorAll('.item-row').forEach((tr) => {
+        const productRate = parseFloat(tr.dataset.igst);
+        if (productRate) rate = Math.max(rate, productRate);
+      });
+    }
+    const intra = isIntraState(OUR_GSTIN, document.getElementById('seller_gstin').value);
+    const half = Math.round((rate / 2) * 10000) / 10000;
+    return intra
+      ? { igst: 0, cgst: half, sgst: half, intra: intra, rate: rate }
+      : { igst: rate, cgst: 0, sgst: 0, intra: intra, rate: rate };
+  }
+
+  function renderTaxes(taxes) {
+    document.getElementById('igst-display').textContent = taxes.igst.toFixed(2);
+    document.getElementById('cgst-display').textContent = taxes.cgst.toFixed(2);
+    document.getElementById('sgst-display').textContent = taxes.sgst.toFixed(2);
+    const parts = [];
+    if (!OUR_GSTIN) {
+      parts.push('Our company has no GSTIN on file, so this is treated as an inter-state purchase (IGST).');
+    } else if (!stateCode(document.getElementById('seller_gstin').value)) {
+      parts.push('No seller GSTIN yet — treated as an inter-state purchase (IGST).');
+    } else {
+      parts.push(taxes.intra
+        ? 'Seller GSTIN is in our own state (' + stateCode(OUR_GSTIN) + ') — CGST + SGST apply.'
+        : 'Seller GSTIN is in another state — IGST applies.');
+    }
+    if (document.getElementById('purchase_type').value === 'full_tax' && !taxes.rate) {
+      parts.push('No catalog product on these lines carries an IGST %, so the rate is 0.');
+    }
+    document.getElementById('tax-basis-hint').textContent = parts.join(' ');
+  }
+
   function recalcTotals() {
     let subtotal = 0;
     itemsBody.querySelectorAll('.item-row').forEach((tr) => {
@@ -241,10 +345,9 @@
       tr.querySelector('.js-total').textContent = total.toFixed(2);
       subtotal += total;
     });
-    const igst = parseFloat(document.getElementById('igst_percent').value) || 0;
-    const cgst = parseFloat(document.getElementById('cgst_percent').value) || 0;
-    const sgst = parseFloat(document.getElementById('sgst_percent').value) || 0;
-    const gross = subtotal + subtotal * (igst + cgst + sgst) / 100;
+    const taxes = currentTaxes();
+    renderTaxes(taxes);
+    const gross = subtotal + subtotal * (taxes.igst + taxes.cgst + taxes.sgst) / 100;
     const orderValue = Math.round(gross);
     document.getElementById('subtotal-display').textContent = subtotal.toFixed(2);
     document.getElementById('roundoff-display').textContent = (orderValue - gross).toFixed(2);
@@ -286,9 +389,9 @@
   itemsBody.addEventListener('change', (e) => {
     if (e.target.classList.contains('js-price-per')) recalcTotals();
   });
-  ['igst_percent', 'cgst_percent', 'sgst_percent'].forEach((id) => {
-    document.getElementById(id).addEventListener('input', recalcTotals);
-  });
+  // Both of these move the tax rates, so they move the order value too.
+  document.getElementById('purchase_type').addEventListener('change', recalcTotals);
+  document.getElementById('seller_gstin').addEventListener('input', recalcTotals);
 
   // ---- proforma dropdown prefill (reloads the page with ?proforma_invoice_id=) --------------------------------------------------
   document.getElementById('proforma_select').addEventListener('change', (e) => {
@@ -303,15 +406,67 @@
   });
 
   // ---- seller dropdown prefill --------------------------------------------------
-  document.getElementById('seller_select').addEventListener('change', (e) => {
+  const sellerSelect = document.getElementById('seller_select');
+  function applySeller(id, name, address, pan, gstin) {
+    document.getElementById('seller_supplier_id').value = id || '';
+    document.getElementById('seller_name').value = name || '';
+    document.getElementById('seller_address').value = address || '';
+    document.getElementById('seller_pan').value = pan || '';
+    document.getElementById('seller_gstin').value = gstin || '';
+    // A different seller can mean a different state, which flips the order
+    // between IGST and CGST+SGST.
+    recalcTotals();
+  }
+  sellerSelect.addEventListener('change', (e) => {
     const opt = e.target.selectedOptions[0];
-    document.getElementById('seller_supplier_id').value = opt.value || '';
-    if (!opt.value) return;
-    document.getElementById('seller_name').value = opt.dataset.name || '';
-    document.getElementById('seller_address').value = opt.dataset.address || '';
-    document.getElementById('seller_pan').value = opt.dataset.pan || '';
-    document.getElementById('seller_gstin').value = opt.dataset.gstin || '';
+    if (!opt.value) { applySeller('', '', '', '', ''); return; }
+    applySeller(opt.value, opt.dataset.name, opt.dataset.address, opt.dataset.pan, opt.dataset.gstin);
   });
+
+  // ---- add new supplier (admin only) --------------------------------------------------
+  // The panel is a plain <div>, not a <form> (see the markup comment above),
+  // so there's no native .reset()/'submit' event to lean on - fields are
+  // read and cleared individually, and the save button is wired as a plain
+  // click.
+  const sellerAddPanel = document.getElementById('seller-add-new-panel');
+  const sellerAddToggle = document.getElementById('seller-add-new-toggle');
+  const sellerAddFieldNames = ['company_name', 'address', 'pan_no', 'gstin'];
+  const sellerAddInput = (name) => document.getElementById('new_supplier_' + name);
+  function resetSellerAddFields() {
+    sellerAddFieldNames.forEach((name) => { sellerAddInput(name).value = ''; });
+  }
+  if (sellerAddToggle) {
+    sellerAddToggle.addEventListener('click', () => { sellerAddPanel.hidden = !sellerAddPanel.hidden; });
+    document.getElementById('seller-add-new-cancel').addEventListener('click', () => {
+      sellerAddPanel.hidden = true;
+      resetSellerAddFields();
+    });
+    document.getElementById('seller-add-new-save').addEventListener('click', () => {
+      if (!sellerAddInput('company_name').value.trim()) {
+        alert('Company name is compulsory.');
+        sellerAddInput('company_name').focus();
+        return;
+      }
+      const formData = new FormData();
+      sellerAddFieldNames.forEach((name) => formData.append(name, sellerAddInput(name).value));
+      fetch('/suppliers/api/quick-create', { method: 'POST', body: formData })
+        .then(r => r.json().then(data => ({ ok: r.ok, data })))
+        .then(({ ok, data }) => {
+          if (!ok) { alert(data.error || 'Could not create the supplier.'); return; }
+          const opt = new Option(data.company_name, data.id, true, true);
+          opt.dataset.name = data.company_name;
+          opt.dataset.address = data.address || '';
+          opt.dataset.pan = data.pan_no || '';
+          opt.dataset.gstin = data.gstin || '';
+          sellerSelect.appendChild(opt);
+          sellerSelect.value = data.id;
+          applySeller(data.id, data.company_name, data.address, data.pan_no, data.gstin);
+          sellerAddPanel.hidden = true;
+          resetSellerAddFields();
+        })
+        .catch(() => alert('Something went wrong creating the supplier.'));
+    });
+  }
 
   // ---- product picker modal (flat searchable product list) --------------------------------------------------
   const overlay = document.getElementById('product-picker-overlay');
@@ -370,6 +525,8 @@
     activeRow.querySelector('.js-hsn').value = p.hsn_code || '';
     setUnitValue(activeRow.querySelector('.js-unit'), p.alt_quantity_unit);
     activeRow.dataset.altQty = parseFloat(p.alternate_quantity) || '';
+    // Carried on the row so a Full Tax Purchase can read its rate back out.
+    activeRow.dataset.igst = parseFloat(p.igst_percent) || '';
     recalcRowQty(activeRow);
     recalcTotals();
     overlay.hidden = true;

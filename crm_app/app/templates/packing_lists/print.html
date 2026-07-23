@@ -26,18 +26,23 @@
     <a href="{{ url_for('packing_lists.list_packing_lists') }}" class="btn btn-ghost btn-sm">← All packing lists</a>
     <div class="flex gap-8">
       {% if not historical_version %}
-      {% if packing_list.proforma_invoice_id %}
-      <a href="{{ url_for('proforma_invoices.view_proforma_invoice', proforma_invoice_id=packing_list.proforma_invoice_id) }}" class="btn btn-ghost btn-sm">View proforma</a>
+      {% if packing_list.purchase_invoice_id %}
+      <a href="{{ url_for('purchase_invoices.view_purchase_invoice', purchase_invoice_id=packing_list.purchase_invoice_id) }}" class="btn btn-ghost btn-sm">← Back to linked document</a>
+      {% elif packing_list.purchase_order_id %}
+      <a href="{{ url_for('purchase_orders.view_purchase_order', purchase_order_id=packing_list.purchase_order_id) }}" class="btn btn-ghost btn-sm">← Back to linked document</a>
+      <a href="{{ url_for('purchase_orders.combined_purchase_order', purchase_order_id=packing_list.purchase_order_id) }}" class="btn btn-ghost btn-sm">Combined document</a>
+      {% elif packing_list.proforma_invoice_id %}
+      <a href="{{ url_for('proforma_invoices.view_proforma_invoice', proforma_invoice_id=packing_list.proforma_invoice_id) }}" class="btn btn-ghost btn-sm">← Back to linked document</a>
       <a href="{{ url_for('proforma_invoices.combined_proforma_invoice', proforma_invoice_id=packing_list.proforma_invoice_id) }}" class="btn btn-ghost btn-sm">Combined document</a>
       {% elif packing_list.quotation_id %}
-      <a href="{{ url_for('quotations.view_quotation', quotation_id=packing_list.quotation_id) }}" class="btn btn-ghost btn-sm">View quotation</a>
+      <a href="{{ url_for('quotations.view_quotation', quotation_id=packing_list.quotation_id) }}" class="btn btn-ghost btn-sm">← Back to linked document</a>
       <a href="{{ url_for('quotations.combined_quotation', quotation_id=packing_list.quotation_id) }}" class="btn btn-ghost btn-sm">Combined document</a>
       {% endif %}
       <a href="{{ url_for('packing_lists.edit_packing_list', packing_list_id=packing_list.id) }}" class="btn btn-ghost btn-sm">Edit</a>
       {% if current_user.is_admin %}
       <a href="{{ url_for('packing_lists.packing_list_versions', packing_list_id=packing_list.id) }}" class="btn btn-ghost btn-sm">Version history</a>
       {% endif %}
-      <form method="POST" action="{{ url_for('packing_lists.delete_packing_list', packing_list_id=packing_list.id) }}" onsubmit="return confirm('Delete this packing list?');">
+      <form method="POST" action="{{ url_for('packing_lists.delete_packing_list', packing_list_id=packing_list.id) }}" onsubmit="return confirmDeleteWithPassword(this, 'Delete this packing list?');">
         <button type="submit" class="btn btn-danger btn-sm">Delete</button>
       </form>
       {% endif %}
@@ -45,7 +50,36 @@
     </div>
   </div>
 
+  {# This page doesn't extend base.html, so it renders its own flashes -
+     creating/updating a packing list redirects straight back here, and
+     that's also where the "bought more than necessary" notice shows up. #}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="sheet-note no-print flash-stack">
+      {% for category, message in messages %}
+      <div class="flash flash-{{ category }}">{{ message }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endwith %}
+
   {% include 'packing_lists/_sheet.html' %}
 
+  <script>
+    function confirmDeleteWithPassword(form, message) {
+      if (!window.confirm(message)) return false;
+      var password = window.prompt('Enter your password to confirm deletion:');
+      if (!password) return false;
+      var input = form.querySelector('input[name="delete_password"]');
+      if (!input) {
+        input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'delete_password';
+        form.appendChild(input);
+      }
+      input.value = password;
+      return true;
+    }
+  </script>
 </body>
 </html>

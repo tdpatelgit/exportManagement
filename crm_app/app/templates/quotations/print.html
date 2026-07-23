@@ -38,7 +38,7 @@
       {% else %}
       <a href="{{ url_for('proforma_invoices.new_proforma_invoice', quotation_id=quotation.id) }}" class="btn btn-ghost btn-sm">Generate Proforma Invoice</a>
       {% endif %}
-      <form method="POST" action="{{ url_for('quotations.delete_quotation', quotation_id=quotation.id) }}" onsubmit="return confirm('Delete this quotation?');">
+      <form method="POST" action="{{ url_for('quotations.delete_quotation', quotation_id=quotation.id) }}" onsubmit="return confirmDeleteWithPassword(this, 'Delete this quotation? Any documents generated from it will also be deleted.');">
         <button type="submit" class="btn btn-danger btn-sm">Delete</button>
       </form>
       <a href="{{ url_for('quotations.combined_quotation', quotation_id=quotation.id) }}" class="btn btn-primary btn-sm">🖨 Generate combined document</a>
@@ -47,8 +47,36 @@
     </div>
   </div>
 
+  {# This page doesn't extend base.html, so it renders its own flashes -
+     e.g. a wrong delete password redirects straight back here. #}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="sheet-note no-print flash-stack">
+      {% for category, message in messages %}
+      <div class="flash flash-{{ category }}">{{ message }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endwith %}
+
   {% include 'quotations/_sheet.html' %}
   {% include 'quotations/_annexure.html' %}
 
+  <script>
+    function confirmDeleteWithPassword(form, message) {
+      if (!window.confirm(message)) return false;
+      var password = window.prompt('Enter your password to confirm deletion:');
+      if (!password) return false;
+      var input = form.querySelector('input[name="delete_password"]');
+      if (!input) {
+        input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'delete_password';
+        form.appendChild(input);
+      }
+      input.value = password;
+      return true;
+    }
+  </script>
 </body>
 </html>

@@ -31,11 +31,16 @@
       {% else %}
       <a href="{{ url_for('packing_lists.new_packing_list', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">📦 Create packing list</a>
       {% endif %}
+      {% if purchase_invoices %}
+      <a href="{{ url_for('purchase_invoices.view_purchase_invoice', purchase_invoice_id=purchase_invoices[0].id) }}" class="btn btn-ghost btn-sm">🧾 View purchase invoice</a>
+      {% else %}
+      <a href="{{ url_for('purchase_invoices.new_purchase_invoice', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">🧾 Create purchase invoice</a>
+      {% endif %}
       <a href="{{ url_for('purchase_orders.edit_purchase_order', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">Edit</a>
       {% if current_user.is_admin %}
       <a href="{{ url_for('purchase_orders.purchase_order_versions', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">Version history</a>
       {% endif %}
-      <form method="POST" action="{{ url_for('purchase_orders.delete_purchase_order', purchase_order_id=purchase_order.id) }}" onsubmit="return confirm('Delete this purchase order?');">
+      <form method="POST" action="{{ url_for('purchase_orders.delete_purchase_order', purchase_order_id=purchase_order.id) }}" onsubmit="return confirmDeleteWithPassword(this, 'Delete this purchase order? Any purchase invoice/packing lists generated from it will also be deleted.');">
         <button type="submit" class="btn btn-danger btn-sm">Delete</button>
       </form>
       <a href="{{ url_for('purchase_orders.combined_purchase_order', purchase_order_id=purchase_order.id) }}" class="btn btn-primary btn-sm">🖨 Generate combined document</a>
@@ -44,7 +49,36 @@
     </div>
   </div>
 
+  {# This page doesn't extend base.html, so it renders its own flashes -
+     creating/updating a purchase order redirects straight back here, and
+     that's also where the "ordered more than necessary" notice shows up. #}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="sheet-note no-print flash-stack">
+      {% for category, message in messages %}
+      <div class="flash flash-{{ category }}">{{ message }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endwith %}
+
   {% include 'purchase_orders/_sheet.html' %}
 
+  <script>
+    function confirmDeleteWithPassword(form, message) {
+      if (!window.confirm(message)) return false;
+      var password = window.prompt('Enter your password to confirm deletion:');
+      if (!password) return false;
+      var input = form.querySelector('input[name="delete_password"]');
+      if (!input) {
+        input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'delete_password';
+        form.appendChild(input);
+      }
+      input.value = password;
+      return true;
+    }
+  </script>
 </body>
 </html>

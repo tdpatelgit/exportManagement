@@ -49,7 +49,9 @@
 
     <tr><td class="pk-title" colspan="13">&lt; &lt; &lt; &lt; &lt; &nbsp;PACKING DETAILS&nbsp; &gt; &gt; &gt; &gt; &gt;</td></tr>
 
-    {% if packing_list.purchase_order_id %}
+    {% if packing_list.purchase_invoice_id %}
+      {% set pk_src_label, pk_src_number = 'PURCHASE INVOICE NO', packing_list.purchase_invoice_number %}
+    {% elif packing_list.purchase_order_id %}
       {% set pk_src_label, pk_src_number = 'PURCHASE ORDER NO', packing_list.purchase_order_number %}
     {% elif packing_list.quotation_id and not packing_list.proforma_invoice_id %}
       {% set pk_src_label, pk_src_number = 'QUOTATION NO', packing_list.quotation_number %}

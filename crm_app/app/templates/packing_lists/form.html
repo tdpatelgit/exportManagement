@@ -16,6 +16,15 @@
     <div class="card-header"><h3>Start from</h3></div>
     <div class="form-row">
       <div class="field">
+        <label for="purchase_invoice_select">Prefill from an existing purchase invoice <span class="text-soft text-sm">(optional)</span></label>
+        <select id="purchase_invoice_select">
+          <option value="">— Select a purchase invoice —</option>
+          {% for pinv in purchase_invoices %}
+            <option value="{{ pinv.id }}" {{ 'selected' if data and data.purchase_invoice_id | string == pinv.id | string }}>{{ pinv.purchase_invoice_number }} — {{ pinv.seller_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
         <label for="purchase_order_select">Prefill from an existing purchase order <span class="text-soft text-sm">(optional)</span></label>
         <select id="purchase_order_select">
           <option value="">— Select a purchase order —</option>
@@ -52,11 +61,12 @@
         </select>
       </div>
     </div>
-    <p class="hint">Choosing a proforma invoice or a quotation reloads this page with one starting row per product — you then pick the design for each row and split the quantities into smaller, per-design amounts. Choosing a purchase order does the same, and when that PO was generated from a proforma that already has a packing list, its design rows are imported ready-filled.</p>
+    <p class="hint">Choosing a proforma invoice or a quotation reloads this page with one starting row per product — you then pick the design for each row and split the quantities into smaller, per-design amounts. Choosing a purchase order does the same, and when that PO was generated from a proforma that already has a packing list, its design rows are imported ready-filled. Choosing a purchase invoice imports its linked purchase order's packing list wholesale, as the invoice's own PL.</p>
     <input type="hidden" name="lead_id" id="lead_id" value="{{ data.lead_id | default('', true) }}">
     <input type="hidden" name="proforma_invoice_id" id="proforma_invoice_id" value="{{ data.proforma_invoice_id | default('', true) }}">
     <input type="hidden" name="quotation_id" id="quotation_id" value="{{ data.quotation_id | default('', true) }}">
     <input type="hidden" name="purchase_order_id" id="purchase_order_id" value="{{ data.purchase_order_id | default('', true) }}">
+    <input type="hidden" name="purchase_invoice_id" id="purchase_invoice_id" value="{{ data.purchase_invoice_id | default('', true) }}">
   </div>
 
   <div class="card">
@@ -403,20 +413,11 @@
     };
   }
 
-  function isPerfectMultiple(boxes, perPallet) {
-    if (!perPallet) return false;
-    const q = boxes / perPallet;
-    return Math.abs(q - Math.round(q)) < 1e-6;
-  }
-
   // Boxes is compulsory and the field everything else derives from. With
   // "Loose" selected there are no pallets at all: Plts locks empty. With a
-  // pallet type selected, Pallets is a derived field when Boxes divides
-  // evenly by that pallet's box capacity (a whole number of full pallets) -
-  // it locks read-only in that case so it can't drift out of sync. When
-  // Boxes ISN'T a perfect multiple (a partial last pallet), there's no
-  // clean quotient to show, so Pallets unlocks for the user to type in by
-  // hand.
+  // pallet type selected, Pallets is always a derived field (Boxes / that
+  // pallet's box capacity, kept to 2 decimals so a partial last pallet like
+  // 3.5 shows exactly) and locks read-only so it can't drift out of sync.
   function updatePallets(block, row) {
     const boxes = parseFloat(row.querySelector('.js-boxes').value) || 0;
     const perPallet = parseFloat(block.querySelector('.js-pallet-type').value) || 0;
@@ -424,7 +425,7 @@
     if (!perPallet) {
       palletsEl.value = '';
       palletsEl.readOnly = true;
-    } else if (boxes && isPerfectMultiple(boxes, perPallet)) {
+    } else if (boxes) {
       palletsEl.value = +(boxes / perPallet).toFixed(2);
       palletsEl.readOnly = true;
     } else {
@@ -528,6 +529,13 @@
       block.querySelectorAll('.design-row').forEach((row) => recalcRow(row));
       recalcTotals();
     }
+  });
+
+  // ---- purchase invoice dropdown prefill (reloads the page with ?purchase_invoice_id=) --------------------------------------------------
+  document.getElementById('purchase_invoice_select').addEventListener('change', (e) => {
+    const id = e.target.value;
+    if (!id) return;
+    window.location = '{{ url_for("packing_lists.new_packing_list") }}?purchase_invoice_id=' + encodeURIComponent(id);
   });
 
   // ---- purchase order dropdown prefill (reloads the page with ?purchase_order_id=) --------------------------------------------------

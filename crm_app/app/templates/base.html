@@ -26,10 +26,19 @@
       <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('suppliers.') }}" href="{{ url_for('suppliers.list_suppliers') }}">🏭 Supplier</a>
       <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('exporters.') }}" href="{{ url_for('exporters.list_parties') }}">🚢 Exporter</a>
       <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('products.') }}" href="{{ url_for('products.list_products') }}">📦 Products</a>
-      <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('quotations.') }}" href="{{ url_for('quotations.list_quotations') }}">🧾 Quotations</a>
-      <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('proforma_invoices.') }}" href="{{ url_for('proforma_invoices.list_proforma_invoices') }}">📄 Proforma Invoices</a>
-      <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('purchase_orders.') }}" href="{{ url_for('purchase_orders.list_purchase_orders') }}">🧾 Purchase Orders</a>
-      <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('packing_lists.') }}" href="{{ url_for('packing_lists.list_packing_lists') }}">📦 Packing Lists</a>
+
+      {% set doc_prefixes = ['quotations.', 'proforma_invoices.', 'purchase_orders.', 'purchase_invoices.', 'packing_lists.'] %}
+      {% set doc_open = request.endpoint and (request.endpoint.split('.')[0] ~ '.') in doc_prefixes %}
+      <details class="nav-dropdown" {{ 'open' if doc_open }}>
+        <summary class="nav-link nav-dropdown-summary {{ 'active' if doc_open }}">📁 Documents</summary>
+        <div class="nav-dropdown-panel">
+          <a class="nav-link nav-sublink {{ 'active' if request.endpoint and request.endpoint.startswith('quotations.') }}" href="{{ url_for('quotations.list_quotations') }}">🧾 Quotations</a>
+          <a class="nav-link nav-sublink {{ 'active' if request.endpoint and request.endpoint.startswith('proforma_invoices.') }}" href="{{ url_for('proforma_invoices.list_proforma_invoices') }}">📄 Proforma Invoices</a>
+          <a class="nav-link nav-sublink {{ 'active' if request.endpoint and request.endpoint.startswith('purchase_orders.') }}" href="{{ url_for('purchase_orders.list_purchase_orders') }}">🧾 Purchase Orders</a>
+          <a class="nav-link nav-sublink {{ 'active' if request.endpoint and request.endpoint.startswith('purchase_invoices.') }}" href="{{ url_for('purchase_invoices.list_purchase_invoices') }}">🧾 Purchase Invoices</a>
+          <a class="nav-link nav-sublink {{ 'active' if request.endpoint and request.endpoint.startswith('packing_lists.') }}" href="{{ url_for('packing_lists.list_packing_lists') }}">📦 Packing Lists</a>
+        </div>
+      </details>
 
       {% if current_user and current_user.is_admin %}
         <div class="nav-section-label">Administration</div>
@@ -63,5 +72,25 @@
       {% block content %}{% endblock %}
     </main>
   </div>
+
+  <script>
+    // Every document delete form calls this instead of a plain confirm() -
+    // deleting a document also deletes any sub-documents made under it, so
+    // the user's own password is required to go through with it.
+    function confirmDeleteWithPassword(form, message) {
+      if (!window.confirm(message)) return false;
+      var password = window.prompt('Enter your password to confirm deletion:');
+      if (!password) return false;
+      var input = form.querySelector('input[name="delete_password"]');
+      if (!input) {
+        input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'delete_password';
+        form.appendChild(input);
+      }
+      input.value = password;
+      return true;
+    }
+  </script>
 </body>
 </html>

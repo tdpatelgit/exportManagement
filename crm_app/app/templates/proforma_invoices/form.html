@@ -115,7 +115,6 @@
             <th style="min-width:220px;">Product</th>
             <th>HSN code</th>
             <th>Boxes</th>
-            <th>Surface</th>
             <th style="min-width:150px;">Pallet type</th>
             <th>Plts</th>
             <th>Qty (SQM/LM)</th>
@@ -138,7 +137,6 @@
             </td>
             <td><input type="text" name="item_hsn_code[]" class="js-hsn" value="{{ row.hsn_code or '' }}" readonly tabindex="-1"></td>
             <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" value="{{ row.quantity_boxes or '' }}"></td>
-            <td><input type="text" name="item_surface[]" class="js-surface" style="min-width:80px;" placeholder="GLOSSY / MATT" value="{{ row.surface or '' }}"></td>
             <td><select class="js-pallet-type"><option value="">Loose — no pallets</option></select></td>
             <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets" value="{{ row.pallets or '' }}"></td>
             <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required value="{{ row.quantity_value or '' }}"></td>
@@ -292,7 +290,6 @@
       </td>
       <td><input type="text" name="item_hsn_code[]" class="js-hsn" readonly tabindex="-1"></td>
       <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes"></td>
-      <td><input type="text" name="item_surface[]" class="js-surface" style="min-width:80px;" placeholder="GLOSSY / MATT"></td>
       <td><select class="js-pallet-type"><option value="">Loose — no pallets</option></select></td>
       <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets"></td>
       <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required></td>
@@ -367,9 +364,9 @@
   }
 
   // With Loose selected there are no pallets (Plts locks empty); with a
-  // pallet type selected Plts derives from Boxes / that pallet's capacity -
-  // locked when it divides evenly, editable otherwise (a partial last
-  // pallet has no clean quotient); Manual leaves Plts entirely to the user.
+  // pallet type selected Plts always derives from Boxes / that pallet's
+  // capacity, kept to 2 decimals so a partial last pallet like 3.5 shows
+  // exactly, and locks read-only; Manual leaves Plts entirely to the user.
   function recalcRowPallets(tr) {
     const sel = tr.querySelector('.js-pallet-type');
     const palletsEl = tr.querySelector('.js-pallets');
@@ -385,12 +382,9 @@
     const perPallet = parseFloat(sel.value) || 0;
     const boxes = parseFloat(tr.querySelector('.js-boxes').value) || 0;
     if (perPallet && boxes) {
-      const q = boxes / perPallet;
-      if (Math.abs(q - Math.round(q)) < 1e-6) {
-        palletsEl.value = +q.toFixed(2);
-        palletsEl.readOnly = true;
-        return;
-      }
+      palletsEl.value = +(boxes / perPallet).toFixed(2);
+      palletsEl.readOnly = true;
+      return;
     }
     palletsEl.readOnly = false;
   }
