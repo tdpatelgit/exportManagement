@@ -456,6 +456,7 @@ CREATE TABLE IF NOT EXISTS quotation_items (
     dimension_mm        TEXT,
     hsn_code            TEXT,
     quantity_boxes      REAL,
+    pallets             REAL,      -- "Plts" column - same derived-from-boxes pattern as proforma_invoice_items.pallets
     quantity_value       REAL NOT NULL DEFAULT 0,
     unit                TEXT NOT NULL DEFAULT 'SQM',
     price_usd           REAL NOT NULL DEFAULT 0,

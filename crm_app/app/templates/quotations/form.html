@@ -65,6 +65,8 @@
             <th style="min-width:220px;">Product</th>
             <th>HSN code</th>
             <th>Boxes</th>
+            <th style="min-width:150px;">Pallet type</th>
+            <th>Plts</th>
             <th>Qty (SQM/LM)</th>
             <th>Unit</th>
             <th>Price (USD)</th>
@@ -75,7 +77,8 @@
         <tbody id="items-body">
           {% set rows = form_items if form_items is not none else (quotation.items if quotation else []) %}
           {% for row in rows %}
-          <tr class="item-row" data-alt-qty="{{ alt_qty_map.get(row.product_id | int, '') if row.product_id else '' }}">
+          <tr class="item-row" data-alt-qty="{{ alt_qty_map.get(row.product_id | int, '') if row.product_id else '' }}"
+              data-pallet-types="{{ (pallet_types_map.get(row.product_id | int, []) if row.product_id else []) | tojson | forceescape }}">
             <td class="js-sr">{{ loop.index }}</td>
             <td>
               <input type="hidden" name="item_product_id[]" class="js-product-id" value="{{ row.product_id or '' }}">
@@ -84,6 +87,8 @@
             </td>
             <td><input type="text" name="item_hsn_code[]" class="js-hsn" value="{{ row.hsn_code or '' }}" readonly tabindex="-1"></td>
             <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" value="{{ row.quantity_boxes or '' }}"></td>
+            <td><select class="js-pallet-type"><option value="">Loose — no pallets</option></select></td>
+            <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets" value="{{ row.pallets or '' }}"></td>
             <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required value="{{ row.quantity_value or '' }}"></td>
             <td>
               <select name="item_unit[]" class="js-unit">
@@ -102,7 +107,7 @@
       </table>
     </div>
     <button type="button" class="btn btn-ghost btn-sm" id="add-row-btn">+ Add product line</button>
-    <p class="hint">Choosing a catalog product prefills its name, HSN code and unit. Qty auto-fills from Boxes × the product's Alternate Quantity when known, but stays editable. Price is typed in per line (a specific design and its price are picked later, on the packing list).</p>
+    <p class="hint">Choosing a catalog product prefills its name, HSN code, unit and pallet type options. Qty auto-fills from Boxes × the product's Alternate Quantity when known, but stays editable. Pallet type starts on "Loose" — no pallets; picking one of the product's pallet types works out Plts from Boxes using that pallet's box capacity (the dropdown shows how much each pallet stores), and "Manual" lets Plts be typed by hand. Price is typed in per line (a specific design and its price are picked later, on the packing list).</p>
     <div class="form-row" style="margin-top:14px;">
       <div class="field" style="max-width:160px;"><label for="sea_freight">Sea freight (USD)</label><input type="number" step="0.01" id="sea_freight" name="sea_freight" value="{{ data.sea_freight | default(0, true) }}"></div>
       <div class="field" style="max-width:160px;"><label for="insurance">Insurance (USD)</label><input type="number" step="0.01" id="insurance" name="insurance" value="{{ data.insurance | default(0, true) }}"></div>
@@ -236,6 +241,8 @@
       </td>
       <td><input type="text" name="item_hsn_code[]" class="js-hsn" readonly tabindex="-1"></td>
       <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes"></td>
+      <td><select class="js-pallet-type"><option value="">Loose — no pallets</option></select></td>
+      <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets"></td>
       <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required></td>
       <td>
         <select name="item_unit[]" class="js-unit">
@@ -285,8 +292,84 @@
     if (boxes) tr.querySelector('.js-qty').value = (boxes * altQty).toFixed(2);
   }
 
+  // ---- pallet type dropdown --------------------------------------------------
+  // Each option's value is that pallet type's box capacity ("" = Loose, the
+  // default: goods unpalletised, zero pallets; "manual" = type Plts by
+  // hand). Only the derived Plts NUMBER is submitted/stored - pallet type
+  // names never reach the backend.
+  function populatePalletOptions(tr, types, keepSelection) {
+    const sel = tr.querySelector('.js-pallet-type');
+    const unit = tr.querySelector('.js-unit').value || 'SQM';
+    const previous = keepSelection ? sel.value : null;
+    sel.innerHTML = '';
+    sel.appendChild(new Option('Loose — no pallets', ''));
+    (types || []).forEach((t) => {
+      let label = `${t.name} — ${t.boxes_per_pallet} boxes/plt`;
+      if (t.alt_qty_per_pallet) label += ` (${t.alt_qty_per_pallet} ${unit})`;
+      sel.appendChild(new Option(label, String(t.boxes_per_pallet)));
+    });
+    sel.appendChild(new Option('Manual — type Plts by hand', 'manual'));
+    if (previous !== null && Array.from(sel.options).some((o) => o.value === previous)) {
+      sel.value = previous;
+    }
+  }
+
+  // With Loose selected there are no pallets (Plts locks empty); with a
+  // pallet type selected Plts always derives from Boxes / that pallet's
+  // capacity, kept to 2 decimals so a partial last pallet like 3.5 shows
+  // exactly, and locks read-only; Manual leaves Plts entirely to the user.
+  function recalcRowPallets(tr) {
+    const sel = tr.querySelector('.js-pallet-type');
+    const palletsEl = tr.querySelector('.js-pallets');
+    if (sel.value === '') {
+      palletsEl.value = '';
+      palletsEl.readOnly = true;
+      return;
+    }
+    if (sel.value === 'manual') {
+      palletsEl.readOnly = false;
+      return;
+    }
+    const perPallet = parseFloat(sel.value) || 0;
+    const boxes = parseFloat(tr.querySelector('.js-boxes').value) || 0;
+    if (perPallet && boxes) {
+      palletsEl.value = +(boxes / perPallet).toFixed(2);
+      palletsEl.readOnly = true;
+      return;
+    }
+    palletsEl.readOnly = false;
+  }
+
+  // Reopened rows only carry the stored Plts number, so the dropdown's
+  // selection is inferred: no Plts -> Loose; Plts matching Boxes / a pallet
+  // type's capacity -> that type; anything else -> Manual, so the typed
+  // figure survives untouched.
+  function initRowPalletSelection(tr) {
+    let types = [];
+    try { types = JSON.parse(tr.dataset.palletTypes || '[]'); } catch (e) {}
+    populatePalletOptions(tr, types, false);
+    const sel = tr.querySelector('.js-pallet-type');
+    const palletsEl = tr.querySelector('.js-pallets');
+    const pallets = parseFloat(palletsEl.value) || 0;
+    if (!pallets) {
+      sel.value = '';
+      palletsEl.value = '';
+      palletsEl.readOnly = true;
+      return;
+    }
+    const boxes = parseFloat(tr.querySelector('.js-boxes').value) || 0;
+    const match = boxes
+      ? (types || []).find((t) => Math.abs(boxes / t.boxes_per_pallet - pallets) < 1e-6)
+      : null;
+    sel.value = match ? String(match.boxes_per_pallet) : 'manual';
+    recalcRowPallets(tr);
+  }
+
   addRowBtn.addEventListener('click', () => {
-    itemsBody.appendChild(rowTemplate());
+    const tr = rowTemplate();
+    itemsBody.appendChild(tr);
+    populatePalletOptions(tr, [], false);
+    recalcRowPallets(tr);
     renumber();
   });
 
@@ -302,10 +385,23 @@
 
   itemsBody.addEventListener('input', (e) => {
     if (e.target.classList.contains('js-boxes')) {
-      recalcRowQty(e.target.closest('tr'));
+      const tr = e.target.closest('tr');
+      recalcRowQty(tr);
+      recalcRowPallets(tr);
       recalcTotals();
     } else if (e.target.classList.contains('js-qty') || e.target.classList.contains('js-price')) {
       recalcTotals();
+    }
+  });
+  itemsBody.addEventListener('change', (e) => {
+    if (e.target.classList.contains('js-pallet-type')) {
+      recalcRowPallets(e.target.closest('tr'));
+    } else if (e.target.classList.contains('js-unit')) {
+      // Re-label the pallet options with the new unit, keeping the selection.
+      const tr = e.target.closest('tr');
+      let types = [];
+      try { types = JSON.parse(tr.dataset.palletTypes || '[]'); } catch (err) {}
+      populatePalletOptions(tr, types, true);
     }
   });
   ['discount_amount', 'sea_freight', 'insurance', 'certification', 'other_charges'].forEach((id) => {
@@ -421,11 +517,17 @@
     activeRow.querySelector('.js-hsn').value = p.hsn_code || '';
     setUnitValue(activeRow.querySelector('.js-unit'), p.alt_quantity_unit);
     activeRow.dataset.altQty = parseFloat(p.alternate_quantity) || '';
+    // A different product brings its own pallet type options; the dropdown
+    // resets to Loose - every product's built-in default.
+    activeRow.dataset.palletTypes = JSON.stringify(p.pallet_types || []);
+    populatePalletOptions(activeRow, p.pallet_types || [], false);
+    recalcRowPallets(activeRow);
     recalcRowQty(activeRow);
     recalcTotals();
     overlay.hidden = true;
   }
 
+  itemsBody.querySelectorAll('.item-row').forEach(initRowPalletSelection);
   renumber();
   recalcTotals();
 })();

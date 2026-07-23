@@ -153,6 +153,27 @@ class TestQuotationCrud:
         with pytest.raises(NotFoundError):
             container.quotation_service.get(q.id, seed.company_id)
 
+    def test_pallets_persist_on_a_line_item(self, container, seed):
+        q = container.quotation_service.create(
+            seed.admin, {"buyer_name": "Buyer", "quotation_date": "2026-01-01"},
+            [{"product_name": "P", "quantity_value": "10", "price_usd": "2", "pallets": "3.5"}])
+        reloaded = container.quotation_service.get(q.id, seed.company_id)
+        assert reloaded.items[0].pallets == 3.5
+
+    def test_pallets_optional(self, container, seed):
+        q = self._create(container, seed)
+        assert container.quotation_service.get(q.id, seed.company_id).items[0].pallets is None
+
+    def test_pallets_can_be_updated(self, container, seed):
+        q = container.quotation_service.create(
+            seed.admin, {"buyer_name": "Buyer", "quotation_date": "2026-01-01"},
+            [{"product_name": "P", "quantity_value": "10", "price_usd": "2", "pallets": "3"}])
+        container.quotation_service.update(
+            seed.admin, q.id, {"buyer_name": "Buyer", "quotation_date": "2026-01-01"},
+            [{"product_name": "P", "quantity_value": "10", "price_usd": "2", "pallets": "5"}])
+        reloaded = container.quotation_service.get(q.id, seed.company_id)
+        assert reloaded.items[0].pallets == 5
+
 
 # ==========================================================================
 # ProformaInvoice / PurchaseOrder / PackingList number formats
