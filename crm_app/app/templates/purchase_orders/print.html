@@ -31,6 +31,11 @@
       {% else %}
       <a href="{{ url_for('packing_lists.new_packing_list', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">📦 Create packing list</a>
       {% endif %}
+      {% if purchase_invoices %}
+      <a href="{{ url_for('purchase_invoices.view_purchase_invoice', purchase_invoice_id=purchase_invoices[0].id) }}" class="btn btn-ghost btn-sm">🧾 View purchase invoice</a>
+      {% else %}
+      <a href="{{ url_for('purchase_invoices.new_purchase_invoice', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">🧾 Create purchase invoice</a>
+      {% endif %}
       <a href="{{ url_for('purchase_orders.edit_purchase_order', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">Edit</a>
       {% if current_user.is_admin %}
       <a href="{{ url_for('purchase_orders.purchase_order_versions', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">Version history</a>

@@ -848,6 +848,157 @@ class PurchaseOrder:
 
 
 @dataclass
+class PurchaseInvoiceItem:
+    """One product line of a purchase invoice - same shape as
+    PurchaseOrderItem, copied in from the linked purchase order at creation
+    time so the invoice stays a self-contained record even if that
+    purchase order is later edited or deleted."""
+    id: Optional[int]
+    purchase_invoice_id: Optional[int]
+    sr_no: int
+    product_name: str
+    product_id: Optional[int] = None
+    hsn_code: Optional[str] = None
+    quantity_boxes: Optional[float] = None
+    quantity_value: float = 0
+    unit: str = "SQM"
+    price_inr: float = 0
+    price_per: str = "BOX"
+    total_inr: float = 0
+
+    @staticmethod
+    def from_row(row) -> "PurchaseInvoiceItem":
+        return PurchaseInvoiceItem(
+            id=row["id"],
+            purchase_invoice_id=row["purchase_invoice_id"],
+            sr_no=row["sr_no"],
+            product_id=row["product_id"],
+            product_name=row["product_name"],
+            hsn_code=row["hsn_code"],
+            quantity_boxes=row["quantity_boxes"],
+            quantity_value=row["quantity_value"],
+            unit=row["unit"],
+            price_inr=row["price_inr"],
+            price_per=row["price_per"],
+            total_inr=row["total_inr"],
+        )
+
+
+@dataclass
+class PurchaseInvoice:
+    """The last document in the pipeline: raised once a supplier's goods
+    (against one of our purchase orders) actually arrive, carrying the
+    supplier's own invoice/transport details. Unlike every other document
+    type here, WE don't generate a PDF for this one - the supplier already
+    sent their own invoice as a PDF (supplier_pdf_path); this record just
+    saves its numbers alongside it. `invoice_number`/`invoice_date` are the
+    SUPPLIER's own values as printed on that PDF; `purchase_invoice_number`
+    is our own internal, auto-generated identifier, kept only for
+    consistency with every other document type's numbering/version-history
+    machinery. Discount/insurance/freight/tax/round-off are typed in
+    directly (not derived) since they must match what the supplier actually
+    charged, not what our own tax rules would compute."""
+    id: Optional[int]
+    company_id: int
+    purchase_invoice_number: str
+    invoice_number: str
+    invoice_date: str
+    seller_name: str
+    created_by: int
+    purchase_order_id: Optional[int] = None
+    lead_id: Optional[int] = None
+    seller_supplier_id: Optional[int] = None
+    seller_address: Optional[str] = None
+    seller_pan: Optional[str] = None
+    seller_gstin: Optional[str] = None
+    seller_ref_no: Optional[str] = None
+    port_of_loading: Optional[str] = None
+    port_of_discharge: Optional[str] = None
+    container_details: Optional[str] = None
+    transporter_name: Optional[str] = None
+    epcg_number: Optional[str] = None
+    epcg_date: Optional[str] = None
+    supplier_pdf_path: Optional[str] = None
+    discount_amount: float = 0
+    insurance_other: float = 0
+    freight: float = 0
+    igst_amount: float = 0
+    cgst_amount: float = 0
+    sgst_amount: float = 0
+    round_off: float = 0
+    remarks: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    created_by_name: Optional[str] = None  # populated by joined queries only
+    purchase_order_number: Optional[str] = None  # populated by joined queries only
+    items: List[PurchaseInvoiceItem] = field(default_factory=list)
+    vehicle_numbers: List[str] = field(default_factory=list)
+    computed_subtotal_inr: Optional[float] = None  # precomputed by list queries that don't load items
+
+    @staticmethod
+    def from_row(row) -> "PurchaseInvoice":
+        return PurchaseInvoice(
+            id=row["id"],
+            company_id=row["company_id"],
+            purchase_invoice_number=row["purchase_invoice_number"],
+            invoice_number=row["invoice_number"],
+            invoice_date=row["invoice_date"],
+            purchase_order_id=row["purchase_order_id"],
+            lead_id=row["lead_id"],
+            seller_supplier_id=row["seller_supplier_id"],
+            seller_name=row["seller_name"],
+            seller_address=row["seller_address"],
+            seller_pan=row["seller_pan"],
+            seller_gstin=row["seller_gstin"],
+            seller_ref_no=row["seller_ref_no"],
+            port_of_loading=row["port_of_loading"],
+            port_of_discharge=row["port_of_discharge"],
+            container_details=row["container_details"],
+            transporter_name=row["transporter_name"],
+            epcg_number=row["epcg_number"],
+            epcg_date=row["epcg_date"],
+            supplier_pdf_path=row["supplier_pdf_path"],
+            discount_amount=row["discount_amount"],
+            insurance_other=row["insurance_other"],
+            freight=row["freight"],
+            igst_amount=row["igst_amount"],
+            cgst_amount=row["cgst_amount"],
+            sgst_amount=row["sgst_amount"],
+            round_off=row["round_off"],
+            remarks=row["remarks"],
+            created_by=row["created_by"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            created_by_name=row["created_by_name"] if "created_by_name" in row.keys() else None,
+            purchase_order_number=row["purchase_order_number"] if "purchase_order_number" in row.keys() else None,
+            computed_subtotal_inr=row["items_total"] if "items_total" in row.keys() else None,
+        )
+
+    @property
+    def total_boxes(self) -> float:
+        return sum(item.quantity_boxes or 0 for item in self.items)
+
+    @property
+    def total_quantity(self) -> float:
+        return sum(item.quantity_value or 0 for item in self.items)
+
+    @property
+    def subtotal_inr(self) -> float:
+        if self.computed_subtotal_inr is not None and not self.items:
+            return self.computed_subtotal_inr
+        return sum(item.total_inr for item in self.items)
+
+    @property
+    def invoice_value_inr(self) -> float:
+        return round(
+            self.subtotal_inr + self.freight + self.insurance_other
+            + self.igst_amount + self.cgst_amount + self.sgst_amount
+            - self.discount_amount + self.round_off,
+            2,
+        )
+
+
+@dataclass
 class PackingListItem:
     """One design of a product packed in a given quantity. product_name and
     design_name are stored snapshots - product_id/design_id are reference

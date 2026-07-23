@@ -1,0 +1,414 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit purchase invoice' if purchase_invoice else 'New purchase invoice' }}{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Sales documents</div>
+    <h1>{{ 'Edit ' + purchase_invoice.purchase_invoice_number if purchase_invoice else 'New purchase invoice' }}</h1>
+    {% if not purchase_invoice %}<div class="text-sm text-soft">Our own reference number is generated automatically on save. Nothing is printed for this document - the values here (and the uploaded PDF) are just recorded.</div>{% endif %}
+  </div>
+</div>
+
+<form method="POST" id="pinv-form" enctype="multipart/form-data">
+  {% set data = form_data if form_data else purchase_invoice %}
+  <div class="card">
+    <div class="card-header"><h3>Start from</h3></div>
+    <div class="form-row">
+      <div class="field">
+        <label for="po_select">Prefill from an existing purchase order <span class="text-soft text-sm">(optional)</span></label>
+        <select id="po_select">
+          <option value="">— Select a purchase order —</option>
+          {% for po in purchase_orders %}
+            <option value="{{ po.id }}" {{ 'selected' if data and data.purchase_order_id | string == po.id | string }}>{{ po.po_number }} — {{ po.seller_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="lead_select">Link to a lead <span class="text-soft text-sm">(optional)</span></label>
+        <select id="lead_select">
+          <option value="">— Select a lead —</option>
+          {% for l in leads %}
+            <option value="{{ l.id }}" {{ 'selected' if data and data.lead_id | string == l.id | string }}>{{ l.company_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <p class="hint">Choosing a purchase order reloads this page and copies its seller details and product lines in as a starting point - the purchase invoice is then its own independent record.</p>
+    <input type="hidden" name="lead_id" id="lead_id" value="{{ data.lead_id | default('', true) }}">
+    <input type="hidden" name="purchase_order_id" id="purchase_order_id" value="{{ data.purchase_order_id | default('', true) }}">
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Invoice details</h3></div>
+    <div class="form-row">
+      <div class="field"><label for="invoice_number">Invoice number<span class="required-mark">*</span></label><input type="text" id="invoice_number" name="invoice_number" required placeholder="Supplier's own invoice no." value="{{ data.invoice_number | default('', true) }}"></div>
+      <div class="field"><label for="invoice_date">Invoice date<span class="required-mark">*</span></label><input type="date" id="invoice_date" name="invoice_date" required value="{{ data.invoice_date | default(today, true) }}"></div>
+      <div class="field"><label for="seller_ref_no">Seller ref. no.</label><input type="text" id="seller_ref_no" name="seller_ref_no" value="{{ data.seller_ref_no | default('', true) }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label for="transporter_name">Transporter name</label><input type="text" id="transporter_name" name="transporter_name" value="{{ data.transporter_name | default('', true) }}"></div>
+      <div class="field"><label for="epcg_number">EPCG number <span class="text-soft text-sm">(optional)</span></label><input type="text" id="epcg_number" name="epcg_number" value="{{ data.epcg_number | default('', true) }}"></div>
+      <div class="field"><label for="epcg_date">EPCG date <span class="text-soft text-sm">(optional)</span></label><input type="date" id="epcg_date" name="epcg_date" value="{{ data.epcg_date | default('', true) }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label for="port_of_loading">Port of loading</label><input type="text" id="port_of_loading" name="port_of_loading" value="{{ data.port_of_loading | default('', true) }}"></div>
+      <div class="field"><label for="port_of_discharge">Port of discharge</label><input type="text" id="port_of_discharge" name="port_of_discharge" value="{{ data.port_of_discharge | default('', true) }}"></div>
+      <div class="field"><label for="container_details">Container details</label><input type="text" id="container_details" name="container_details" value="{{ data.container_details | default('', true) }}"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Vehicle numbers</h3></div>
+    <div id="vehicle-rows">
+      {% set vehicles = form_vehicle_numbers if form_vehicle_numbers is not none else (purchase_invoice.vehicle_numbers if purchase_invoice else []) %}
+      {% if vehicles %}
+        {% for v in vehicles %}
+        <div class="repeatable-row">
+          <div class="field"><label>Vehicle number</label><input type="text" name="vehicle_number[]" value="{{ v }}"></div>
+          <button type="button" class="btn-link-danger js-remove-vehicle-row">Remove</button>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="repeatable-row">
+          <div class="field"><label>Vehicle number</label><input type="text" name="vehicle_number[]"></div>
+          <button type="button" class="btn-link-danger js-remove-vehicle-row">Remove</button>
+        </div>
+      {% endif %}
+    </div>
+    <button type="button" class="btn btn-ghost btn-sm" id="add-vehicle-row-btn">+ Add vehicle</button>
+    <p class="hint">A supplier's shipment can arrive split across several trucks - add one row per vehicle.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3>Seller</h3>
+      {% if current_user.is_admin %}
+      <button type="button" class="btn btn-ghost btn-sm" id="seller-add-new-toggle">+ Add new supplier</button>
+      {% endif %}
+    </div>
+
+    {% if current_user.is_admin %}
+    <!-- Deliberately a plain div, not a form element - same nested-form
+         reasoning as purchase_orders/form.html's seller panel. -->
+    <div id="seller-add-new-panel" class="card" hidden style="margin-bottom:14px;">
+      <div class="card-header"><h3>Add new supplier</h3></div>
+      <div id="seller-add-new-form">
+        <div class="field"><label for="new_supplier_company_name">Company name<span class="required-mark">*</span></label><input type="text" id="new_supplier_company_name"></div>
+        <div class="field"><label for="new_supplier_address">Address</label><textarea id="new_supplier_address" rows="2"></textarea></div>
+        <div class="form-row">
+          <div class="field"><label for="new_supplier_pan_no">PAN no.</label><input type="text" id="new_supplier_pan_no"></div>
+          <div class="field"><label for="new_supplier_gstin">GSTIN</label><input type="text" id="new_supplier_gstin"></div>
+        </div>
+        <div class="hint">IEC and bank/contact details can be filled in later from the supplier's own page.</div>
+        <button type="button" class="btn btn-primary btn-sm" id="seller-add-new-save">Save &amp; select</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="seller-add-new-cancel">Cancel</button>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="field">
+      <label for="seller_select">Prefill from an existing supplier <span class="text-soft text-sm">(optional)</span></label>
+      <select id="seller_select">
+        <option value="">— Select a supplier —</option>
+        {% for s in suppliers %}
+          <option value="{{ s.id }}" data-name="{{ s.company_name }}" data-address="{{ s.address or '' }}"
+                  data-pan="{{ s.pan_no or '' }}" data-gstin="{{ s.gstin or '' }}"
+                  {{ 'selected' if data and data.seller_supplier_id | string == s.id | string }}>
+            {{ s.company_name }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <input type="hidden" name="seller_supplier_id" id="seller_supplier_id" value="{{ data.seller_supplier_id | default('', true) }}">
+    <div class="field"><label for="seller_name">Seller name<span class="required-mark">*</span></label><input type="text" id="seller_name" name="seller_name" required value="{{ data.seller_name | default('', true) }}"></div>
+    <div class="field"><label for="seller_address">Seller address</label><textarea id="seller_address" name="seller_address" rows="3">{{ data.seller_address | default('', true) }}</textarea></div>
+    <div class="form-row">
+      <div class="field"><label for="seller_pan">Seller PAN no.</label><input type="text" id="seller_pan" name="seller_pan" value="{{ data.seller_pan | default('', true) }}"></div>
+      <div class="field"><label for="seller_gstin">Seller GSTIN</label><input type="text" id="seller_gstin" name="seller_gstin" value="{{ data.seller_gstin | default('', true) }}"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Products</h3></div>
+    <div class="table-wrap">
+      <table class="ledger" id="items-table">
+        <thead>
+          <tr>
+            <th>Sr</th>
+            <th style="min-width:220px;">Product</th>
+            <th>HSN code</th>
+            <th>Boxes</th>
+            <th>Qty (SQM/LM)</th>
+            <th>Unit</th>
+            <th>Price (INR)</th>
+            <th>Per</th>
+            <th class="num">Total (INR)</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="items-body">
+          {% set rows = form_items if form_items is not none else (purchase_invoice.items if purchase_invoice else []) %}
+          {% for row in rows %}
+          <tr class="item-row">
+            <td class="js-sr">{{ loop.index }}</td>
+            <td>
+              <input type="hidden" name="item_product_id[]" class="js-product-id" value="{{ row.product_id or '' }}">
+              <textarea name="item_product_name[]" class="js-product-name" rows="2" required>{{ row.product_name }}</textarea>
+            </td>
+            <td><input type="text" name="item_hsn_code[]" class="js-hsn" value="{{ row.hsn_code or '' }}"></td>
+            <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" value="{{ row.quantity_boxes or '' }}"></td>
+            <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required value="{{ row.quantity_value or '' }}"></td>
+            <td>
+              <select name="item_unit[]" class="js-unit">
+                {% for u in PRODUCT_UNITS %}
+                  <option value="{{ u }}" {{ 'selected' if row.unit == u }}>{{ u }}</option>
+                {% endfor %}
+                {% if row.unit and row.unit not in PRODUCT_UNITS %}<option value="{{ row.unit }}" selected>{{ row.unit }}</option>{% endif %}
+              </select>
+            </td>
+            <td><input type="number" step="0.01" name="item_price_inr[]" class="js-price" required value="{{ row.price_inr or '' }}"></td>
+            <td>
+              <select name="item_price_per[]" class="js-price-per">
+                <option value="BOX" {{ 'selected' if (row.price_per or 'BOX') == 'BOX' }}>BOX</option>
+                <option value="UNIT" {{ 'selected' if row.price_per and row.price_per != 'BOX' }}>Unit</option>
+              </select>
+            </td>
+            <td class="num js-total">0.00</td>
+            <td><button type="button" class="btn-link-danger js-remove-row">Remove</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <button type="button" class="btn btn-ghost btn-sm" id="add-row-btn">+ Add product line</button>
+    <p class="hint">Prefilled from the chosen purchase order's product lines - adjust quantities here if what actually arrived differs (e.g. a partial shipment).</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Charges &amp; taxes</h3></div>
+    <p class="hint">Typed in directly from the supplier's own invoice - these aren't derived from our tax rules, since they must match what the supplier actually charged.</p>
+    <div class="form-row">
+      <div class="field"><label for="discount_amount">Discount</label><input type="number" step="0.01" id="discount_amount" name="discount_amount" value="{{ data.discount_amount | default(0, true) }}"></div>
+      <div class="field"><label for="insurance_other">Insurance and Other</label><input type="number" step="0.01" id="insurance_other" name="insurance_other" value="{{ data.insurance_other | default(0, true) }}"></div>
+      <div class="field"><label for="freight">Freight</label><input type="number" step="0.01" id="freight" name="freight" value="{{ data.freight | default(0, true) }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label for="igst_amount">IGST</label><input type="number" step="0.01" id="igst_amount" name="igst_amount" value="{{ data.igst_amount | default(0, true) }}"></div>
+      <div class="field"><label for="cgst_amount">CGST</label><input type="number" step="0.01" id="cgst_amount" name="cgst_amount" value="{{ data.cgst_amount | default(0, true) }}"></div>
+      <div class="field"><label for="sgst_amount">SGST</label><input type="number" step="0.01" id="sgst_amount" name="sgst_amount" value="{{ data.sgst_amount | default(0, true) }}"></div>
+      <div class="field"><label for="round_off">Round off</label><input type="number" step="0.01" id="round_off" name="round_off" value="{{ data.round_off | default(0, true) }}"></div>
+    </div>
+    <div class="flex-between" style="margin-top:14px;">
+      <div></div>
+      <div class="text-sm">
+        <strong>Products subtotal:</strong> ₹ <span id="subtotal-display">0.00</span>
+        &nbsp;·&nbsp; <strong>Invoice value:</strong> ₹ <span id="invoice-value-display">0.00</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Supplier's Purchase Invoice PDF</h3></div>
+    {% if purchase_invoice and purchase_invoice.supplier_pdf_path %}
+    <div class="field">
+      <a href="{{ url_for('static', filename=purchase_invoice.supplier_pdf_path) }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">📄 View current file</a>
+    </div>
+    <div class="radio-wrap" style="margin-bottom:10px;">
+      <input type="checkbox" id="remove_supplier_pdf" name="remove_supplier_pdf" value="1">
+      <label for="remove_supplier_pdf">Remove current file</label>
+    </div>
+    {% endif %}
+    <div class="field">
+      <label for="supplier_pdf">{{ 'Replace file' if purchase_invoice and purchase_invoice.supplier_pdf_path else 'Upload the supplier\'s invoice PDF' }} <span class="text-soft text-sm">(optional)</span></label>
+      <input type="file" id="supplier_pdf" name="supplier_pdf" accept="application/pdf">
+      <div class="hint">Each supplier sends their own Purchase Invoice document - it's saved here alongside the values above, nothing is generated from them.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Remarks</h3></div>
+    <div class="field">
+      <textarea name="remarks" rows="4">{{ data.remarks | default('', true) }}</textarea>
+    </div>
+  </div>
+
+  <button type="submit" class="btn btn-primary">{{ 'Save changes' if purchase_invoice else 'Create purchase invoice' }}</button>
+  <a href="{{ url_for('purchase_invoices.view_purchase_invoice', purchase_invoice_id=purchase_invoice.id) if purchase_invoice else url_for('purchase_invoices.list_purchase_invoices') }}" class="btn btn-ghost">Cancel</a>
+</form>
+
+<script>
+(function () {
+  const itemsBody = document.getElementById('items-body');
+  const addRowBtn = document.getElementById('add-row-btn');
+
+  const rowTemplate = () => {
+    const tr = document.createElement('tr');
+    tr.className = 'item-row';
+    tr.innerHTML = `
+      <td class="js-sr"></td>
+      <td>
+        <input type="hidden" name="item_product_id[]" class="js-product-id">
+        <textarea name="item_product_name[]" class="js-product-name" rows="2" required></textarea>
+      </td>
+      <td><input type="text" name="item_hsn_code[]" class="js-hsn"></td>
+      <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes"></td>
+      <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required></td>
+      <td>
+        <select name="item_unit[]" class="js-unit">
+          {% for u in PRODUCT_UNITS %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
+        </select>
+      </td>
+      <td><input type="number" step="0.01" name="item_price_inr[]" class="js-price" required></td>
+      <td>
+        <select name="item_price_per[]" class="js-price-per">
+          <option value="BOX">BOX</option>
+          <option value="UNIT">Unit</option>
+        </select>
+      </td>
+      <td class="num js-total">0.00</td>
+      <td><button type="button" class="btn-link-danger js-remove-row">Remove</button></td>`;
+    return tr;
+  };
+
+  function renumber() {
+    itemsBody.querySelectorAll('.item-row').forEach((tr, i) => {
+      tr.querySelector('.js-sr').textContent = i + 1;
+    });
+  }
+
+  function rowTotal(tr) {
+    const boxes = parseFloat(tr.querySelector('.js-boxes').value) || 0;
+    const qty = parseFloat(tr.querySelector('.js-qty').value) || 0;
+    const price = parseFloat(tr.querySelector('.js-price').value) || 0;
+    const perBox = tr.querySelector('.js-price-per').value === 'BOX';
+    return (perBox ? boxes : qty) * price;
+  }
+
+  function num(id) { return parseFloat(document.getElementById(id).value) || 0; }
+
+  function recalcTotals() {
+    let subtotal = 0;
+    itemsBody.querySelectorAll('.item-row').forEach((tr) => {
+      const total = rowTotal(tr);
+      tr.querySelector('.js-total').textContent = total.toFixed(2);
+      subtotal += total;
+    });
+    document.getElementById('subtotal-display').textContent = subtotal.toFixed(2);
+    const invoiceValue = subtotal + num('freight') + num('insurance_other')
+      + num('igst_amount') + num('cgst_amount') + num('sgst_amount')
+      - num('discount_amount') + num('round_off');
+    document.getElementById('invoice-value-display').textContent = invoiceValue.toFixed(2);
+  }
+
+  addRowBtn.addEventListener('click', () => {
+    itemsBody.appendChild(rowTemplate());
+    renumber();
+    recalcTotals();
+  });
+
+  itemsBody.addEventListener('click', (e) => {
+    if (e.target.classList.contains('js-remove-row')) {
+      e.target.closest('tr').remove();
+      renumber();
+      recalcTotals();
+    }
+  });
+
+  itemsBody.addEventListener('input', recalcTotals);
+  ['discount_amount', 'insurance_other', 'freight', 'igst_amount', 'cgst_amount', 'sgst_amount', 'round_off']
+    .forEach((id) => document.getElementById(id).addEventListener('input', recalcTotals));
+
+  // ---- purchase order dropdown prefill (reloads the page with ?purchase_order_id=) --------------------------------------------------
+  document.getElementById('po_select').addEventListener('change', (e) => {
+    const id = e.target.value;
+    if (!id) return;
+    window.location = '{{ url_for("purchase_invoices.new_purchase_invoice") }}?purchase_order_id=' + encodeURIComponent(id);
+  });
+
+  // ---- lead dropdown --------------------------------------------------
+  document.getElementById('lead_select').addEventListener('change', (e) => {
+    document.getElementById('lead_id').value = e.target.value || '';
+  });
+
+  // ---- seller dropdown prefill --------------------------------------------------
+  const sellerSelect = document.getElementById('seller_select');
+  function applySeller(id, name, address, pan, gstin) {
+    document.getElementById('seller_supplier_id').value = id || '';
+    document.getElementById('seller_name').value = name || '';
+    document.getElementById('seller_address').value = address || '';
+    document.getElementById('seller_pan').value = pan || '';
+    document.getElementById('seller_gstin').value = gstin || '';
+  }
+  sellerSelect.addEventListener('change', (e) => {
+    const opt = e.target.selectedOptions[0];
+    if (!opt.value) { applySeller('', '', '', '', ''); return; }
+    applySeller(opt.value, opt.dataset.name, opt.dataset.address, opt.dataset.pan, opt.dataset.gstin);
+  });
+
+  // ---- add new supplier (admin only) --------------------------------------------------
+  const sellerAddPanel = document.getElementById('seller-add-new-panel');
+  const sellerAddToggle = document.getElementById('seller-add-new-toggle');
+  const sellerAddFieldNames = ['company_name', 'address', 'pan_no', 'gstin'];
+  const sellerAddInput = (name) => document.getElementById('new_supplier_' + name);
+  function resetSellerAddFields() {
+    sellerAddFieldNames.forEach((name) => { sellerAddInput(name).value = ''; });
+  }
+  if (sellerAddToggle) {
+    sellerAddToggle.addEventListener('click', () => { sellerAddPanel.hidden = !sellerAddPanel.hidden; });
+    document.getElementById('seller-add-new-cancel').addEventListener('click', () => {
+      sellerAddPanel.hidden = true;
+      resetSellerAddFields();
+    });
+    document.getElementById('seller-add-new-save').addEventListener('click', () => {
+      if (!sellerAddInput('company_name').value.trim()) {
+        alert('Company name is compulsory.');
+        sellerAddInput('company_name').focus();
+        return;
+      }
+      const formData = new FormData();
+      sellerAddFieldNames.forEach((name) => formData.append(name, sellerAddInput(name).value));
+      fetch('/suppliers/api/quick-create', { method: 'POST', body: formData })
+        .then(r => r.json().then(data => ({ ok: r.ok, data })))
+        .then(({ ok, data }) => {
+          if (!ok) { alert(data.error || 'Could not create the supplier.'); return; }
+          const opt = new Option(data.company_name, data.id, true, true);
+          opt.dataset.name = data.company_name;
+          opt.dataset.address = data.address || '';
+          opt.dataset.pan = data.pan_no || '';
+          opt.dataset.gstin = data.gstin || '';
+          sellerSelect.appendChild(opt);
+          sellerSelect.value = data.id;
+          applySeller(data.id, data.company_name, data.address, data.pan_no, data.gstin);
+          sellerAddPanel.hidden = true;
+          resetSellerAddFields();
+        })
+        .catch(() => alert('Something went wrong creating the supplier.'));
+    });
+  }
+
+  // ---- vehicle number rows --------------------------------------------------
+  const vehicleRows = document.getElementById('vehicle-rows');
+  document.getElementById('add-vehicle-row-btn').addEventListener('click', () => {
+    const row = document.createElement('div');
+    row.className = 'repeatable-row';
+    row.innerHTML = `<div class="field"><label>Vehicle number</label><input type="text" name="vehicle_number[]"></div>
+      <button type="button" class="btn-link-danger js-remove-vehicle-row">Remove</button>`;
+    vehicleRows.appendChild(row);
+  });
+  vehicleRows.addEventListener('click', (e) => {
+    if (e.target.classList.contains('js-remove-vehicle-row')) {
+      if (vehicleRows.querySelectorAll('.repeatable-row').length > 1) {
+        e.target.closest('.repeatable-row').remove();
+      } else {
+        e.target.closest('.repeatable-row').querySelector('input').value = '';
+      }
+    }
+  });
+
+  renumber();
+  recalcTotals();
+})();
+</script>
+
+{% endblock %}

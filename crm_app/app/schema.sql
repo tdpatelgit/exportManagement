@@ -592,6 +592,84 @@ CREATE TABLE IF NOT EXISTS purchase_order_items (
 );
 
 -- ============================================================
+-- PURCHASE INVOICES  (header + line items + vehicle numbers, number
+-- generated as PINV{YYYYMMDD}{seq-of-that-day} per company. The last
+-- document in the pipeline: raised once a supplier's goods (against one of
+-- our purchase orders) actually arrive, carrying the supplier's own
+-- invoice/transport details. purchase_order_id is a "generated from"
+-- reference only, same pattern as purchase_orders.proforma_invoice_id -
+-- one supplier, one PO, one purchase invoice. Unlike every other document
+-- type there is nothing to print here: the supplier already sent their own
+-- invoice as a PDF (supplier_pdf_path), we just record its numbers
+-- alongside it. invoice_number/invoice_date are the SUPPLIER's own values
+-- as printed on that PDF - purchase_invoice_number is our own internal,
+-- auto-generated identifier (kept for consistency with every other
+-- document type's numbering/version-history machinery). Discount/
+-- insurance/freight/tax/round-off are typed in directly from the supplier's
+-- invoice rather than derived, since they must match what the supplier
+-- actually charged, not what our own tax rules would compute.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS purchase_invoices (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id              INTEGER NOT NULL REFERENCES tenants(id),
+    purchase_invoice_number TEXT NOT NULL,
+    invoice_number          TEXT NOT NULL,   -- the supplier's own invoice number, printed on their PDF
+    invoice_date            TEXT NOT NULL,
+    purchase_order_id       INTEGER REFERENCES purchase_orders(id),   -- optional, "generated from" reference only
+    lead_id                 INTEGER REFERENCES leads(id),             -- optional, prefill/reference only
+    seller_supplier_id      INTEGER REFERENCES suppliers(id),
+    seller_name             TEXT NOT NULL,
+    seller_address          TEXT,
+    seller_pan              TEXT,
+    seller_gstin            TEXT,
+    seller_ref_no           TEXT,
+    port_of_loading         TEXT,
+    port_of_discharge       TEXT,
+    container_details       TEXT,
+    transporter_name        TEXT,
+    epcg_number             TEXT,
+    epcg_date               TEXT,
+    supplier_pdf_path       TEXT,   -- the supplier's own Purchase Invoice PDF, relative to static/
+    discount_amount         REAL NOT NULL DEFAULT 0,
+    insurance_other         REAL NOT NULL DEFAULT 0,
+    freight                 REAL NOT NULL DEFAULT 0,
+    igst_amount             REAL NOT NULL DEFAULT 0,
+    cgst_amount             REAL NOT NULL DEFAULT 0,
+    sgst_amount             REAL NOT NULL DEFAULT 0,
+    round_off               REAL NOT NULL DEFAULT 0,
+    remarks                 TEXT,
+    created_by              INTEGER NOT NULL REFERENCES users(id),
+    created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (company_id, purchase_invoice_number)
+);
+
+CREATE TABLE IF NOT EXISTS purchase_invoice_items (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_invoice_id    INTEGER NOT NULL REFERENCES purchase_invoices(id) ON DELETE CASCADE,
+    sr_no                  INTEGER NOT NULL,
+    product_id             INTEGER REFERENCES products(id) ON DELETE SET NULL,   -- optional, just for prefill/reference
+    product_name           TEXT NOT NULL,
+    hsn_code               TEXT,
+    quantity_boxes         REAL,
+    quantity_value         REAL NOT NULL DEFAULT 0,
+    unit                   TEXT NOT NULL DEFAULT 'SQM',
+    price_inr              REAL NOT NULL DEFAULT 0,
+    price_per              TEXT NOT NULL DEFAULT 'BOX',
+    total_inr              REAL NOT NULL DEFAULT 0
+);
+
+-- Vehicle numbers are a plain repeatable list of values (a supplier's
+-- shipment can arrive split across several trucks) - no other columns, so
+-- no separate model class, just a sr_no-ordered list of strings.
+CREATE TABLE IF NOT EXISTS purchase_invoice_vehicles (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_invoice_id    INTEGER NOT NULL REFERENCES purchase_invoices(id) ON DELETE CASCADE,
+    sr_no                  INTEGER NOT NULL,
+    vehicle_number         TEXT NOT NULL
+);
+
+-- ============================================================
 -- PACKING LISTS  (header + line items, number generated as
 -- PL{YYYYMMDD}{seq-of-that-day} per company. Normally started from an
 -- existing proforma invoice, but can also be started directly from a
@@ -662,7 +740,7 @@ CREATE TABLE IF NOT EXISTS packing_list_items (
 CREATE TABLE IF NOT EXISTS document_versions (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     company_id          INTEGER NOT NULL REFERENCES tenants(id),
-    document_type       TEXT NOT NULL,   -- 'quotation' | 'proforma_invoice' | 'purchase_order' | 'packing_list'
+    document_type       TEXT NOT NULL,   -- 'quotation' | 'proforma_invoice' | 'purchase_order' | 'packing_list' | 'purchase_invoice'
     document_id         INTEGER NOT NULL,
     version_number      INTEGER NOT NULL,
     document_number     TEXT NOT NULL,   -- snapshot of quotation_number/invoice_number/packing_list_number, for display
@@ -706,6 +784,12 @@ CREATE INDEX IF NOT EXISTS idx_purchase_orders_company ON purchase_orders(compan
 CREATE INDEX IF NOT EXISTS idx_purchase_orders_created_by ON purchase_orders(created_by);
 CREATE INDEX IF NOT EXISTS idx_purchase_orders_date ON purchase_orders(po_date);
 CREATE INDEX IF NOT EXISTS idx_purchase_order_items_po ON purchase_order_items(purchase_order_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_invoices_company ON purchase_invoices(company_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_invoices_created_by ON purchase_invoices(created_by);
+CREATE INDEX IF NOT EXISTS idx_purchase_invoices_date ON purchase_invoices(invoice_date);
+CREATE INDEX IF NOT EXISTS idx_purchase_invoices_po ON purchase_invoices(purchase_order_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_invoice_items_pi ON purchase_invoice_items(purchase_invoice_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_invoice_vehicles_pi ON purchase_invoice_vehicles(purchase_invoice_id);
 CREATE INDEX IF NOT EXISTS idx_packing_lists_company ON packing_lists(company_id);
 CREATE INDEX IF NOT EXISTS idx_packing_lists_created_by ON packing_lists(created_by);
 CREATE INDEX IF NOT EXISTS idx_packing_lists_date ON packing_lists(packing_list_date);

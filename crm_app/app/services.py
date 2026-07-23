@@ -33,7 +33,7 @@ from app.models import (
     LEAD_STATUSES, CLIENT_STATUSES, CLIENT_STATUS_ADVANCE_ON, PRODUCT_UNITS, Category, Product,
     ProductPalletType, ProductFolder,
     Design, Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
-    PurchaseOrder, PurchaseOrderItem, PackingList, PackingListItem,
+    PurchaseOrder, PurchaseOrderItem, PurchaseInvoice, PurchaseInvoiceItem, PackingList, PackingListItem,
     DocumentVersion, PURCHASE_TYPES, DEFAULT_PURCHASE_TYPE, EXEMPTION_IGST_PERCENT,
     PROFORMA_STATUSES, PROFORMA_STATUS_DRAFT, PROFORMA_STATUS_CONFIRMED,
 )
@@ -41,8 +41,8 @@ from app.repositories import (
     TenantRepository, UserRepositoryBase, LeadRepositoryBase, PartyRepositoryBase, SupplierRepositoryBase,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
     CategoryRepository, ProductRepository, ProductPalletTypeRepository, ProductFolderRepository, DesignRepository,
-    QuotationRepository, ProformaInvoiceRepository, PurchaseOrderRepository, PackingListRepository,
-    DocumentVersionRepository,
+    QuotationRepository, ProformaInvoiceRepository, PurchaseOrderRepository, PurchaseInvoiceRepository,
+    PackingListRepository, DocumentVersionRepository,
 )
 from app.database import Database, SCHEMA_VERSION
 
@@ -1380,6 +1380,7 @@ _VERSIONED_TYPES = {
     "quotation": (Quotation, QuotationItem, "quotation_number"),
     "proforma_invoice": (ProformaInvoice, ProformaInvoiceItem, "invoice_number"),
     "purchase_order": (PurchaseOrder, PurchaseOrderItem, "po_number"),
+    "purchase_invoice": (PurchaseInvoice, PurchaseInvoiceItem, "purchase_invoice_number"),
     "packing_list": (PackingList, PackingListItem, "packing_list_number"),
 }
 
@@ -2238,6 +2239,296 @@ class PurchaseOrderService:
 
 
 # ============================================================
+# PURCHASE INVOICE SERVICE
+# ============================================================
+class PurchaseInvoiceService:
+    """The last document in the pipeline: raised once a supplier's goods
+    against one of our purchase orders actually arrive. Mirrors
+    PurchaseOrderService's shape (header + line items, day-scoped number
+    sequence, creator-or-admin edit lock), but with two differences that
+    follow from what this document actually is:
+
+    - There is nothing to print/generate here - the supplier already sent
+      their own invoice as a PDF, so this service also stores an uploaded
+      file (see _save_pdf/_delete_pdf_file, same pattern as
+      ProductService._save_image) alongside the typed-in figures.
+    - Its product lines are copied over from the linked purchase order in
+      FULL (see build_prefill_from_purchase_order) rather than cut down to
+      an outstanding remainder - unlike a PI's purchase orders, a purchase
+      invoice isn't splitting anything further, it's recording what one
+      specific supplier shipment actually contained."""
+
+    def __init__(self, purchase_invoice_repo: PurchaseInvoiceRepository, product_repo: ProductRepository,
+                 lead_repo: LeadRepositoryBase, purchase_order_repo: PurchaseOrderRepository,
+                 version_service: "DocumentVersionService", party_repos: Optional[dict] = None,
+                 supplier_repo: Optional[SupplierRepositoryBase] = None,
+                 upload_folder: str = "", allowed_extensions: set = frozenset()):
+        self.purchase_invoice_repo = purchase_invoice_repo
+        self.product_repo = product_repo
+        self.lead_repo = lead_repo
+        self.purchase_order_repo = purchase_order_repo
+        self.version_service = version_service
+        self.party_repos = party_repos  # {'Buyer': ..., 'Supplier': ..., 'Exporter': ...} for advance_client_status
+        self.supplier_repo = supplier_repo  # for validating seller_supplier_id belongs to this company
+        self.upload_folder = upload_folder
+        self.allowed_extensions = allowed_extensions
+
+    # ---- reads --------------------------------------------------
+    def get(self, purchase_invoice_id: int, company_id: int) -> PurchaseInvoice:
+        purchase_invoice = self.purchase_invoice_repo.get_by_id(purchase_invoice_id)
+        if not purchase_invoice or purchase_invoice.company_id != company_id:
+            # 404, not 403 - don't reveal that another company's purchase invoice exists.
+            raise NotFoundError(f"Purchase invoice #{purchase_invoice_id} not found.")
+        return purchase_invoice
+
+    def list_all(self, company_id: int) -> List[PurchaseInvoice]:
+        return self.purchase_invoice_repo.list_all(company_id)
+
+    def list_for_purchase_order(self, purchase_order_id: Optional[int], company_id: int) -> List[PurchaseInvoice]:
+        if not purchase_order_id:
+            return []
+        return [pinv for pinv in self.purchase_invoice_repo.list_for_purchase_order(purchase_order_id)
+                if pinv.company_id == company_id]
+
+    def count_map_by_purchase_order(self, company_id: int) -> dict:
+        return self.purchase_invoice_repo.count_map_by_purchase_order(company_id)
+
+    # ---- permission --------------------------------------------------
+    def _assert_can_modify(self, purchase_invoice: PurchaseInvoice, current_user: User):
+        if current_user.is_admin:
+            return
+        if purchase_invoice.created_by != current_user.id:
+            raise PermissionDeniedError("You can only manage purchase invoices you created yourself.")
+
+    # ---- number generation --------------------------------------------------
+    def _generate_number(self, company_id: int, invoice_date: str) -> str:
+        """PINV{YYYYMMDD}{seq} where seq is that day's purchase invoice count
+        + 1 for this company - our own internal identifier, distinct from
+        the supplier's own invoice_number typed in on the form."""
+        date_part = invoice_date.replace("-", "")
+        prefix = f"PINV{date_part}"
+        seq = self.purchase_invoice_repo.count_for_date_prefix(company_id, prefix) + 1
+        return f"{prefix}{seq:03d}"
+
+    # ---- prefill from an existing purchase order --------------------------------------------------
+    def build_prefill_from_purchase_order(self, purchase_order: PurchaseOrder) -> dict:
+        """Caller must have already loaded `purchase_order` via
+        PurchaseOrderService.get(purchase_order_id, current_user.company_id)
+        so cross-company ownership is already verified. Seller details and
+        product lines carry over in full - each supplier's Purchase Invoice
+        covers exactly the one PO it's raised against, so there's no
+        "outstanding remainder" to cut down to (unlike a PO built from a
+        proforma invoice, which can be one of several splitting the same
+        order)."""
+        fields = {
+            "purchase_order_id": purchase_order.id,
+            "lead_id": purchase_order.lead_id,
+            "seller_supplier_id": purchase_order.seller_supplier_id,
+            "seller_name": purchase_order.seller_name,
+            "seller_address": purchase_order.seller_address,
+            "seller_pan": purchase_order.seller_pan,
+            "seller_gstin": purchase_order.seller_gstin,
+            "seller_ref_no": purchase_order.seller_ref_no,
+            "port_of_loading": purchase_order.port_of_loading,
+            "port_of_discharge": purchase_order.port_of_discharge,
+            "container_details": purchase_order.container_details,
+        }
+        items = [self._raw_item(item) for item in purchase_order.items]
+        return {"fields": fields, "items": items}
+
+    @staticmethod
+    def _raw_item(item: PurchaseOrderItem) -> dict:
+        return {
+            "product_id": item.product_id, "product_name": item.product_name,
+            "hsn_code": item.hsn_code, "quantity_boxes": item.quantity_boxes,
+            "quantity_value": item.quantity_value, "unit": item.unit,
+            "price_inr": item.price_inr, "price_per": item.price_per,
+        }
+
+    # ---- validation --------------------------------------------------
+    def _build_items(self, company_id: int, raw_items: list) -> List[PurchaseInvoiceItem]:
+        items = []
+        for i, raw in enumerate(raw_items, start=1):
+            product_name = (raw.get("product_name") or "").strip()
+            if not product_name:
+                continue
+            try:
+                quantity_value = float(raw.get("quantity_value") or 0)
+                price_inr = float(raw.get("price_inr") or 0)
+                quantity_boxes = float(raw["quantity_boxes"]) if raw.get("quantity_boxes") else None
+            except ValueError:
+                raise ValidationError(f"Row {i}: quantity and price must be numbers.")
+            product_id = int(raw["product_id"]) if raw.get("product_id") else None
+
+            if product_id:
+                product = self.product_repo.get_by_id(product_id)
+                if not product or product.company_id != company_id:
+                    product_id = None
+
+            if quantity_value <= 0:
+                raise ValidationError(f"Row {i} ('{product_name}'): quantity is compulsory and must be greater than zero.")
+            if price_inr < 0:
+                raise ValidationError(f"Row {i} ('{product_name}'): price can't be negative.")
+
+            unit = (raw.get("unit") or "SQM").strip() or "SQM"
+            price_per = "BOX" if (raw.get("price_per") or "BOX").strip().upper() == "BOX" else unit
+            if price_per == "BOX":
+                if not quantity_boxes:
+                    raise ValidationError(f"Row {i} ('{product_name}'): boxes is compulsory when the price is per box.")
+                total_inr = round(quantity_boxes * price_inr, 2)
+            else:
+                total_inr = round(quantity_value * price_inr, 2)
+
+            items.append(PurchaseInvoiceItem(
+                id=None, purchase_invoice_id=None, sr_no=i, product_id=product_id, product_name=product_name,
+                hsn_code=(raw.get("hsn_code") or "").strip() or None,
+                quantity_boxes=quantity_boxes, quantity_value=quantity_value, unit=unit,
+                price_inr=price_inr, price_per=price_per, total_inr=total_inr,
+            ))
+        if not items:
+            raise ValidationError("At least one product line is compulsory.")
+        return items
+
+    @staticmethod
+    def _parse_amount(fields: dict, key: str, label: str) -> float:
+        raw = fields.get(key)
+        if raw in (None, ""):
+            return 0.0
+        try:
+            return float(raw)
+        except ValueError:
+            raise ValidationError(f"{label} must be a number.")
+
+    @staticmethod
+    def _clean_vehicle_numbers(raw_vehicle_numbers: list) -> List[str]:
+        return [v.strip() for v in (raw_vehicle_numbers or []) if v and v.strip()]
+
+    def _build_header(self, current_user: User, fields: dict, items: List[PurchaseInvoiceItem]) -> PurchaseInvoice:
+        seller_name = (fields.get("seller_name") or "").strip()
+        if not seller_name:
+            raise ValidationError("Seller name is compulsory.")
+        invoice_number = (fields.get("invoice_number") or "").strip()
+        if not invoice_number:
+            raise ValidationError("Invoice number is compulsory.")
+        invoice_date = (fields.get("invoice_date") or "").strip()
+        if not invoice_date:
+            raise ValidationError("Invoice date is compulsory.")
+        epcg_number = (fields.get("epcg_number") or "").strip() or None
+        epcg_date = (fields.get("epcg_date") or "").strip() or None
+
+        purchase_order_id = int(fields["purchase_order_id"]) if fields.get("purchase_order_id") else None
+        if purchase_order_id is not None:
+            # Only trust a purchase order from this same company - a crafted
+            # id could otherwise attach this invoice to another company's PO.
+            purchase_order = self.purchase_order_repo.get_by_id(purchase_order_id)
+            if not purchase_order or purchase_order.company_id != current_user.company_id:
+                purchase_order_id = None
+
+        lead_id = int(fields["lead_id"]) if fields.get("lead_id") else None
+        if lead_id is not None:
+            lead = self.lead_repo.get_by_id(lead_id)
+            if not lead or lead.company_id != current_user.company_id:
+                lead_id = None
+
+        seller_supplier_id = int(fields["seller_supplier_id"]) if fields.get("seller_supplier_id") else None
+        if seller_supplier_id is not None and self.supplier_repo is not None:
+            supplier = self.supplier_repo.get_by_id(seller_supplier_id)
+            if not supplier or supplier.company_id != current_user.company_id:
+                seller_supplier_id = None
+
+        return PurchaseInvoice(
+            id=None, company_id=current_user.company_id, purchase_invoice_number="",
+            invoice_number=invoice_number, invoice_date=invoice_date,
+            seller_name=seller_name, created_by=current_user.id,
+            purchase_order_id=purchase_order_id, lead_id=lead_id, seller_supplier_id=seller_supplier_id,
+            seller_address=(fields.get("seller_address") or "").strip() or None,
+            seller_pan=(fields.get("seller_pan") or "").strip() or None,
+            seller_gstin=(fields.get("seller_gstin") or "").strip() or None,
+            seller_ref_no=(fields.get("seller_ref_no") or "").strip() or None,
+            port_of_loading=(fields.get("port_of_loading") or "").strip() or None,
+            port_of_discharge=(fields.get("port_of_discharge") or "").strip() or None,
+            container_details=(fields.get("container_details") or "").strip() or None,
+            transporter_name=(fields.get("transporter_name") or "").strip() or None,
+            epcg_number=epcg_number, epcg_date=epcg_date,
+            discount_amount=self._parse_amount(fields, "discount_amount", "Discount"),
+            insurance_other=self._parse_amount(fields, "insurance_other", "Insurance and other"),
+            freight=self._parse_amount(fields, "freight", "Freight"),
+            igst_amount=self._parse_amount(fields, "igst_amount", "IGST"),
+            cgst_amount=self._parse_amount(fields, "cgst_amount", "CGST"),
+            sgst_amount=self._parse_amount(fields, "sgst_amount", "SGST"),
+            round_off=self._parse_amount(fields, "round_off", "Round off"),
+            remarks=(fields.get("remarks") or "").strip() or None,
+            items=items,
+        )
+
+    # ---- supplier PDF storage --------------------------------------------------
+    def _save_pdf(self, file_storage) -> Optional[str]:
+        """Saves the supplier's own Purchase Invoice PDF under the purchase
+        invoice upload folder with a collision-proof name and returns the
+        path relative to static/ (same pattern as ProductService._save_image,
+        restricted to PDFs since that's the only thing a supplier sends)."""
+        if not file_storage or not file_storage.filename:
+            return None
+        filename = secure_filename(file_storage.filename)
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if ext not in self.allowed_extensions:
+            raise ValidationError(f"Unsupported file type '.{ext}'. Allowed: {', '.join(sorted(self.allowed_extensions))}.")
+        os.makedirs(self.upload_folder, exist_ok=True)
+        stored_name = f"{uuid.uuid4().hex}_{filename}"
+        file_storage.save(os.path.join(self.upload_folder, stored_name))
+        return f"uploads/purchase_invoices/{stored_name}"
+
+    def _delete_pdf_file(self, relative_path: Optional[str]) -> None:
+        if not relative_path:
+            return
+        full_path = os.path.join(self.upload_folder, os.path.basename(relative_path))
+        if os.path.exists(full_path):
+            os.remove(full_path)
+
+    # ---- writes --------------------------------------------------
+    def create(self, current_user: User, fields: dict, raw_items: list, raw_vehicle_numbers: list,
+               pdf_file=None) -> PurchaseInvoice:
+        items = self._build_items(current_user.company_id, raw_items)
+        purchase_invoice = self._build_header(current_user, fields, items)
+        purchase_invoice.vehicle_numbers = self._clean_vehicle_numbers(raw_vehicle_numbers)
+        purchase_invoice.supplier_pdf_path = self._save_pdf(pdf_file)
+        purchase_invoice.purchase_invoice_number = self._generate_number(current_user.company_id, purchase_invoice.invoice_date)
+        created = self.purchase_invoice_repo.create(purchase_invoice)
+        self.version_service.record("purchase_invoice", created, current_user.id)
+        if self.party_repos:
+            advance_client_status(self.party_repos, self.lead_repo, created.lead_id, "purchase_invoice")
+        return created
+
+    def update(self, current_user: User, purchase_invoice_id: int, fields: dict, raw_items: list,
+               raw_vehicle_numbers: list, pdf_file=None, remove_pdf: bool = False) -> PurchaseInvoice:
+        existing = self.get(purchase_invoice_id, current_user.company_id)
+        self._assert_can_modify(existing, current_user)
+        items = self._build_items(current_user.company_id, raw_items)
+        purchase_invoice = self._build_header(current_user, fields, items)
+        purchase_invoice.vehicle_numbers = self._clean_vehicle_numbers(raw_vehicle_numbers)
+        if pdf_file and pdf_file.filename:
+            purchase_invoice.supplier_pdf_path = self._save_pdf(pdf_file)
+            self._delete_pdf_file(existing.supplier_pdf_path)
+        elif remove_pdf:
+            self._delete_pdf_file(existing.supplier_pdf_path)
+            purchase_invoice.supplier_pdf_path = None
+        else:
+            purchase_invoice.supplier_pdf_path = existing.supplier_pdf_path
+        self.purchase_invoice_repo.update(purchase_invoice_id, purchase_invoice)
+        updated = self.get(purchase_invoice_id, current_user.company_id)
+        self.version_service.record("purchase_invoice", updated, current_user.id)
+        if self.party_repos:
+            advance_client_status(self.party_repos, self.lead_repo, updated.lead_id, "purchase_invoice")
+        return updated
+
+    def delete(self, current_user: User, purchase_invoice_id: int) -> None:
+        existing = self.get(purchase_invoice_id, current_user.company_id)
+        self._assert_can_modify(existing, current_user)
+        self._delete_pdf_file(existing.supplier_pdf_path)
+        self.purchase_invoice_repo.delete(purchase_invoice_id)
+
+
+# ============================================================
 # PACKING LIST SERVICE
 # ============================================================
 # A "2 PCS = 0.72 SQM" (or LM) note anywhere in a row's description carries
@@ -3022,14 +3313,14 @@ BACKUP_SIGNATURE = "crm-app-backup"
 BACKUP_FORMAT_VERSION = 1          # bump if the ZIP layout itself changes
 _MANIFEST_NAME = "manifest.json"
 _DB_ARCNAME = "database/crm.db"    # where the DB lives inside the ZIP
-_UPLOADS_ARCPREFIX = "uploads/products"
 _SQLITE_MAGIC = b"SQLite format 3\x00"   # first 16 bytes of any SQLite file
 _CORE_TABLES = ("tenants", "users")      # tables a real app DB must have
 
 
 class BackupService:
-    """Download and restore the ENTIRE dataset - the SQLite database plus the
-    product images that live on disk (not in the DB) - as a single ZIP.
+    """Download and restore the ENTIRE dataset - the SQLite database plus
+    every folder of uploaded files that live on disk (not in the DB) - as a
+    single ZIP.
 
     Admin-only (enforced by the route layer). The ZIP carries a manifest with
     a signature + schema version so a restore can (a) confirm the upload is
@@ -3038,10 +3329,15 @@ class BackupService:
     it (see SCHEMA_VERSION in app/database.py).
     """
 
-    def __init__(self, db: Database, db_path: str, uploads_folder: str, schema_path: str):
+    def __init__(self, db: Database, db_path: str, uploads_folders: dict, schema_path: str):
+        """`uploads_folders` maps an arcname prefix (e.g. "uploads/products")
+        to the on-disk folder it corresponds to - one entry per kind of
+        upload the app has (product photos, suppliers' Purchase Invoice
+        PDFs, ...). Adding a new upload folder later only means adding one
+        more entry here, no other changes to the backup/restore logic."""
         self.db = db
         self.db_path = db_path
-        self.uploads_folder = uploads_folder
+        self.uploads_folders = uploads_folders
         self.schema_path = schema_path
 
     # ---- download --------------------------------------------------
@@ -3072,12 +3368,14 @@ class BackupService:
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
                 zf.writestr(_MANIFEST_NAME, json.dumps(manifest, indent=2))
                 zf.write(tmp_db_path, _DB_ARCNAME)
-                if os.path.isdir(self.uploads_folder):
-                    for root, _dirs, files in os.walk(self.uploads_folder):
+                for arcprefix, folder in self.uploads_folders.items():
+                    if not os.path.isdir(folder):
+                        continue
+                    for root, _dirs, files in os.walk(folder):
                         for name in files:
                             abs_path = os.path.join(root, name)
-                            rel = os.path.relpath(abs_path, self.uploads_folder)
-                            arcname = f"{_UPLOADS_ARCPREFIX}/{rel.replace(os.sep, '/')}"
+                            rel = os.path.relpath(abs_path, folder)
+                            arcname = f"{arcprefix}/{rel.replace(os.sep, '/')}"
                             zf.write(abs_path, arcname)
             return zip_path, f"crm-backup-{stamp}.zip"
         finally:
@@ -3147,7 +3445,10 @@ class BackupService:
 
             # --- everything checks out: snapshot current data, then swap ---
             self._snapshot_current("pre_restore")
-            extracted_uploads = os.path.join(work_dir, "uploads", "products")
+            extracted_uploads = {
+                arcprefix: os.path.join(work_dir, *arcprefix.split("/"))
+                for arcprefix in self.uploads_folders
+            }
             self._swap_in(extracted_db, extracted_uploads)
 
             # Bring the restored (possibly older) DB up to the current shape.
@@ -3201,22 +3502,27 @@ class BackupService:
         return os.path.join(os.path.dirname(self.db_path), "backups")
 
     def _snapshot_current(self, tag: str) -> None:
-        """Copy the CURRENT db + uploads into instance/backups/ so a restore is
-        reversible. Uses the same crm_<tag>_<stamp>.db naming the migration
-        backups use, so it shows up in list_auto_backups()."""
+        """Copy the CURRENT db + every upload folder into instance/backups/
+        so a restore is reversible. Uses the same crm_<tag>_<stamp>.db
+        naming the migration backups use, so it shows up in
+        list_auto_backups()."""
         backup_dir = self._backups_dir()
         os.makedirs(backup_dir, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         stem = os.path.splitext(os.path.basename(self.db_path))[0]
         if os.path.exists(self.db_path):
             self.db.create_backup_copy(os.path.join(backup_dir, f"{stem}_{tag}_{stamp}.db"))
-        if os.path.isdir(self.uploads_folder):
-            shutil.copytree(self.uploads_folder, os.path.join(backup_dir, f"uploads_{tag}_{stamp}"))
+        for arcprefix, folder in self.uploads_folders.items():
+            if os.path.isdir(folder):
+                safe_name = arcprefix.replace("/", "_")
+                shutil.copytree(folder, os.path.join(backup_dir, f"{safe_name}_{tag}_{stamp}"))
 
-    def _swap_in(self, new_db_path: str, new_uploads_dir: str) -> None:
-        """Replace the live DB file and product-images folder with the
+    def _swap_in(self, new_db_path: str, new_uploads_dirs: dict) -> None:
+        """Replace the live DB file and every upload folder with the
         restored ones. DB swap is atomic (os.replace on the same filesystem);
-        the uploads folder is moved aside first and rolled back on failure."""
+        each uploads folder is moved aside first and rolled back on failure.
+        `new_uploads_dirs` maps the same arcprefix keys as self.uploads_folders
+        to the corresponding extracted folder from the backup ZIP."""
         # DB: stage next to the target (same filesystem) then atomic replace.
         staging = self.db_path + ".restore_tmp"
         shutil.copy2(new_db_path, staging)
@@ -3226,24 +3532,26 @@ class BackupService:
             if os.path.exists(sidecar):
                 os.remove(sidecar)
 
-        # Uploads: move current aside, then put the restored folder in place.
-        os.makedirs(os.path.dirname(self.uploads_folder), exist_ok=True)
-        aside = None
-        if os.path.isdir(self.uploads_folder):
-            aside = f"{self.uploads_folder}_old_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            os.rename(self.uploads_folder, aside)
-        try:
-            if new_uploads_dir and os.path.isdir(new_uploads_dir):
-                shutil.copytree(new_uploads_dir, self.uploads_folder)
-            else:
-                os.makedirs(self.uploads_folder, exist_ok=True)
-        except Exception:
-            shutil.rmtree(self.uploads_folder, ignore_errors=True)
+        for arcprefix, folder in self.uploads_folders.items():
+            new_dir = new_uploads_dirs.get(arcprefix)
+            # Uploads: move current aside, then put the restored folder in place.
+            os.makedirs(os.path.dirname(folder), exist_ok=True)
+            aside = None
+            if os.path.isdir(folder):
+                aside = f"{folder}_old_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                os.rename(folder, aside)
+            try:
+                if new_dir and os.path.isdir(new_dir):
+                    shutil.copytree(new_dir, folder)
+                else:
+                    os.makedirs(folder, exist_ok=True)
+            except Exception:
+                shutil.rmtree(folder, ignore_errors=True)
+                if aside:
+                    os.rename(aside, folder)
+                raise
             if aside:
-                os.rename(aside, self.uploads_folder)
-            raise
-        if aside:
-            shutil.rmtree(aside, ignore_errors=True)
+                shutil.rmtree(aside, ignore_errors=True)
 
     @staticmethod
     def _assert_no_zip_slip(names: list, dest_dir: str) -> None:
