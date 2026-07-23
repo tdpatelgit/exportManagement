@@ -160,6 +160,85 @@ class TestDesignStatus:
         assert design_names(result[second.id]["pending"]) == ["Sand"]
 
 
+class TestDesignOverOrdering:
+    """A design need not be bought from a single PO - it can be split across
+    several, and their packing lists can add up to MORE boxes than the
+    invoice's own packing list called for. That's a different state from
+    "pending" (under, not over), tracked separately so both can be shown."""
+
+    def test_a_single_po_that_overshoots_is_flagged(self, container, seed):
+        pi = make_proforma(container, seed)
+        make_packing_list(container, seed, [("Ocean Blue", 10)], proforma_invoice_id=pi.id)
+        po = make_purchase_order(container, seed, proforma_invoice_id=pi.id)
+        make_packing_list(container, seed, [("Ocean Blue", 15)], purchase_order_id=po.id)
+
+        status = container.proforma_fulfilment_service.design_status(seed.company_id, pi.id)
+        assert status["pending"] == []
+        assert design_names(status["over_ordered"]) == ["Ocean Blue"]
+        over = status["over_ordered"][0]
+        assert over["placed_boxes"] == 15 and over["required_boxes"] == 10
+        assert over["excess_boxes"] == 5
+        assert over["is_over_ordered"] is True
+        assert over["is_placed"] is True  # over-ordered is still "not pending"
+
+    def test_several_pos_together_overshoot_even_though_none_alone_does(self, container, seed):
+        """The whole point: no single PO looks wrong on its own (6 and 7
+        boxes are both under the required 10), but their combined total
+        (13) is over - so the aggregate, not any one PO, is what matters."""
+        pi = make_proforma(container, seed)
+        make_packing_list(container, seed, [("Ocean Blue", 10)], proforma_invoice_id=pi.id)
+        first = make_purchase_order(container, seed, proforma_invoice_id=pi.id)
+        second = make_purchase_order(container, seed, proforma_invoice_id=pi.id)
+        make_packing_list(container, seed, [("Ocean Blue", 6)], purchase_order_id=first.id)
+        make_packing_list(container, seed, [("Ocean Blue", 7)], purchase_order_id=second.id)
+
+        status = container.proforma_fulfilment_service.design_status(seed.company_id, pi.id)
+        over = status["over_ordered"][0]
+        assert over["placed_boxes"] == 13
+        assert over["excess_boxes"] == 3
+
+    def test_exact_match_is_neither_pending_nor_over_ordered(self, container, seed):
+        pi = make_proforma(container, seed)
+        make_packing_list(container, seed, [("Ocean Blue", 10)], proforma_invoice_id=pi.id)
+        po = make_purchase_order(container, seed, proforma_invoice_id=pi.id)
+        make_packing_list(container, seed, [("Ocean Blue", 10)], purchase_order_id=po.id)
+
+        status = container.proforma_fulfilment_service.design_status(seed.company_id, pi.id)
+        assert status["pending"] == [] and status["over_ordered"] == []
+
+    def test_over_ordered_designs_helper(self, container, seed):
+        pi = make_proforma(container, seed)
+        make_packing_list(container, seed, [("Ocean Blue", 10)], proforma_invoice_id=pi.id)
+        po = make_purchase_order(container, seed, proforma_invoice_id=pi.id)
+        make_packing_list(container, seed, [("Ocean Blue", 12)], purchase_order_id=po.id)
+
+        over = container.proforma_fulfilment_service.over_ordered_designs(seed.company_id, pi.id)
+        assert design_names(over) == ["Ocean Blue"]
+
+
+class TestProductOverOrdering:
+    """Same concept, one level coarser - a PI's own product line (not
+    broken into designs) can also be over-ordered across several POs."""
+
+    def test_several_pos_together_overshoot_a_product_line(self, container, seed):
+        pi = make_proforma_with_items(container, seed, [("Tiles", 10)])
+        container.purchase_order_service.create(
+            seed.admin, {"seller_name": "Supplier A", "po_date": "2026-02-02",
+                        "proforma_invoice_id": str(pi.id)},
+            [{"product_name": "Tiles", "quantity_boxes": "6", "quantity_value": "60", "price_inr": "50"}])
+        container.purchase_order_service.create(
+            seed.admin, {"seller_name": "Supplier B", "po_date": "2026-02-03",
+                        "proforma_invoice_id": str(pi.id)},
+            [{"product_name": "Tiles", "quantity_boxes": "7", "quantity_value": "70", "price_inr": "50"}])
+
+        reloaded = container.proforma_invoice_service.get(pi.id, seed.company_id)
+        status = container.proforma_fulfilment_service.product_status(seed.company_id, reloaded)
+        assert status["pending"] == []
+        over = status["over_ordered"][0]
+        assert over["product_name"] == "Tiles"
+        assert over["placed_boxes"] == 13 and over["excess_boxes"] == 3
+
+
 class TestDesignStatusQuotationAncestorFallback:
     """Regression coverage for a real bug: an invoice generated straight from
     a quotation that already has its OWN packing list (skipping the PI step)
@@ -516,3 +595,86 @@ class TestProformaPages:
         assert "Purchase orders still to place" not in web.client.get("/").get_data(as_text=True)
         assert "Every design ordered" in web.client.get(
             f"/proforma-invoices/{pi.id}").get_data(as_text=True)
+
+
+# ==========================================================================
+# The "bought more than necessary" notification, fired right after saving
+# the document that pushed something over.
+# ==========================================================================
+class TestOverOrderedNotification:
+    def test_new_po_packing_list_that_overshoots_flashes_an_error(self, web):
+        seed = type("S", (), {"admin": web.admin, "company_id": web.company_id})
+        pi = make_proforma(web.container, seed)
+        make_packing_list(web.container, seed, [("Ocean Blue", 10)], proforma_invoice_id=pi.id)
+        po = make_purchase_order(web.container, seed, proforma_invoice_id=pi.id)
+
+        resp = web.client.post("/packing-lists/new", data={
+            "packing_list_date": "2026-02-04",
+            "purchase_order_id": str(po.id),
+            "item_product_id[]": [""],
+            "item_product_name[]": ["Tiles"],
+            "item_design_id[]": [""],
+            "item_design_name[]": ["Ocean Blue"],
+            "item_hsn_code[]": [""],
+            "item_box_per_pallet[]": [""],
+            "item_pallets[]": [""],
+            "item_quantity_boxes[]": ["15"],   # only 10 required - 5 too many
+            "item_pcs[]": [""],
+            "item_quantity_value[]": ["150"],
+            "item_unit[]": ["SQM"],
+            "item_net_weight_kg[]": [""],
+            "item_gross_weight_kg[]": [""],
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "Bought more than the proforma invoice" in body
+        assert "Ocean Blue" in body
+
+    def test_exact_match_does_not_flash(self, web):
+        seed = type("S", (), {"admin": web.admin, "company_id": web.company_id})
+        pi = make_proforma(web.container, seed)
+        make_packing_list(web.container, seed, [("Ocean Blue", 10)], proforma_invoice_id=pi.id)
+        po = make_purchase_order(web.container, seed, proforma_invoice_id=pi.id)
+
+        resp = web.client.post("/packing-lists/new", data={
+            "packing_list_date": "2026-02-04",
+            "purchase_order_id": str(po.id),
+            "item_product_id[]": [""],
+            "item_product_name[]": ["Tiles"],
+            "item_design_id[]": [""],
+            "item_design_name[]": ["Ocean Blue"],
+            "item_hsn_code[]": [""],
+            "item_box_per_pallet[]": [""],
+            "item_pallets[]": [""],
+            "item_quantity_boxes[]": ["10"],
+            "item_pcs[]": [""],
+            "item_quantity_value[]": ["100"],
+            "item_unit[]": ["SQM"],
+            "item_net_weight_kg[]": [""],
+            "item_gross_weight_kg[]": [""],
+        }, follow_redirects=True)
+        body = resp.get_data(as_text=True)
+        assert "Bought more than the proforma invoice" not in body
+
+    def test_new_po_that_overshoots_a_product_line_flashes_an_error(self, web):
+        seed = type("S", (), {"admin": web.admin, "company_id": web.company_id})
+        pi = make_proforma_with_items(web.container, seed, [("Tiles", 10)])
+
+        resp = web.client.post("/purchase-orders/new", data={
+            "po_date": "2026-02-02",
+            "proforma_invoice_id": str(pi.id),
+            "seller_name": "Supplier A",
+            "purchase_type": "full_tax",
+            "item_product_id[]": [""],
+            "item_product_name[]": ["Tiles"],
+            "item_hsn_code[]": [""],
+            "item_quantity_boxes[]": ["15"],
+            "item_quantity_value[]": ["150"],
+            "item_unit[]": ["SQM"],
+            "item_price_inr[]": ["50"],
+            "item_price_per[]": ["BOX"],
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "Ordered more than the proforma invoice calls for" in body
+        assert "Tiles" in body

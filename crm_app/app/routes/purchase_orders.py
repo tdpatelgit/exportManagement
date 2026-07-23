@@ -67,6 +67,34 @@ def _form_context():
     return leads, invoices, suppliers
 
 
+def _flash_if_over_ordered(container, purchase_order) -> None:
+    """A product line need not be ordered from a single PO - it can be split
+    across several, and nothing stops their quantities adding up to MORE
+    boxes than the proforma invoice actually called for. Checked right after
+    saving a PO that's linked to one, flagging every product currently over
+    its requirement (the whole picture across every PO on that invoice, not
+    just this one - an earlier PO could be the one now pushed over)."""
+    if not purchase_order.proforma_invoice_id:
+        return
+    try:
+        invoice = container.proforma_invoice_service.get(purchase_order.proforma_invoice_id, g.user.company_id)
+    except NotFoundError:
+        return
+    over_ordered = container.proforma_fulfilment_service.product_status(g.user.company_id, invoice)["over_ordered"]
+    if not over_ordered:
+        return
+    parts = []
+    for p in over_ordered:
+        if p["required_boxes"] or p["placed_boxes"]:
+            excess, unit = p["excess_boxes"], "boxes"
+        else:
+            excess, unit = p["excess_quantity"], p["unit"]
+        parts.append(f"{p['product_name']} (+{excess:,.2f} {unit})")
+    flash(
+        "Ordered more than the proforma invoice calls for: " + ", ".join(parts) + ".", "error",
+    )
+
+
 def _product_meta_map(items) -> dict:
     """product_id -> {'alt_qty', 'igst'} for rows already tied to a catalog
     product: `alt_qty` reproduces proforma_invoices._alt_qty_map's Boxes x
@@ -110,6 +138,7 @@ def new_purchase_order():
                 current_user=g.user, fields=_extract_header(request.form), raw_items=_extract_items(request.form),
             )
             flash(f"Purchase order {purchase_order.po_number} created.", "success")
+            _flash_if_over_ordered(container, purchase_order)
             return redirect(url_for("purchase_orders.view_purchase_order", purchase_order_id=purchase_order.id))
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
@@ -193,11 +222,12 @@ def edit_purchase_order(purchase_order_id):
 
     if request.method == "POST":
         try:
-            container.purchase_order_service.update(
+            updated = container.purchase_order_service.update(
                 current_user=g.user, purchase_order_id=purchase_order_id,
                 fields=_extract_header(request.form), raw_items=_extract_items(request.form),
             )
             flash(f"Purchase order {purchase_order.po_number} updated.", "success")
+            _flash_if_over_ordered(container, updated)
             return redirect(url_for("purchase_orders.view_purchase_order", purchase_order_id=purchase_order_id))
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")

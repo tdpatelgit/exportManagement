@@ -511,6 +511,7 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
 }
 .sheet-note-warning { border-left-color: var(--status-amber); background: var(--color-warning-bg); }
 .sheet-note-done { border-left-color: var(--status-green); background: var(--color-success-bg); }
+.sheet-note-error { border-left-color: var(--color-danger); background: var(--color-danger-bg); }
 .sheet-note h3 { margin: 0 0 4px; font-size: .95rem; }
 .sheet-note p { margin: 0; font-size: .84rem; color: var(--color-text-soft); }
 .sheet-note .ledger { margin-top: 12px; background: #fff; }

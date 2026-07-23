@@ -44,6 +44,19 @@
     </div>
   </div>
 
+  {# This page doesn't extend base.html, so it renders its own flashes -
+     creating/updating a purchase order redirects straight back here, and
+     that's also where the "ordered more than necessary" notice shows up. #}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="sheet-note no-print flash-stack">
+      {% for category, message in messages %}
+      <div class="flash flash-{{ category }}">{{ message }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endwith %}
+
   {% include 'purchase_orders/_sheet.html' %}
 
 </body>
