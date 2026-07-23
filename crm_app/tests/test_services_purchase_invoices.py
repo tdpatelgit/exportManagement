@@ -25,13 +25,13 @@ def make_lead(container, user):
         [{"name": "Bob", "is_primary": True}])
 
 
-def make_purchase_order(container, seed, **over):
+def make_purchase_order(container, seed, item=None, **over):
     fields = {"seller_name": "Supplier Ltd", "po_date": "2026-03-01"}
     fields.update(over)
     return container.purchase_order_service.create(
         seed.admin, fields,
-        [{"product_name": "Tiles", "quantity_boxes": "10", "quantity_value": "100",
-          "price_inr": "500", "price_per": "BOX"}])
+        [item or {"product_name": "Tiles", "quantity_boxes": "10", "quantity_value": "100",
+                  "price_inr": "500", "price_per": "BOX"}])
 
 
 class TestPurchaseInvoicePrefill:
@@ -50,6 +50,23 @@ class TestPurchaseInvoicePrefill:
         assert items[0]["product_name"] == "Tiles"
         assert items[0]["quantity_boxes"] == 10
         assert items[0]["price_inr"] == 500
+
+    def test_prefill_copies_the_pos_own_computed_tax_amounts(self, container, seed):
+        container.company_repo.upsert(seed.company_id, "Test Exports", "Morbi", "24AAAAA0000A1Z5", "", "", "")
+        product = container.product_service.create_product(
+            current_user=seed.admin, product_name="Tiles", description="", hsn_code="6907",
+            igst_percent="18", quantity="", alternate_quantity="")
+        po = make_purchase_order(
+            container, seed, item={
+                "product_id": str(product.id), "product_name": "Tiles", "quantity_boxes": "10",
+                "quantity_value": "100", "price_inr": "500", "price_per": "BOX",
+            },
+            seller_gstin="27BBBBB0000B1Z5",  # different state -> IGST, not CGST/SGST
+        )
+        fields = container.purchase_invoice_service.build_prefill_from_purchase_order(po)["fields"]
+        assert fields["igst_amount"] == po.igst_amount == 900.0  # 5000 * 18%
+        assert fields["cgst_amount"] == 0
+        assert fields["sgst_amount"] == 0
 
 
 class TestPurchaseInvoiceCrud:

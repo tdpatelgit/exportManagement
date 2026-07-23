@@ -21,6 +21,11 @@
     {% if purchase_invoice.purchase_order_id %}
     <a href="{{ url_for('purchase_orders.view_purchase_order', purchase_order_id=purchase_invoice.purchase_order_id) }}" class="btn btn-ghost btn-sm">View purchase order</a>
     {% endif %}
+    {% if packing_lists %}
+    <a href="{{ url_for('packing_lists.view_packing_list', packing_list_id=packing_lists[0].id) }}" class="btn btn-ghost btn-sm">📦 View packing list</a>
+    {% else %}
+    <a href="{{ url_for('packing_lists.new_packing_list', purchase_invoice_id=purchase_invoice.id) }}" class="btn btn-ghost btn-sm">📦 Create packing list</a>
+    {% endif %}
     <a href="{{ url_for('purchase_invoices.edit_purchase_invoice', purchase_invoice_id=purchase_invoice.id) }}" class="btn btn-ghost btn-sm">Edit</a>
     {% if current_user.is_admin %}
     <a href="{{ url_for('purchase_invoices.purchase_invoice_versions', purchase_invoice_id=purchase_invoice.id) }}" class="btn btn-ghost btn-sm">Version history</a>

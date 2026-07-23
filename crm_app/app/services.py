@@ -2319,7 +2319,12 @@ class PurchaseInvoiceService:
         covers exactly the one PO it's raised against, so there's no
         "outstanding remainder" to cut down to (unlike a PO built from a
         proforma invoice, which can be one of several splitting the same
-        order)."""
+        order). The PO's own computed tax amounts (igst_amount/cgst_amount/
+        sgst_amount - derived from its stored percentages, see
+        PurchaseOrder.igst_amount etc.) are copied in as a starting point
+        too, since the supplier's actual invoice should normally charge the
+        same tax the PO was placed under - the user can still adjust them
+        here to match what the supplier's invoice actually says."""
         fields = {
             "purchase_order_id": purchase_order.id,
             "lead_id": purchase_order.lead_id,
@@ -2332,6 +2337,9 @@ class PurchaseInvoiceService:
             "port_of_loading": purchase_order.port_of_loading,
             "port_of_discharge": purchase_order.port_of_discharge,
             "container_details": purchase_order.container_details,
+            "igst_amount": purchase_order.igst_amount,
+            "cgst_amount": purchase_order.cgst_amount,
+            "sgst_amount": purchase_order.sgst_amount,
         }
         items = [self._raw_item(item) for item in purchase_order.items]
         return {"fields": fields, "items": items}
@@ -2568,7 +2576,8 @@ class PackingListService:
                  proforma_invoice_repo: ProformaInvoiceRepository, version_service: "DocumentVersionService",
                  quotation_repo: Optional[QuotationRepository] = None,
                  purchase_order_repo: Optional[PurchaseOrderRepository] = None,
-                 fulfilment_service: Optional["ProformaFulfilmentService"] = None):
+                 fulfilment_service: Optional["ProformaFulfilmentService"] = None,
+                 purchase_invoice_repo: Optional[PurchaseInvoiceRepository] = None):
         self.packing_list_repo = packing_list_repo
         self.product_repo = product_repo
         self.design_repo = design_repo
@@ -2580,6 +2589,9 @@ class PackingListService:
         # Optional: when present, a PO's packing list is prefilled with only
         # the designs its proforma invoice still needs ordered.
         self.fulfilment_service = fulfilment_service
+        # Optional: lets a Purchase Invoice's own packing list validate its
+        # purchase_invoice_id and import its linked PO's PL wholesale.
+        self.purchase_invoice_repo = purchase_invoice_repo
 
     # ---- reads --------------------------------------------------
     def get(self, packing_list_id: int, company_id: int) -> PackingList:
@@ -2622,6 +2634,12 @@ class PackingListService:
         own PL), company-scoped - drives the combined PO + packing details
         print view, same as list_for_proforma."""
         return [pl for pl in self.packing_list_repo.list_for_purchase_order(purchase_order_id)
+                if pl.company_id == company_id]
+
+    def list_for_purchase_invoice(self, purchase_invoice_id: int, company_id: int) -> List[PackingList]:
+        """Every packing list generated from one Purchase Invoice (that
+        invoice's own PL), company-scoped - same as list_for_purchase_order."""
+        return [pl for pl in self.packing_list_repo.list_for_purchase_invoice(purchase_invoice_id)
                 if pl.company_id == company_id]
 
     # ---- permission --------------------------------------------------
@@ -2781,6 +2799,37 @@ class PackingListService:
             fields["remarks"] = source_pl.remarks or fields["remarks"]
         else:
             items = self._placeholder_items(purchase_order.items)
+        return {"fields": fields, "items": items}
+
+    # ---- prefill from an existing purchase invoice --------------------------------------------------
+    def build_prefill_from_purchase_invoice(self, purchase_invoice: PurchaseInvoice) -> dict:
+        """The Purchase Invoice's own packing list. Caller must have already
+        loaded `purchase_invoice` via PurchaseInvoiceService.get(...) so
+        cross-company ownership is already verified. Imports its linked
+        purchase order's own packing list WHOLESALE - unlike
+        build_prefill_from_purchase_order, there is no _remaining_designs
+        cut-down here, since a Purchase Invoice already corresponds to
+        exactly one PO's shipment, not a split still being placed across
+        several. Falls back to one empty product block per invoice line
+        (same as build_prefill_from_proforma) when the linked PO has no
+        packing list of its own yet."""
+        fields = {
+            "purchase_invoice_id": purchase_invoice.id,
+            "lead_id": purchase_invoice.lead_id,
+            "buyer_order_no": purchase_invoice.seller_ref_no,
+            "remarks": "MADE IN INDIA",
+        }
+        source_pl = None
+        if purchase_invoice.purchase_order_id:
+            source_pl = self._newest_packing_list(
+                self.packing_list_repo.list_for_purchase_order(purchase_invoice.purchase_order_id),
+                purchase_invoice.company_id,
+            )
+        if source_pl:
+            items = self._items_from_packing_list(source_pl)
+            fields["remarks"] = source_pl.remarks or fields["remarks"]
+        else:
+            items = self._placeholder_items(purchase_invoice.items)
         return {"fields": fields, "items": items}
 
     def _remaining_designs(self, company_id: int, proforma_invoice_id: Optional[int], items: list) -> list:
@@ -2979,11 +3028,19 @@ class PackingListService:
             if not purchase_order or purchase_order.company_id != current_user.company_id:
                 purchase_order_id = None
 
+        purchase_invoice_id = int(fields["purchase_invoice_id"]) if fields.get("purchase_invoice_id") else None
+        if purchase_invoice_id is not None and self.purchase_invoice_repo is not None:
+            # Only trust a purchase invoice from this same company - same reasoning as lead_id above.
+            purchase_invoice = self.purchase_invoice_repo.get_by_id(purchase_invoice_id)
+            if not purchase_invoice or purchase_invoice.company_id != current_user.company_id:
+                purchase_invoice_id = None
+
         return PackingList(
             id=None, company_id=current_user.company_id, packing_list_number="",
             packing_list_date=packing_list_date, consignee_name="",
             created_by=current_user.id, lead_id=lead_id, proforma_invoice_id=proforma_invoice_id,
             quotation_id=quotation_id, purchase_order_id=purchase_order_id,
+            purchase_invoice_id=purchase_invoice_id,
             export_ref_no=(fields.get("export_ref_no") or "").strip() or None,
             buyer_order_no=(fields.get("buyer_order_no") or "").strip() or None,
             other_reference=(fields.get("other_reference") or "").strip() or None,

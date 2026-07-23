@@ -127,6 +127,7 @@ class ServiceContainer:
             self.packing_list_repo, self.product_repo, self.design_repo,
             self.lead_repo, self.proforma_invoice_repo, self.document_version_service,
             self.quotation_repo, self.purchase_order_repo, self.proforma_fulfilment_service,
+            self.purchase_invoice_repo,
         )
         self.purchase_invoice_service = PurchaseInvoiceService(
             self.purchase_invoice_repo, self.product_repo, self.lead_repo, self.purchase_order_repo,
