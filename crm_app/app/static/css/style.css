@@ -134,6 +134,12 @@ code, .mono, .num { font-family: var(--font-mono); }
   color: #fff;
 }
 
+.nav-dropdown-summary { list-style: none; cursor: pointer; justify-content: space-between; }
+.nav-dropdown-summary::-webkit-details-marker { display: none; }
+.nav-dropdown-summary::after { content: '▸'; font-size: .75rem; color: #91a3b3; transition: transform .15s ease; }
+.nav-dropdown[open] > .nav-dropdown-summary::after { transform: rotate(90deg); }
+.nav-sublink { padding-left: 40px; font-size: .87rem; }
+
 .sidebar-footer {
   margin-top: auto;
   padding: 14px 20px 0;
@@ -524,7 +530,8 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
   color: var(--color-ink); margin-bottom: 14px; font-size: .8275rem;
 }
 .quote-meta-table { width: 100%; border-collapse: collapse; border: 1px solid var(--color-ink); margin-bottom: 16px; }
-.quote-meta-table td { border: 1px solid var(--color-line-dark); padding: 6px 9px; vertical-align: top; }
+.quote-meta-table td { border: 1px solid var(--color-line-dark); padding: 6px 9px; vertical-align: middle; text-align: center; }
+.quote-left { text-align: left; }
 .quote-side-label {
   text-align: center; vertical-align: middle;
   font-weight: 700; font-size: .5975rem; letter-spacing: .08em; background: var(--color-paper); width: 26px;
@@ -542,7 +549,7 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
   background: var(--color-paper); width: 78px;
 }
 .quote-side-label-upright span { writing-mode: horizontal-tb; transform: none; }
-.quote-block { width: 40%; }
+.quote-block { width: 40%; text-align: left; vertical-align: top; }
 .quote-field-label { font-weight: 600; font-size: .5975rem; text-transform: uppercase; color: var(--color-text-soft); width: 26%; background: var(--color-paper); }
 .quote-field-value { font-weight: 500; }
 
@@ -553,17 +560,18 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
   border: 1px solid var(--color-line-dark); background: var(--color-paper); padding: 6px 8px;
   font-size: .5575rem; text-transform: uppercase; letter-spacing: .05em;
 }
-.quote-items-table td { border: 1px solid var(--color-line-dark); padding: 6px 8px; overflow-wrap: break-word; }
+.quote-items-table td { border: 1px solid var(--color-line-dark); padding: 6px 8px; vertical-align: middle; text-align: center; overflow-wrap: break-word; }
 /* PRICE (USD) / TOTAL (USD) columns are numeric-only - never let them wrap,
    even a 7-figure amount ("$ 1,234,567.89") must sit on one line. */
 .quote-items-table td.num, .quote-items-table th:nth-child(7), .quote-items-table th:nth-child(8) {
   white-space: nowrap;
 }
-.quote-items-table tfoot td { border: 1px solid var(--color-line-dark); padding: 6px 8px; background: var(--color-paper); }
+.quote-items-table td.num { text-align: right; }
+.quote-items-table tfoot td { border: 1px solid var(--color-line-dark); padding: 6px 8px; background: var(--color-paper); vertical-align: middle; text-align: center; }
 .quote-charge-row td { padding: 2px 8px; }
 .quote-total-row td { background: var(--color-paper); }
 .quote-amount-words {
-  vertical-align: top; font-size: .5975rem; text-transform: uppercase;
+  vertical-align: top; text-align: left; font-size: .5975rem; text-transform: uppercase;
   letter-spacing: .02em; line-height: 1.4;
 }
 
@@ -571,7 +579,7 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
 
 .quote-bank-table { width: 100%; table-layout: fixed; border-collapse: collapse; border: 1px solid var(--color-ink); margin-bottom: 30px; }
 .quote-bank-table th { border: 1px solid var(--color-line-dark); background: var(--color-paper); padding: 6px 8px; font-size: .6175rem; }
-.quote-bank-table td { border: 1px solid var(--color-line-dark); padding: 8px 10px; vertical-align: top; overflow-wrap: break-word; }
+.quote-bank-table td { border: 1px solid var(--color-line-dark); padding: 8px 10px; vertical-align: top; text-align: left; overflow-wrap: break-word; }
 
 /* Signature cell sits to the right of the bank name/address cell, sized to
    leave room for both a physical signature and a rubber stamp - mirrors the

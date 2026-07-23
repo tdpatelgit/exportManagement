@@ -15,7 +15,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
 from app.services import pallet_alt_quantity
-from app.utils import login_required, admin_required
+from app.utils import login_required, admin_required, verify_delete_password
 
 proforma_invoices_bp = Blueprint("proforma_invoices", __name__, url_prefix="/proforma-invoices")
 
@@ -295,6 +295,9 @@ def set_proforma_invoice_status(proforma_invoice_id):
 @proforma_invoices_bp.route("/<int:proforma_invoice_id>/delete", methods=["POST"])
 @login_required
 def delete_proforma_invoice(proforma_invoice_id):
+    if not verify_delete_password(g.user, request.form):
+        flash("Incorrect password. Proforma invoice not deleted.", "error")
+        return redirect(url_for("proforma_invoices.view_proforma_invoice", proforma_invoice_id=proforma_invoice_id))
     try:
         invoice = current_app.container.proforma_invoice_service.get(proforma_invoice_id, g.user.company_id)
         current_app.container.proforma_invoice_service.delete(g.user, proforma_invoice_id)

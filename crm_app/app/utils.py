@@ -11,6 +11,15 @@ not business rules (Single Responsibility again).
 
 from functools import wraps
 from flask import session, redirect, url_for, flash, g, abort
+from werkzeug.security import check_password_hash
+
+
+def verify_delete_password(user, form) -> bool:
+    """Confirms `form['delete_password']` matches the signed-in user's own
+    password - required before any document delete goes through, since
+    deleting cascades to every sub-document made under it."""
+    password = form.get("delete_password", "")
+    return bool(password) and check_password_hash(user.password_hash, password)
 
 
 def login_required(view_func):

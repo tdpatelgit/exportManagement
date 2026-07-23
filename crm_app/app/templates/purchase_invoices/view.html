@@ -30,7 +30,7 @@
     {% if current_user.is_admin %}
     <a href="{{ url_for('purchase_invoices.purchase_invoice_versions', purchase_invoice_id=purchase_invoice.id) }}" class="btn btn-ghost btn-sm">Version history</a>
     {% endif %}
-    <form method="POST" action="{{ url_for('purchase_invoices.delete_purchase_invoice', purchase_invoice_id=purchase_invoice.id) }}" onsubmit="return confirm('Delete this purchase invoice?');">
+    <form method="POST" action="{{ url_for('purchase_invoices.delete_purchase_invoice', purchase_invoice_id=purchase_invoice.id) }}" onsubmit="return confirmDeleteWithPassword(this, 'Delete this purchase invoice? Any packing lists generated from it will also be deleted.');">
       <button type="submit" class="btn btn-danger btn-sm">Delete</button>
     </form>
   </div>
@@ -43,11 +43,6 @@
     <div class="field"><label>Transporter name</label><div>{{ purchase_invoice.transporter_name or '—' }}</div></div>
     <div class="field"><label>EPCG number</label><div>{{ purchase_invoice.epcg_number or '—' }}</div></div>
     <div class="field"><label>EPCG date</label><div>{{ purchase_invoice.epcg_date or '—' }}</div></div>
-  </div>
-  <div class="form-row">
-    <div class="field"><label>Port of loading</label><div>{{ purchase_invoice.port_of_loading or '—' }}</div></div>
-    <div class="field"><label>Port of discharge</label><div>{{ purchase_invoice.port_of_discharge or '—' }}</div></div>
-    <div class="field"><label>Container details</label><div>{{ purchase_invoice.container_details or '—' }}</div></div>
   </div>
   {% if purchase_invoice.vehicle_numbers %}
   <div class="field">

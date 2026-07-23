@@ -242,8 +242,14 @@ class TestDocumentRoutes:
     def test_delete_quotation_via_post(self, admin_ctx):
         client, container, admin, company_id = admin_ctx
         q = self._quotation(container, admin)
-        client.post(f"/quotations/{q.id}/delete", follow_redirects=True)
+        client.post(f"/quotations/{q.id}/delete", data={"delete_password": "page-pass-1"}, follow_redirects=True)
         assert container.quotation_repo.get_by_id(q.id) is None
+
+    def test_delete_quotation_via_post_rejects_wrong_password(self, admin_ctx):
+        client, container, admin, company_id = admin_ctx
+        q = self._quotation(container, admin)
+        client.post(f"/quotations/{q.id}/delete", data={"delete_password": "wrong"}, follow_redirects=True)
+        assert container.quotation_repo.get_by_id(q.id) is not None
 
     def test_purchase_order_form_has_no_nested_form(self, admin_ctx):
         """The admin-only "Add new supplier" panel once shipped as a <form>

@@ -1121,6 +1121,56 @@ class DesignRepository:
 
 
 # ============================================================
+# DOCUMENT CASCADE DELETE HELPERS
+# ------------------------------------------------------------
+# The pipeline is Quotation -> Proforma Invoice -> Purchase Order(s) ->
+# Purchase Invoice -> Packing List. Deleting any document deletes every
+# document generated under it (a real cascade), so these are called from
+# the repository .delete() methods below, deepest table first, all inside
+# the same transaction as the parent's own DELETE.
+# ============================================================
+def _delete_purchase_invoice_pdf_files(paths) -> None:
+    if not paths:
+        return
+    import os
+    from config import Config
+    for path in paths:
+        if not path:
+            continue
+        full_path = os.path.join(Config.PURCHASE_INVOICE_UPLOAD_FOLDER, os.path.basename(path))
+        if os.path.exists(full_path):
+            os.remove(full_path)
+
+
+def _cascade_delete_purchase_invoice(conn, purchase_invoice_id: int) -> None:
+    row = conn.execute(
+        "SELECT supplier_pdf_path FROM purchase_invoices WHERE id = ?", (purchase_invoice_id,)
+    ).fetchone()
+    conn.execute("DELETE FROM packing_lists WHERE purchase_invoice_id = ?", (purchase_invoice_id,))
+    conn.execute("DELETE FROM purchase_invoices WHERE id = ?", (purchase_invoice_id,))
+    if row:
+        _delete_purchase_invoice_pdf_files([row["supplier_pdf_path"]])
+
+
+def _cascade_delete_purchase_order(conn, purchase_order_id: int) -> None:
+    for row in conn.execute(
+        "SELECT id FROM purchase_invoices WHERE purchase_order_id = ?", (purchase_order_id,)
+    ).fetchall():
+        _cascade_delete_purchase_invoice(conn, row["id"])
+    conn.execute("DELETE FROM packing_lists WHERE purchase_order_id = ?", (purchase_order_id,))
+    conn.execute("DELETE FROM purchase_orders WHERE id = ?", (purchase_order_id,))
+
+
+def _cascade_delete_proforma_invoice(conn, proforma_invoice_id: int) -> None:
+    for row in conn.execute(
+        "SELECT id FROM purchase_orders WHERE proforma_invoice_id = ?", (proforma_invoice_id,)
+    ).fetchall():
+        _cascade_delete_purchase_order(conn, row["id"])
+    conn.execute("DELETE FROM packing_lists WHERE proforma_invoice_id = ?", (proforma_invoice_id,))
+    conn.execute("DELETE FROM proforma_invoices WHERE id = ?", (proforma_invoice_id,))
+
+
+# ============================================================
 # QUOTATION REPOSITORY (header + line items)
 # ============================================================
 class QuotationRepository:
@@ -1247,18 +1297,17 @@ class QuotationRepository:
                 )
 
     def delete(self, quotation_id: int) -> None:
-        """proforma_invoices.quotation_id and packing_lists.quotation_id are
-        "generated from" references only (see schema.sql), not an ownership
-        link - deleting the quotation must not be blocked by, or destroy,
-        a document generated from it. Neither column has an ON DELETE clause,
-        so with `PRAGMA foreign_keys = ON` (always on - see Database._connect)
-        SQLite would otherwise reject the delete outright with
-        IntegrityError. Null the references out first, in the same
-        transaction, so those documents simply lose the "generated from"
-        breadcrumb and keep existing standalone."""
+        """Deleting a quotation cascades to every document generated under
+        it: proforma invoices raised from it (which themselves cascade to
+        their purchase orders/invoices/packing lists - see
+        _cascade_delete_proforma_invoice) and any packing list made
+        directly from the quotation."""
         with self.db.get_connection() as conn:
-            conn.execute("UPDATE proforma_invoices SET quotation_id = NULL WHERE quotation_id = ?", (quotation_id,))
-            conn.execute("UPDATE packing_lists SET quotation_id = NULL WHERE quotation_id = ?", (quotation_id,))
+            for row in conn.execute(
+                "SELECT id FROM proforma_invoices WHERE quotation_id = ?", (quotation_id,)
+            ).fetchall():
+                _cascade_delete_proforma_invoice(conn, row["id"])
+            conn.execute("DELETE FROM packing_lists WHERE quotation_id = ?", (quotation_id,))
             conn.execute("DELETE FROM quotations WHERE id = ?", (quotation_id,))
 
 
@@ -1453,20 +1502,12 @@ class ProformaInvoiceRepository:
                 )
 
     def delete(self, invoice_id: int) -> None:
-        """purchase_orders.proforma_invoice_id and packing_lists.
-        proforma_invoice_id are "generated from" references only, same
-        reasoning as QuotationRepository.delete above - null them out first
-        so deleting a proforma invoice that already has purchase orders
-        and/or packing lists generated from it doesn't get rejected by the
-        FK constraint (there is no ON DELETE clause on either column)."""
+        """Deleting a proforma invoice cascades to every purchase order
+        raised against it (which themselves cascade further, see
+        _cascade_delete_purchase_order) and any packing list made directly
+        from this proforma invoice."""
         with self.db.get_connection() as conn:
-            conn.execute(
-                "UPDATE purchase_orders SET proforma_invoice_id = NULL WHERE proforma_invoice_id = ?",
-                (invoice_id,))
-            conn.execute(
-                "UPDATE packing_lists SET proforma_invoice_id = NULL WHERE proforma_invoice_id = ?",
-                (invoice_id,))
-            conn.execute("DELETE FROM proforma_invoices WHERE id = ?", (invoice_id,))
+            _cascade_delete_proforma_invoice(conn, invoice_id)
 
 
 class PurchaseOrderRepository:
@@ -1634,17 +1675,12 @@ class PurchaseOrderRepository:
                 )
 
     def delete(self, purchase_order_id: int) -> None:
-        """packing_lists.purchase_order_id is a "generated from" reference
-        only, same reasoning as QuotationRepository.delete above - null it
-        out first so deleting a purchase order that already has its own
-        packing list doesn't get rejected by the FK constraint (the column
-        has no ON DELETE clause). This is the exact bug that made every PO
-        with a packing list of its own permanently undeletable."""
+        """Deleting a purchase order cascades to its purchase invoice
+        (including the supplier's uploaded PDF, see
+        _cascade_delete_purchase_invoice) and any packing list made
+        directly from this purchase order."""
         with self.db.get_connection() as conn:
-            conn.execute(
-                "UPDATE packing_lists SET purchase_order_id = NULL WHERE purchase_order_id = ?",
-                (purchase_order_id,))
-            conn.execute("DELETE FROM purchase_orders WHERE id = ?", (purchase_order_id,))
+            _cascade_delete_purchase_order(conn, purchase_order_id)
 
 
 class PurchaseInvoiceRepository:
@@ -1805,16 +1841,10 @@ class PurchaseInvoiceRepository:
                 )
 
     def delete(self, purchase_invoice_id: int) -> None:
-        """packing_lists.purchase_invoice_id is a "generated from" reference
-        only, same reasoning as PackingListRepository callers elsewhere -
-        null it out first so deleting a purchase invoice that already has
-        its own packing list doesn't get rejected by the FK constraint (the
-        column has no ON DELETE clause)."""
+        """Deleting a purchase invoice cascades to any packing list made
+        directly from it, and removes its own uploaded supplier PDF."""
         with self.db.get_connection() as conn:
-            conn.execute(
-                "UPDATE packing_lists SET purchase_invoice_id = NULL WHERE purchase_invoice_id = ?",
-                (purchase_invoice_id,))
-            conn.execute("DELETE FROM purchase_invoices WHERE id = ?", (purchase_invoice_id,))
+            _cascade_delete_purchase_invoice(conn, purchase_invoice_id)
 
 
 class PackingListRepository:

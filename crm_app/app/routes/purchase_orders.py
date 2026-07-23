@@ -16,15 +16,14 @@ from datetime import date
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
-from app.utils import login_required, admin_required
+from app.utils import login_required, admin_required, verify_delete_password
 
 purchase_orders_bp = Blueprint("purchase_orders", __name__, url_prefix="/purchase-orders")
 
 _HEADER_FIELDS = [
     "po_date", "lead_id", "proforma_invoice_id", "seller_supplier_id",
     "seller_name", "seller_address", "seller_pan", "seller_gstin", "seller_ref_no",
-    "port_of_loading", "port_of_discharge", "container_details", "delivery_time",
-    "advance_percent", "payment_terms", "remarks",
+    "delivery_time", "advance_percent", "payment_terms", "remarks",
     "purchase_type",
 ]
 
@@ -93,6 +92,26 @@ def _flash_if_over_ordered(container, purchase_order) -> None:
     flash(
         "Ordered more than the proforma invoice calls for: " + ", ".join(parts) + ".", "error",
     )
+
+
+def _packing_details_rows(purchase_order, pi_packing_lists) -> list:
+    """Rows for the 'PACKING DETAILS' block embedded in the PO's own print
+    sheet: restricted to the products actually selected on this PO (not
+    whatever the PO's separately-maintained packing list happens to hold),
+    with each product's design breakdown pulled from the linked proforma
+    invoice's own packing list - that's where designs are actually chosen,
+    the PO only orders by product."""
+    def key(product_id, product_name):
+        return product_id or (product_name or "").strip().upper()
+
+    po_keys = {key(item.product_id, item.product_name) for item in purchase_order.items}
+    rows = []
+    for packing_list in pi_packing_lists:
+        for item in packing_list.items:
+            if key(item.product_id, item.product_name) not in po_keys:
+                continue
+            rows.append(item)
+    return rows
 
 
 def _product_meta_map(items) -> dict:
@@ -189,8 +208,14 @@ def view_purchase_order(purchase_order_id):
     company = container.company_service.get(g.user.company_id)
     packing_lists = container.packing_list_service.list_for_purchase_order(purchase_order_id, g.user.company_id)
     purchase_invoices = container.purchase_invoice_service.list_for_purchase_order(purchase_order_id, g.user.company_id)
+    pi_packing_lists = (
+        container.packing_list_service.list_for_proforma(purchase_order.proforma_invoice_id, g.user.company_id)
+        if purchase_order.proforma_invoice_id else []
+    )
+    packing_details_items = _packing_details_rows(purchase_order, pi_packing_lists)
     return render_template("purchase_orders/print.html", purchase_order=purchase_order, company=company,
-                           packing_lists=packing_lists, purchase_invoices=purchase_invoices)
+                           packing_lists=packing_lists, purchase_invoices=purchase_invoices,
+                           packing_details_items=packing_details_items)
 
 
 @purchase_orders_bp.route("/<int:purchase_order_id>/combined")
@@ -206,10 +231,16 @@ def combined_purchase_order(purchase_order_id):
         abort(404)
     company = container.company_service.get(g.user.company_id)
     packing_lists = container.packing_list_service.list_for_purchase_order(purchase_order_id, g.user.company_id)
+    pi_packing_lists = (
+        container.packing_list_service.list_for_proforma(purchase_order.proforma_invoice_id, g.user.company_id)
+        if purchase_order.proforma_invoice_id else []
+    )
+    packing_details_items = _packing_details_rows(purchase_order, pi_packing_lists)
     from app.routes.packing_lists import catalog_maps
     product_map, design_map = catalog_maps(packing_lists)
     return render_template("purchase_orders/print_combined.html", purchase_order=purchase_order, company=company,
-                           packing_lists=packing_lists, product_map=product_map, design_map=design_map)
+                           packing_lists=packing_lists, product_map=product_map, design_map=design_map,
+                           packing_details_items=packing_details_items)
 
 
 @purchase_orders_bp.route("/<int:purchase_order_id>/edit", methods=["GET", "POST"])
@@ -251,6 +282,9 @@ def edit_purchase_order(purchase_order_id):
 @purchase_orders_bp.route("/<int:purchase_order_id>/delete", methods=["POST"])
 @login_required
 def delete_purchase_order(purchase_order_id):
+    if not verify_delete_password(g.user, request.form):
+        flash("Incorrect password. Purchase order not deleted.", "error")
+        return redirect(url_for("purchase_orders.view_purchase_order", purchase_order_id=purchase_order_id))
     try:
         purchase_order = current_app.container.purchase_order_service.get(purchase_order_id, g.user.company_id)
         current_app.container.purchase_order_service.delete(g.user, purchase_order_id)
@@ -302,5 +336,5 @@ def view_purchase_order_version(purchase_order_id, version_number):
     company = container.company_service.get(g.user.company_id)
     return render_template(
         "purchase_orders/print.html", purchase_order=historical_purchase_order, company=company,
-        packing_lists=[], historical_version=version,
+        packing_lists=[], packing_details_items=[], historical_version=version,
     )
