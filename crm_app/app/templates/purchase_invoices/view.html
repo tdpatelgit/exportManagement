@@ -44,11 +44,6 @@
     <div class="field"><label>EPCG number</label><div>{{ purchase_invoice.epcg_number or '—' }}</div></div>
     <div class="field"><label>EPCG date</label><div>{{ purchase_invoice.epcg_date or '—' }}</div></div>
   </div>
-  <div class="form-row">
-    <div class="field"><label>Port of loading</label><div>{{ purchase_invoice.port_of_loading or '—' }}</div></div>
-    <div class="field"><label>Port of discharge</label><div>{{ purchase_invoice.port_of_discharge or '—' }}</div></div>
-    <div class="field"><label>Container details</label><div>{{ purchase_invoice.container_details or '—' }}</div></div>
-  </div>
   {% if purchase_invoice.vehicle_numbers %}
   <div class="field">
     <label>Vehicle numbers</label>

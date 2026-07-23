@@ -26,7 +26,6 @@ purchase_invoices_bp = Blueprint("purchase_invoices", __name__, url_prefix="/pur
 _HEADER_FIELDS = [
     "invoice_number", "invoice_date", "purchase_order_id", "lead_id", "seller_supplier_id",
     "seller_name", "seller_address", "seller_pan", "seller_gstin", "seller_ref_no",
-    "port_of_loading", "port_of_discharge", "container_details",
     "transporter_name", "epcg_number", "epcg_date",
     "discount_amount", "insurance_other", "freight", "igst_amount", "cgst_amount", "sgst_amount", "round_off",
     "remarks",

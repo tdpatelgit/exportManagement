@@ -24,10 +24,15 @@
     padding: 3px 0;
   }
   .po-sheet table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: -1px; }
-  .po-sheet td { border: 1px solid #000; padding: 3px 5px; vertical-align: top; word-wrap: break-word; }
+  .po-sheet td { border: 1px solid #000; padding: 3px 5px; vertical-align: middle; text-align: center; word-wrap: break-word; }
   .po-label { font-size: 9px; }
   .po-val { font-weight: bold; }
   .po-center { text-align: center; }
+  /* Multi-line paragraph cells (addresses, remarks, the compliance note) -
+     these span multiple rows or stand alone, so there's no sibling in the
+     same row to vertically line up with; keep them reading from the top
+     like a letterhead instead of centering a short block in a tall cell. */
+  .po-left { text-align: left; vertical-align: top; }
   .po-right { text-align: right; }
   .po-mid { vertical-align: middle !important; }
   .po-side {
@@ -82,8 +87,8 @@
       <col style="width:20px"><col style="width:36%"><col style="width:14%"><col style="width:19%"><col><col>
     </colgroup>
     <tr>
-      <td class="po-side" rowspan="6">BUYER</td>
-      <td rowspan="6" class="po-buyer-cell" style="border-bottom:none;">
+      <td class="po-side" rowspan="3">BUYER</td>
+      <td rowspan="3" class="po-buyer-cell po-left" style="border-bottom:none;">
         <div class="po-buyer-text {{ '' if company and company.logo_path else 'no-logo' }}"
              {% if not (company and company.logo_path) %}style="padding-right:0;"{% endif %}>
           <span class="po-val">{{ company.company_name|upper if company else '' }}</span><br>
@@ -109,20 +114,8 @@
       <td class="po-val" colspan="3">{{ purchase_order.seller_ref_no or '' }}</td>
     </tr>
     <tr>
-      <td class="po-label">PORT OF LOADING</td>
-      <td class="po-val" colspan="3">{{ (purchase_order.port_of_loading or '-')|upper }}</td>
-    </tr>
-    <tr>
-      <td class="po-label">PORT OF DISCHARGE</td>
-      <td class="po-val" colspan="3">{{ (purchase_order.port_of_discharge or '-')|upper }}</td>
-    </tr>
-    <tr>
-      <td class="po-label">CONTAINER DETAILS</td>
-      <td class="po-val" colspan="3">{{ (purchase_order.container_details or '-')|upper }}</td>
-    </tr>
-    <tr>
       <td class="po-side" rowspan="3">SELLER</td>
-      <td rowspan="3">
+      <td rowspan="3" class="po-left">
         <span class="po-val">{{ (purchase_order.seller_name or '')|upper }}</span><br>
         <span class="po-val">{{ (purchase_order.seller_address or '')|upper|replace('\n', '<br>')|safe }}</span>
         {% if purchase_order.seller_pan %}<br><span class="po-val">PAN NO : {{ purchase_order.seller_pan|upper }}</span>{% endif %}
@@ -141,8 +134,8 @@
     </tr>
     <tr>
       <td colspan="2" style="border-top:none;"></td>
-      <td class="po-label">REMARKS :</td>
-      <td class="po-val" colspan="3">{{ (purchase_order.remarks or '')|upper|replace('\n', '<br>')|safe }}</td>
+      <td class="po-label po-left">REMARKS :</td>
+      <td class="po-val po-left" colspan="3">{{ (purchase_order.remarks or '')|upper|replace('\n', '<br>')|safe }}</td>
     </tr>
   </table>
 
@@ -224,8 +217,10 @@
     </tr>
   </table>
 
-  <!-- Packing details (from the PO's own packing list when one exists) -->
-  {% if packing_lists %}
+  <!-- Packing details: products selected on this PO, with the design
+       breakdown for each pulled from the PO's proforma invoice's own
+       packing list (see _packing_details_rows in routes/purchase_orders.py) -->
+  {% if packing_details_items %}
   <table class="po-items">
     <colgroup>
       <col style="width:5%"><col style="width:38%"><col style="width:19%"><col style="width:9%">
@@ -244,23 +239,20 @@
       </tr>
     </thead>
     <tbody>
-      {% set pk = namespace(sr=0, boxes=0, qty=0, pallets=0) %}
-      {% for packing_list in packing_lists %}
-        {% for item in packing_list.items %}
-        {% set pk.sr = pk.sr + 1 %}
-        {% set pk.boxes = pk.boxes + (item.quantity_boxes or 0) %}
-        {% set pk.qty = pk.qty + (item.quantity_value or 0) %}
-        {% set pk.pallets = pk.pallets + (item.pallets or 0) %}
-        <tr>
-          <td class="po-center">{{ pk.sr }}</td>
-          <td>{{ item.product_name }}{% if item.hsn_code %} &nbsp;HSNC : {{ item.hsn_code }}{% endif %}</td>
-          <td class="po-center">{{ (item.design_name or '')|upper }}</td>
-          <td class="po-center">{{ num(item.quantity_boxes) }}</td>
-          <td class="po-right">{{ '{:,.2f}'.format(item.quantity_value) }}</td>
-          <td class="po-center">{{ num(item.pallets) }}</td>
-          <td class="po-center">{{ num(item.box_per_pallet) }}</td>
-        </tr>
-        {% endfor %}
+      {% set pk = namespace(boxes=0, qty=0, pallets=0) %}
+      {% for item in packing_details_items %}
+      {% set pk.boxes = pk.boxes + (item.quantity_boxes or 0) %}
+      {% set pk.qty = pk.qty + (item.quantity_value or 0) %}
+      {% set pk.pallets = pk.pallets + (item.pallets or 0) %}
+      <tr>
+        <td class="po-center">{{ loop.index }}</td>
+        <td>{{ item.product_name }}{% if item.hsn_code %} &nbsp;HSNC : {{ item.hsn_code }}{% endif %}</td>
+        <td class="po-center">{{ (item.design_name or '')|upper }}</td>
+        <td class="po-center">{{ num(item.quantity_boxes) }}</td>
+        <td class="po-right">{{ '{:,.2f}'.format(item.quantity_value) }}</td>
+        <td class="po-center">{{ num(item.pallets) }}</td>
+        <td class="po-center">{{ num(item.box_per_pallet) }}</td>
+      </tr>
       {% endfor %}
       <tr>
         <td></td>
@@ -279,7 +271,7 @@
   <table>
     <colgroup><col style="width:45%"><col></colgroup>
     <tr>
-      <td colspan="2" class="po-val">
+      <td colspan="2" class="po-val po-left">
         NOTE : THE GOODS PROCURED UNDER CONCESSIONAL RATE OF DUTY @ 0.1% AS PER NOTIFICATION NO. 41/2017
         DT.23.10.2017 AND WE EXPORT THESE GOODS WITHIN 90 DAYS FROM THE DATE OF INVOICE.
       </td>
