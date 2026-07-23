@@ -987,6 +987,19 @@ class PackingList:
         return sum(item.gross_weight_kg or 0 for item in self.items)
 
 
+# A proforma invoice is a draft until it is explicitly confirmed. Confirming
+# it freezes the document (only an admin can move it back to draft) and turns
+# on the "purchase orders still to be placed" reminder, which stays up until
+# every design on the PI's packing list has been placed, in full, on the
+# packing list of some purchase order linked to that PI.
+PROFORMA_STATUS_DRAFT = "draft"
+PROFORMA_STATUS_CONFIRMED = "confirmed"
+PROFORMA_STATUSES = [
+    (PROFORMA_STATUS_DRAFT, "Draft"),
+    (PROFORMA_STATUS_CONFIRMED, "Confirmed"),
+]
+
+
 @dataclass
 class ProformaInvoiceItem:
     id: Optional[int]
@@ -1065,6 +1078,7 @@ class ProformaInvoice:
     bank_branch: Optional[str] = None
     bank_address: Optional[str] = None
     display_mode: str = "index"  # goods layout: 'index' (numbered) | 'surface' (grouped by category + surface)
+    status: str = PROFORMA_STATUS_DRAFT  # 'draft' | 'confirmed' - see PROFORMA_STATUSES
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     created_by_name: Optional[str] = None  # populated by joined queries only
@@ -1112,12 +1126,21 @@ class ProformaInvoice:
             bank_branch=row["bank_branch"],
             bank_address=row["bank_address"],
             display_mode=(row["display_mode"] if "display_mode" in row.keys() else None) or "index",
+            status=(row["status"] if "status" in row.keys() else None) or PROFORMA_STATUS_DRAFT,
             created_by=row["created_by"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             created_by_name=row["created_by_name"] if "created_by_name" in row.keys() else None,
             computed_subtotal_usd=row["items_total"] if "items_total" in row.keys() else None,
         )
+
+    @property
+    def is_confirmed(self) -> bool:
+        return self.status == PROFORMA_STATUS_CONFIRMED
+
+    @property
+    def status_label(self) -> str:
+        return dict(PROFORMA_STATUSES).get(self.status, self.status)
 
     @property
     def subtotal_usd(self) -> float:

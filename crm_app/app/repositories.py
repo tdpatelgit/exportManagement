@@ -1329,6 +1329,21 @@ class ProformaInvoiceRepository:
             result[row["quotation_id"]] = row["id"]
         return result
 
+    def quotation_id_map(self, proforma_invoice_ids: List[int]) -> dict:
+        """proforma_invoice_id -> quotation_id for every invoice in the list
+        that has one, in a single query - ProformaFulfilmentService's
+        quotation-ancestor fallback batches through this instead of loading
+        each invoice one at a time."""
+        if not proforma_invoice_ids:
+            return {}
+        placeholders = ",".join("?" for _ in proforma_invoice_ids)
+        rows = self.db.query(
+            f"SELECT id, quotation_id FROM proforma_invoices "
+            f"WHERE id IN ({placeholders}) AND quotation_id IS NOT NULL",
+            tuple(proforma_invoice_ids),
+        )
+        return {row["id"]: row["quotation_id"] for row in rows}
+
     def create(self, invoice: ProformaInvoice) -> ProformaInvoice:
         new_id = self.db.execute(
             """INSERT INTO proforma_invoices
@@ -1339,8 +1354,8 @@ class ProformaInvoiceRepository:
                 variation_in_qty, delivery_period, container_details, terms_of_delivery, payment_terms,
                 remarks, sea_freight, insurance, certification, other_charges, discount_amount,
                 bank_name, bank_account_number, bank_ifsc_code, bank_swift_code, bank_branch,
-                bank_address, display_mode, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                bank_address, display_mode, status, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (invoice.company_id, invoice.invoice_number, invoice.invoice_date, invoice.lead_id,
              invoice.quotation_id, invoice.export_ref_no, invoice.buyer_order_no, invoice.other_reference,
              invoice.consignee_name, invoice.consignee_address, invoice.notify_name, invoice.notify_address,
@@ -1351,12 +1366,16 @@ class ProformaInvoiceRepository:
              invoice.payment_terms, invoice.remarks, invoice.sea_freight, invoice.insurance,
              invoice.certification, invoice.other_charges, invoice.discount_amount, invoice.bank_name,
              invoice.bank_account_number, invoice.bank_ifsc_code, invoice.bank_swift_code,
-             invoice.bank_branch, invoice.bank_address, invoice.display_mode, invoice.created_by),
+             invoice.bank_branch, invoice.bank_address, invoice.display_mode, invoice.status,
+             invoice.created_by),
         )
         self._replace_items(new_id, invoice.items)
         return self.get_by_id(new_id)
 
     def update(self, invoice_id: int, invoice: ProformaInvoice) -> None:
+        """Deliberately does NOT write `status` - draft/confirmed is only ever
+        moved by update_status below, so re-saving an invoice can never
+        silently un-confirm it (or confirm it) as a side effect."""
         self.db.execute(
             """UPDATE proforma_invoices SET invoice_date = ?, lead_id = ?, quotation_id = ?,
                                              export_ref_no = ?, buyer_order_no = ?, other_reference = ?,
@@ -1385,6 +1404,26 @@ class ProformaInvoiceRepository:
              invoice.bank_branch, invoice.bank_address, invoice.display_mode, invoice_id),
         )
         self._replace_items(invoice_id, invoice.items)
+
+    def update_status(self, invoice_id: int, status: str) -> None:
+        self.db.execute(
+            "UPDATE proforma_invoices SET status = ?, updated_at = datetime('now') WHERE id = ?",
+            (status, invoice_id),
+        )
+
+    def list_by_status(self, company_id: int, status: str) -> List[ProformaInvoice]:
+        """Every invoice at one status, newest first - powers the "confirmed,
+        purchase orders still pending" reminder feed."""
+        rows = self.db.query(
+            """SELECT pi.*, u.full_name AS created_by_name,
+                      COALESCE((SELECT SUM(total_usd) FROM proforma_invoice_items WHERE proforma_invoice_id = pi.id), 0) AS items_total
+               FROM proforma_invoices pi
+               JOIN users u ON u.id = pi.created_by
+               WHERE pi.company_id = ? AND pi.status = ?
+               ORDER BY pi.invoice_date DESC, pi.id DESC""",
+            (company_id, status),
+        )
+        return [ProformaInvoice.from_row(r) for r in rows]
 
     def _replace_items(self, invoice_id: int, items: List[ProformaInvoiceItem]) -> None:
         with self.db.get_connection() as conn:
@@ -1473,26 +1512,45 @@ class PurchaseOrderRepository:
 
     def list_for_proforma(self, proforma_invoice_id: int) -> List[PurchaseOrder]:
         """Every purchase order generated from this proforma invoice, newest
-        first - used to link back to an already-generated PO instead of
-        starting a duplicate one."""
+        first. One invoice is normally split across several suppliers, so the
+        invoice page lists all of them rather than linking to a single PO."""
         rows = self.db.query(
-            self._SELECT.format(items_total="") + " WHERE po.proforma_invoice_id = ? ORDER BY po.id DESC",
+            self._SELECT.format(items_total=self._ITEMS_TOTAL) +
+            " WHERE po.proforma_invoice_id = ? ORDER BY po.id DESC",
             (proforma_invoice_id,),
         )
         return [PurchaseOrder.from_row(r) for r in rows]
 
-    def map_by_proforma(self, company_id: int) -> dict:
-        """proforma_invoice_id -> most recently created purchase_order id, for
-        this company. Powers the proforma list page's "View PO" link."""
+    def count_map_by_proforma(self, company_id: int) -> dict:
+        """proforma_invoice_id -> how many purchase orders point at it, so the
+        proforma list can show "3 POs" without an N+1 query."""
         rows = self.db.query(
-            "SELECT proforma_invoice_id, id FROM purchase_orders "
-            "WHERE company_id = ? AND proforma_invoice_id IS NOT NULL ORDER BY id",
+            "SELECT proforma_invoice_id, COUNT(*) AS cnt FROM purchase_orders "
+            "WHERE company_id = ? AND proforma_invoice_id IS NOT NULL GROUP BY proforma_invoice_id",
             (company_id,),
         )
-        result = {}
-        for row in rows:
-            result[row["proforma_invoice_id"]] = row["id"]
-        return result
+        return {row["proforma_invoice_id"]: row["cnt"] for row in rows}
+
+    def product_totals_for_proforma(self, company_id: int, proforma_invoice_id: int) -> List[dict]:
+        """What's already been placed across every purchase order already
+        linked to this proforma invoice, summed per product line - the
+        'placed' side of ProformaFulfilmentService.product_status (the PO-
+        creation-time analogue of design_totals_for_linked_purchase_orders,
+        which does the same job one level down at packing-list granularity).
+        Keyed by product_id when known, else the row groups on product_name
+        too so hand-typed lines aren't collapsed into one NULL bucket."""
+        rows = self.db.query(
+            """SELECT i.product_id, i.product_name,
+                      COALESCE(SUM(i.quantity_boxes), 0) AS boxes,
+                      COALESCE(SUM(i.quantity_value), 0) AS quantity,
+                      MIN(i.unit) AS unit
+               FROM purchase_orders po
+               JOIN purchase_order_items i ON i.purchase_order_id = po.id
+               WHERE po.company_id = ? AND po.proforma_invoice_id = ?
+               GROUP BY i.product_id, i.product_name""",
+            (company_id, proforma_invoice_id),
+        )
+        return [dict(r) for r in rows]
 
     def create(self, purchase_order: PurchaseOrder) -> PurchaseOrder:
         new_id = self.db.execute(
@@ -1665,6 +1723,86 @@ class PackingListRepository:
             (purchase_order_id,),
         )
         return self._attach_items([PackingList.from_row(r) for r in rows])
+
+    # ---- design coverage (PI packing list vs. its purchase orders' packing lists) ----
+    # Both queries below return the SAME row shape - one row per
+    # (proforma invoice, product, design) with the boxes/quantity summed
+    # across every matching packing list - so the service can subtract one
+    # side from the other without reshaping anything. Grouping on the stored
+    # *names* as well as the ids keeps hand-typed rows (no product_id/
+    # design_id) visible instead of collapsing them all into one NULL group.
+    _DESIGN_TOTALS_COLUMNS = """
+        i.product_id, i.product_name, i.design_id, i.design_name,
+        COALESCE(SUM(i.quantity_boxes), 0) AS boxes,
+        COALESCE(SUM(i.quantity_value), 0) AS quantity,
+        MIN(i.unit) AS unit
+    """
+    @staticmethod
+    def _design_totals_group_by(key_alias: str) -> str:
+        return f" GROUP BY {key_alias}, i.product_id, i.product_name, i.design_id, i.design_name"
+
+    def design_totals_for_proforma(self, company_id: int, proforma_invoice_ids: List[int]) -> List[dict]:
+        """What each proforma invoice's OWN packing list(s) say has to be
+        made. A PL carrying a purchase_order_id is that PO's packing list,
+        not the PI's, so it is excluded here even if it also happens to
+        reference the invoice."""
+        if not proforma_invoice_ids:
+            return []
+        placeholders = ",".join("?" for _ in proforma_invoice_ids)
+        rows = self.db.query(
+            f"""SELECT pl.proforma_invoice_id AS pi_id, {self._DESIGN_TOTALS_COLUMNS}
+                FROM packing_lists pl
+                JOIN packing_list_items i ON i.packing_list_id = pl.id
+                WHERE pl.company_id = ? AND pl.purchase_order_id IS NULL
+                  AND pl.proforma_invoice_id IN ({placeholders})
+                {self._design_totals_group_by("pi_id")}""",
+            (company_id, *proforma_invoice_ids),
+        )
+        return [dict(r) for r in rows]
+
+    def design_totals_for_quotation(self, company_id: int, quotation_ids: List[int]) -> List[dict]:
+        """Same shape as design_totals_for_proforma, but grouped by the
+        packing list's quotation_id - the fallback source for a proforma
+        invoice that was itself generated from a quotation which already has
+        its own packing list (skipping the PI step), so the invoice never
+        got a packing list directly against it. Mirrors the ancestor walk
+        PackingListService._ancestor_packing_list already does for imports -
+        see ProformaFulfilmentService.design_status_map for why the
+        fulfilment side has to resolve the same ancestor, not just the
+        direct one."""
+        if not quotation_ids:
+            return []
+        placeholders = ",".join("?" for _ in quotation_ids)
+        rows = self.db.query(
+            f"""SELECT pl.quotation_id AS q_id, {self._DESIGN_TOTALS_COLUMNS}
+                FROM packing_lists pl
+                JOIN packing_list_items i ON i.packing_list_id = pl.id
+                WHERE pl.company_id = ? AND pl.purchase_order_id IS NULL
+                  AND pl.quotation_id IN ({placeholders})
+                {self._design_totals_group_by("q_id")}""",
+            (company_id, *quotation_ids),
+        )
+        return [dict(r) for r in rows]
+
+    def design_totals_for_linked_purchase_orders(self, company_id: int,
+                                                  proforma_invoice_ids: List[int]) -> List[dict]:
+        """What has already been placed: the same totals taken across the
+        packing lists of every purchase order linked to each invoice. Keyed
+        by the PO's proforma_invoice_id, so a PO PL never needs a PI
+        reference of its own."""
+        if not proforma_invoice_ids:
+            return []
+        placeholders = ",".join("?" for _ in proforma_invoice_ids)
+        rows = self.db.query(
+            f"""SELECT po.proforma_invoice_id AS pi_id, {self._DESIGN_TOTALS_COLUMNS}
+                FROM packing_lists pl
+                JOIN purchase_orders po ON po.id = pl.purchase_order_id
+                JOIN packing_list_items i ON i.packing_list_id = pl.id
+                WHERE pl.company_id = ? AND po.proforma_invoice_id IN ({placeholders})
+                {self._design_totals_group_by("pi_id")}""",
+            (company_id, *proforma_invoice_ids),
+        )
+        return [dict(r) for r in rows]
 
     def create(self, packing_list: PackingList) -> PackingList:
         new_id = self.db.execute(

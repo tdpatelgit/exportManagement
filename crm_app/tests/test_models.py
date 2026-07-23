@@ -11,7 +11,7 @@ Two things matter about the model layer and both are covered here:
 import pytest
 
 from app.models import (
-    Tenant, User, ContactPerson, Communication, Lead, Client,
+    Tenant, User, ContactPerson, Communication, Lead, Party, Supplier,
     Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
     PurchaseOrder, PurchaseOrderItem, PackingList, PackingListItem,
     DocumentVersion,
@@ -72,7 +72,7 @@ class TestCommunication:
         assert c.parent_type == "lead" and c.employee_name is None
 
     def test_from_row_with_employee_name(self):
-        row = FakeRow(id=1, parent_type="client", parent_id=3, employee_id=9,
+        row = FakeRow(id=1, parent_type="buyer", parent_id=3, employee_id=9,
                       comm_date="2025-01-01", mode="Email", description="hi",
                       follow_up_date="2025-02-01", created_at=None, employee_name="Eve")
         assert Communication.from_row(row).employee_name == "Eve"
@@ -98,19 +98,55 @@ class TestLead:
         assert Lead.from_row(self._row("weird")).status_label == "weird"
 
 
-class TestClient:
+class TestParty:
+    """Buyer and Exporter share this one dataclass - which table the row came
+    from is what says which type it is, so there is no type column to map."""
+
+    def _row(self, status="proforma_invoice_submission_pending", **over):
+        row = FakeRow(id=1, company_id=1, lead_id=5, company_name="Acme", phone="1",
+                      email="a@x.com", facebook=None, instagram=None, other_social=None,
+                      status=status, created_by=2, address="Somewhere",
+                      created_at=None, updated_at=None)
+        row.update(over)
+        return row
+
+    def test_from_row(self):
+        party = Party.from_row(self._row())
+        assert party.company_name == "Acme" and party.address == "Somewhere"
+        assert party.lead_id == 5
+        assert party.contacts == []
+
+    def test_from_row_without_the_optional_address_column(self):
+        row = self._row()
+        del row["address"]
+        assert Party.from_row(row).address is None
+
+    def test_status_label(self):
+        assert Party.from_row(self._row()).status_label == "Proforma Invoice Submission Pending"
+
+    def test_status_label_unknown_falls_back_to_code(self):
+        assert Party.from_row(self._row("weird")).status_label == "weird"
+
+
+class TestSupplier:
+    """A Supplier is shaped like our own company profile, not like a lead -
+    no phone/email/social columns, but GSTIN/PAN/IEC instead."""
+
     def _row(self, status="proforma_invoice_submission_pending"):
-        return FakeRow(id=1, company_id=1, lead_id=5, company_name="Acme", phone="1",
-                       email="a@x.com", facebook=None, instagram=None, other_social=None,
-                       client_type="Buyer", status=status, created_by=2, address="Somewhere",
+        return FakeRow(id=1, company_id=1, lead_id=5, company_name="Kiln Co",
+                       status=status, created_by=2, address="Morbi",
+                       gstin="24ABCDE1234F1Z5", pan_no="ABCDE1234F", iec="0123456789",
                        created_at=None, updated_at=None)
 
     def test_from_row(self):
-        c = Client.from_row(self._row())
-        assert c.client_type == "Buyer" and c.address == "Somewhere"
+        supplier = Supplier.from_row(self._row())
+        assert supplier.company_name == "Kiln Co" and supplier.gstin == "24ABCDE1234F1Z5"
+        assert supplier.pan_no == "ABCDE1234F" and supplier.iec == "0123456789"
+        # The repeatable satellite rows are loaded separately, never by from_row.
+        assert supplier.contact_details == [] and supplier.bank_details == []
 
-    def test_status_label(self):
-        assert Client.from_row(self._row()).status_label == "Proforma Invoice Submission Pending"
+    def test_status_label_borrows_the_client_pipeline(self):
+        assert Supplier.from_row(self._row()).status_label == "Proforma Invoice Submission Pending"
 
 
 # --------------------------------------------------------------------------
@@ -259,7 +295,20 @@ class TestProformaInvoice:
         row = self._make_row(display_mode="surface")
         assert ProformaInvoice.from_row(row).display_mode == "surface"
 
-    def _make_row(self, display_mode="index"):
+    def test_status_defaults_to_draft_when_the_column_is_absent(self):
+        """Historical document_versions snapshots and pre-v16 rows have no
+        status - they must read back as editable drafts, not as locked."""
+        row = self._make_row()
+        row.pop("status", None)
+        invoice = ProformaInvoice.from_row(row)
+        assert invoice.status == "draft" and invoice.is_confirmed is False
+
+    def test_confirmed_status_preserved(self):
+        invoice = ProformaInvoice.from_row(self._make_row(status="confirmed"))
+        assert invoice.is_confirmed is True
+        assert invoice.status_label == "Confirmed"
+
+    def _make_row(self, display_mode="index", status="draft"):
         return FakeRow(
             id=1, company_id=1, invoice_number="PI1", invoice_date="2025-01-01",
             lead_id=None, quotation_id=None, export_ref_no=None, buyer_order_no=None,
@@ -272,7 +321,8 @@ class TestProformaInvoice:
             sea_freight=0, insurance=0, certification=0, other_charges=0, discount_amount=0,
             bank_name=None, bank_account_number=None, bank_ifsc_code=None,
             bank_swift_code=None, bank_branch=None, bank_address=None,
-            display_mode=display_mode, created_by=1, created_at=None, updated_at=None,
+            display_mode=display_mode, status=status,
+            created_by=1, created_at=None, updated_at=None,
         )
 
 

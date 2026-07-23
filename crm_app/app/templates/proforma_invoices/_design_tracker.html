@@ -1,0 +1,81 @@
+{# Which designs from THIS invoice's packing list still have to be ordered.
+   `design_status` comes from ProformaFulfilmentService.design_status: every
+   design on the invoice's own packing list, compared against the packing
+   lists of every purchase order linked to the invoice. Only the outstanding
+   ones are listed - designs already ordered in full drop off the table and
+   are counted in the summary line instead. Screen only, never printed. #}
+{% if design_status %}
+
+{% if not design_status.designs %}
+  {# Nothing to compare yet: the invoice has no packing list of its own, so
+     no design has been broken out to order. Only worth nagging about once
+     the invoice is confirmed. #}
+  {% if invoice.is_confirmed %}
+  <div class="sheet-note sheet-note-warning no-print">
+    <h3>⏳ No packing list yet</h3>
+    <p>
+      This invoice is confirmed but has no packing list, so there are no designs to place purchase orders for yet.
+      <a href="{{ url_for('packing_lists.new_packing_list', proforma_invoice_id=invoice.id) }}">Create its packing list →</a>
+    </p>
+  </div>
+  {% endif %}
+
+{% elif design_status.pending %}
+<div class="sheet-note {{ 'sheet-note-warning' if invoice.is_confirmed }} no-print">
+  <h3>{{ '⏳' if invoice.is_confirmed else '📋' }} {{ design_status.pending | length }} design{{ '' if design_status.pending | length == 1 else 's' }} still to be ordered</h3>
+  <p>
+    {{ design_status.placed_count }} of {{ design_status.designs | length }} design{{ '' if design_status.designs | length == 1 else 's' }} on this invoice's packing list
+    {{ 'is' if design_status.placed_count == 1 else 'are' }} fully covered by the {{ purchase_orders | length }} purchase order{{ '' if purchase_orders | length == 1 else 's' }} placed so far.
+    {% if invoice.is_confirmed %}
+    Keep placing purchase orders until this list is empty.
+    {% endif %}
+  </p>
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th>Product</th>
+          <th>Design</th>
+          <th class="num">Boxes needed</th>
+          <th class="num">Ordered</th>
+          <th class="num">Still to order</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for design in design_status.pending %}
+        <tr>
+          <td>{{ design.product_name }}</td>
+          <td><strong>{{ design.design_name or '(no design named)' }}</strong></td>
+          {# Rows packed without a box count are tracked on their quantity
+             column instead - show whichever figure the design is measured on. #}
+          {% if design.required_boxes %}
+          <td class="num">{{ '{:,.2f}'.format(design.required_boxes) }}</td>
+          <td class="num">{{ '{:,.2f}'.format(design.placed_boxes) }}</td>
+          <td class="num"><strong>{{ '{:,.2f}'.format(design.pending_boxes) }}</strong></td>
+          {% else %}
+          <td class="num">{{ '{:,.2f}'.format(design.required_quantity) }} {{ design.unit }}</td>
+          <td class="num">{{ '{:,.2f}'.format(design.placed_quantity) }} {{ design.unit }}</td>
+          <td class="num"><strong>{{ '{:,.2f}'.format(design.pending_quantity) }} {{ design.unit }}</strong></td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top:10px;">
+    <a href="{{ url_for('purchase_orders.new_purchase_order', proforma_invoice_id=invoice.id) }}" class="btn btn-primary btn-sm">＋ New purchase order</a>
+    <span class="text-sm text-soft" style="margin-left:8px;">Its packing list starts pre-filled with exactly these outstanding designs.</span>
+  </p>
+</div>
+
+{% else %}
+<div class="sheet-note sheet-note-done no-print">
+  <h3>✓ Every design ordered</h3>
+  <p>
+    All {{ design_status.designs | length }} design{{ '' if design_status.designs | length == 1 else 's' }} on this invoice's packing list
+    {{ 'is' if design_status.designs | length == 1 else 'are' }} covered by the {{ purchase_orders | length }} purchase order{{ '' if purchase_orders | length == 1 else 's' }} placed against it.
+  </p>
+</div>
+{% endif %}
+
+{% endif %}

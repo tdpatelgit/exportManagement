@@ -23,7 +23,10 @@
   {% endif %}
 
   <div class="quote-toolbar no-print">
-    <a href="{{ url_for('proforma_invoices.list_proforma_invoices') }}" class="btn btn-ghost btn-sm">← All proforma invoices</a>
+    <div class="flex gap-8" style="align-items:center;">
+      <a href="{{ url_for('proforma_invoices.list_proforma_invoices') }}" class="btn btn-ghost btn-sm">← All proforma invoices</a>
+      <span class="stamp {{ 'stamp-green' if invoice.is_confirmed else 'stamp-slate' }}">{{ invoice.status_label }}</span>
+    </div>
     <div class="flex gap-8">
       {% if not historical_version %}
       {% if packing_lists %}
@@ -31,23 +34,66 @@
       {% else %}
       <a href="{{ url_for('packing_lists.new_packing_list', proforma_invoice_id=invoice.id) }}" class="btn btn-ghost btn-sm">📦 Create packing list</a>
       {% endif %}
-      {% if purchase_order %}
-      <a href="{{ url_for('purchase_orders.view_purchase_order', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">🧾 View purchase order</a>
+      {# One invoice is ordered from several suppliers, so its purchase
+         orders are a list, not a single link - and placing the next one is
+         always one click away, however many already exist. #}
+      <details class="toolbar-menu">
+        <summary class="btn btn-ghost btn-sm">🧾 Purchase orders ({{ purchase_orders | length }}) ▾</summary>
+        <div class="toolbar-menu-panel">
+          {% for po in purchase_orders %}
+          <a href="{{ url_for('purchase_orders.view_purchase_order', purchase_order_id=po.id) }}" class="toolbar-menu-item">
+            <span class="mono">{{ po.po_number }}</span>
+            <span class="meta">{{ po.seller_name }} · {{ po.po_date }} · ₹ {{ '{:,.2f}'.format(po.order_value_inr) }}</span>
+          </a>
+          {% else %}
+          <div class="toolbar-menu-empty">No purchase order placed against this invoice yet.</div>
+          {% endfor %}
+        </div>
+      </details>
+      <a href="{{ url_for('purchase_orders.new_purchase_order', proforma_invoice_id=invoice.id) }}" class="btn btn-ghost btn-sm">＋ New purchase order</a>
+      {% if invoice.is_confirmed %}
+        {% if current_user.is_admin %}
+        <form method="POST" action="{{ url_for('proforma_invoices.set_proforma_invoice_status', proforma_invoice_id=invoice.id) }}" onsubmit="return confirm('Move this confirmed invoice back to draft? It becomes editable again.');">
+          <input type="hidden" name="status" value="draft">
+          <button type="submit" class="btn btn-ghost btn-sm">↩ Move back to draft</button>
+        </form>
+        {% endif %}
       {% else %}
-      <a href="{{ url_for('purchase_orders.new_purchase_order', proforma_invoice_id=invoice.id) }}" class="btn btn-ghost btn-sm">🧾 Generate purchase order</a>
-      {% endif %}
+      <form method="POST" action="{{ url_for('proforma_invoices.set_proforma_invoice_status', proforma_invoice_id=invoice.id) }}" onsubmit="return confirm('Confirm this proforma invoice? It will be locked for editing and will remind you to place purchase orders for every design on its packing list.');">
+        <input type="hidden" name="status" value="confirmed">
+        <button type="submit" class="btn btn-ghost btn-sm">✓ Confirm invoice</button>
+      </form>
       <a href="{{ url_for('proforma_invoices.edit_proforma_invoice', proforma_invoice_id=invoice.id) }}" class="btn btn-ghost btn-sm">Edit</a>
+      {% endif %}
       {% if current_user.is_admin %}
       <a href="{{ url_for('proforma_invoices.proforma_invoice_versions', proforma_invoice_id=invoice.id) }}" class="btn btn-ghost btn-sm">Version history</a>
       {% endif %}
+      {% if not invoice.is_confirmed %}
       <form method="POST" action="{{ url_for('proforma_invoices.delete_proforma_invoice', proforma_invoice_id=invoice.id) }}" onsubmit="return confirm('Delete this proforma invoice?');">
         <button type="submit" class="btn btn-danger btn-sm">Delete</button>
       </form>
+      {% endif %}
       <a href="{{ url_for('proforma_invoices.combined_proforma_invoice', proforma_invoice_id=invoice.id) }}" class="btn btn-primary btn-sm">🖨 Generate combined document</a>
       {% endif %}
       <button type="button" class="btn btn-primary btn-sm" onclick="window.print()">🖨 Generate invoice only</button>
     </div>
   </div>
+
+  {# This page doesn't extend base.html, so it renders its own flashes -
+     confirming an invoice redirects straight back here. #}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="sheet-note no-print flash-stack">
+      {% for category, message in messages %}
+      <div class="flash flash-{{ category }}">{{ message }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endwith %}
+
+  {% if not historical_version %}
+  {% include 'proforma_invoices/_design_tracker.html' %}
+  {% endif %}
 
   {% include 'proforma_invoices/_sheet.html' %}
   {% include 'proforma_invoices/_annexure.html' %}

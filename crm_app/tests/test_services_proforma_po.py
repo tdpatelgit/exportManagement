@@ -218,13 +218,20 @@ class TestPurchaseOrder:
         assert len(prefill["items"]) == 1
         assert prefill["items"][0]["product_name"] == "Tiles"
 
-    def test_get_for_proforma_links_back(self, container, seed):
+    def test_list_for_proforma_links_back(self, container, seed):
+        """One invoice can be ordered from several suppliers, so the link
+        back is a list - newest PO first."""
         pi = container.proforma_invoice_service.create(
             seed.admin, {"consignee_name": "B", "invoice_date": "2026-02-01"},
             [{"product_name": "T", "quantity_value": "1", "price_usd": "1"}])
-        po = self._create(container, seed, proforma_invoice_id=pi.id)
-        found = container.purchase_order_service.get_for_proforma(pi.id)
-        assert found is not None and found.id == po.id
+        first = self._create(container, seed, proforma_invoice_id=pi.id)
+        second = self._create(container, seed, proforma_invoice_id=pi.id)
+        found = container.purchase_order_service.list_for_proforma(pi.id, seed.company_id)
+        assert [po.id for po in found] == [second.id, first.id]
+        assert container.purchase_order_service.count_map_by_proforma(seed.company_id)[pi.id] == 2
+
+    def test_list_for_proforma_is_company_scoped(self, container, seed):
+        assert container.purchase_order_service.list_for_proforma(None, seed.company_id) == []
 
     def test_create_records_a_version(self, container, seed):
         po = self._create(container, seed)
