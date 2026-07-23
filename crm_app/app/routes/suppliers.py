@@ -72,6 +72,40 @@ def list_suppliers():
     return render_template("suppliers/list.html", suppliers=suppliers, status_filter=status)
 
 
+def _supplier_json(supplier) -> dict:
+    """Just the fields the purchase order form's Seller picker needs to
+    prefill its inline fields - same idea as products.py's _product_json."""
+    return {
+        "id": supplier.id, "company_name": supplier.company_name,
+        "address": supplier.address or "", "pan_no": supplier.pan_no or "",
+        "gstin": supplier.gstin or "", "cin_llp_no": supplier.cin_llp_no or "",
+    }
+
+
+@suppliers_bp.route("/api/quick-create", methods=["POST"])
+@admin_required
+def api_quick_create():
+    """Lets an admin add a brand new supplier without leaving the purchase
+    order form's Seller picker (mirrors products.api_quick_create) - full
+    contact/bank details can be filled in later from the supplier's own
+    edit page."""
+    container = current_app.container
+    try:
+        supplier = container.supplier_service.create(
+            g.user,
+            company_name=request.form.get("company_name", ""),
+            address=request.form.get("address", ""),
+            gstin=request.form.get("gstin", ""),
+            cin_llp_no=request.form.get("cin_llp_no", ""),
+            pan_no=request.form.get("pan_no", ""),
+            iec=request.form.get("iec", ""),
+            contact_details=[], contact_persons=[], bank_details=[],
+        )
+    except ValidationError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(_supplier_json(supplier))
+
+
 @suppliers_bp.route("/new", methods=["GET", "POST"])
 @admin_required
 def new_supplier():
@@ -83,6 +117,7 @@ def new_supplier():
                 company_name=request.form.get("company_name", ""),
                 address=request.form.get("address", ""),
                 gstin=request.form.get("gstin", ""),
+                cin_llp_no=request.form.get("cin_llp_no", ""),
                 pan_no=request.form.get("pan_no", ""),
                 iec=request.form.get("iec", ""),
                 contact_details=_extract_contact_details(request.form),
@@ -132,6 +167,7 @@ def edit_supplier(supplier_id):
                 company_name=request.form.get("company_name", ""),
                 address=request.form.get("address", ""),
                 gstin=request.form.get("gstin", ""),
+                cin_llp_no=request.form.get("cin_llp_no", ""),
                 pan_no=request.form.get("pan_no", ""),
                 iec=request.form.get("iec", ""),
                 contact_details=_extract_contact_details(request.form),

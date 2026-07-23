@@ -550,8 +550,8 @@ class SupplierService:
         return self.supplier_repo.list_all(company_id, status)
 
     # ---- add directly (admin only, no originating lead) --------------------------------------------------
-    def create(self, current_user: User, company_name: str, address: str, gstin: str, pan_no: str, iec: str,
-               contact_details: list, contact_persons: list, bank_details: list) -> Supplier:
+    def create(self, current_user: User, company_name: str, address: str, gstin: str, cin_llp_no: str, pan_no: str,
+               iec: str, contact_details: list, contact_persons: list, bank_details: list) -> Supplier:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can add a new supplier.")
         if not company_name or not company_name.strip():
@@ -561,7 +561,8 @@ class SupplierService:
         supplier = Supplier(
             id=None, company_id=current_user.company_id, lead_id=None, company_name=company_name.strip(),
             status="proforma_invoice_submission_pending", created_by=current_user.id,
-            address=(address or "").strip() or None, gstin=gstin or None, pan_no=pan_no or None, iec=iec or None,
+            address=(address or "").strip() or None, gstin=gstin or None,
+            cin_llp_no=(cin_llp_no or "").strip() or None, pan_no=pan_no or None, iec=iec or None,
         )
         supplier = self.supplier_repo.create(supplier)
         self.supplier_repo.replace_contact_details(supplier.id, valid_details)
@@ -596,7 +597,7 @@ class SupplierService:
 
     # ---- writes --------------------------------------------------
     def update_profile(self, supplier_id: int, current_user: User, company_name: str, address: str,
-                        gstin: str, pan_no: str, iec: str, contact_details: list,
+                        gstin: str, cin_llp_no: str, pan_no: str, iec: str, contact_details: list,
                         contact_persons: list, bank_details: list) -> None:
         if not current_user.is_admin:
             raise PermissionDeniedError("Only an admin can edit a supplier's profile.")
@@ -607,7 +608,8 @@ class SupplierService:
 
         self.supplier_repo.update_profile(supplier_id, {
             "company_name": company_name.strip(), "address": address or None,
-            "gstin": gstin or None, "pan_no": pan_no or None, "iec": iec or None,
+            "gstin": gstin or None, "cin_llp_no": (cin_llp_no or "").strip() or None,
+            "pan_no": pan_no or None, "iec": iec or None,
         })
         self.supplier_repo.replace_contact_details(supplier_id, valid_details)
         self.supplier_repo.replace_contact_persons(supplier_id, valid_persons)

@@ -160,6 +160,7 @@ CREATE TABLE IF NOT EXISTS suppliers (
     company_name        TEXT NOT NULL,
     address             TEXT,
     gstin               TEXT,
+    cin_llp_no          TEXT,       -- optional: CIN (company) or LLPIN (LLP) registration number
     pan_no              TEXT,
     iec                 TEXT,
     status              TEXT NOT NULL DEFAULT 'proforma_invoice_submission_pending'

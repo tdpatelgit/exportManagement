@@ -500,10 +500,10 @@ class SqliteSupplierRepository(SupplierRepositoryBase):
         convert_from_lead needs. GSTIN/PAN/IEC and contacts/bank details are
         set separately via update_profile/replace_* right after."""
         new_id = self.db.execute(
-            """INSERT INTO suppliers (company_id, lead_id, company_name, address, gstin, pan_no, iec, status, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO suppliers (company_id, lead_id, company_name, address, gstin, cin_llp_no, pan_no, iec, status, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (supplier.company_id, supplier.lead_id, supplier.company_name, supplier.address,
-             supplier.gstin, supplier.pan_no, supplier.iec, supplier.status, supplier.created_by),
+             supplier.gstin, supplier.cin_llp_no, supplier.pan_no, supplier.iec, supplier.status, supplier.created_by),
         )
         supplier.id = new_id
         return supplier
@@ -516,9 +516,9 @@ class SqliteSupplierRepository(SupplierRepositoryBase):
 
     def update_profile(self, supplier_id: int, fields: dict) -> None:
         self.db.execute(
-            """UPDATE suppliers SET company_name = ?, address = ?, gstin = ?, pan_no = ?, iec = ?,
+            """UPDATE suppliers SET company_name = ?, address = ?, gstin = ?, cin_llp_no = ?, pan_no = ?, iec = ?,
                                      updated_at = datetime('now') WHERE id = ?""",
-            (fields["company_name"], fields.get("address"), fields.get("gstin"),
+            (fields["company_name"], fields.get("address"), fields.get("gstin"), fields.get("cin_llp_no"),
              fields.get("pan_no"), fields.get("iec"), supplier_id),
         )
 
