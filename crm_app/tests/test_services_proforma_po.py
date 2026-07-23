@@ -134,24 +134,79 @@ class TestProformaCrud:
 # PurchaseOrderService
 # ==========================================================================
 class TestPurchaseOrder:
-    def _create(self, container, seed, **over):
+    def _create(self, container, seed, item=None, **over):
         fields = {"seller_name": "Supplier Ltd", "po_date": "2026-03-01"}
         fields.update(over)
         return container.purchase_order_service.create(
             seed.admin, fields,
-            [{"product_name": "Tiles", "quantity_boxes": "10", "quantity_value": "100",
-              "price_inr": "500", "price_per": "BOX"}])
+            [item or {"product_name": "Tiles", "quantity_boxes": "10", "quantity_value": "100",
+                      "price_inr": "500", "price_per": "BOX"}])
+
+    def _our_gstin(self, container, seed, gstin):
+        container.company_repo.upsert(seed.company_id, "Test Exports", "Morbi", gstin, "", "", "")
+
+    def _taxed_product(self, container, seed, igst=18):
+        return container.product_service.create_product(
+            current_user=seed.admin, product_name="Tiles", description="", hsn_code="6907",
+            igst_percent=str(igst), quantity="", alternate_quantity="")
+
+    def _line(self, product_id):
+        return {"product_id": str(product_id), "product_name": "Tiles", "quantity_boxes": "10",
+                "quantity_value": "100", "price_inr": "500", "price_per": "BOX"}
 
     def test_create_assigns_number(self, container, seed):
         po = self._create(container, seed)
         assert po.id is not None and "20260301" in po.po_number
 
-    def test_tax_amounts_derive_from_percentages(self, container, seed):
-        po = self._create(container, seed, igst_percent="18")
+    def test_full_tax_purchase_takes_the_rate_from_the_product(self, container, seed):
+        self._our_gstin(container, seed, "24AAAAA0000A1Z5")
+        product = self._taxed_product(container, seed, igst=18)
+        po = self._create(container, seed, item=self._line(product.id),
+                          purchase_type="full_tax", seller_gstin="27BBBBB0000B1Z5")
         reloaded = container.purchase_order_service.get(po.id, seed.company_id)
         assert reloaded.subtotal_inr == 5000.0     # 10 boxes x 500
+        assert reloaded.igst_percent == 18         # another state -> IGST alone
+        assert (reloaded.cgst_percent, reloaded.sgst_percent) == (0, 0)
         assert reloaded.igst_amount == 900.0       # 18% of 5000
         assert reloaded.order_value_inr == 5900.0
+
+    def test_same_state_splits_the_rate_into_cgst_and_sgst(self, container, seed):
+        self._our_gstin(container, seed, "24AAAAA0000A1Z5")
+        product = self._taxed_product(container, seed, igst=18)
+        po = self._create(container, seed, item=self._line(product.id),
+                          purchase_type="full_tax", seller_gstin="24BBBBB0000B1Z5")
+        assert po.igst_percent == 0
+        assert (po.cgst_percent, po.sgst_percent) == (9, 9)
+        assert po.order_value_inr == 5900.0        # same total, split differently
+
+    def test_exemption_uses_the_concessional_rate(self, container, seed):
+        self._our_gstin(container, seed, "24AAAAA0000A1Z5")
+        product = self._taxed_product(container, seed, igst=18)  # ignored under exemption
+        po = self._create(container, seed, item=self._line(product.id),
+                          purchase_type="exemption", seller_gstin="27BBBBB0000B1Z5")
+        assert po.igst_percent == 0.1
+        assert (po.cgst_percent, po.sgst_percent) == (0, 0)
+
+    def test_exemption_within_one_state_halves_into_cgst_and_sgst(self, container, seed):
+        self._our_gstin(container, seed, "24AAAAA0000A1Z5")
+        po = self._create(container, seed, purchase_type="exemption", seller_gstin="24BBBBB0000B1Z5")
+        assert po.igst_percent == 0
+        assert (po.cgst_percent, po.sgst_percent) == (0.05, 0.05)
+
+    def test_missing_gstins_are_treated_as_inter_state(self, container, seed):
+        product = self._taxed_product(container, seed, igst=18)
+        po = self._create(container, seed, item=self._line(product.id), purchase_type="full_tax")
+        assert po.igst_percent == 18
+        assert (po.cgst_percent, po.sgst_percent) == (0, 0)
+
+    def test_typed_percentages_are_ignored(self, container, seed):
+        """The form only displays the rates - a posted one is never trusted."""
+        po = self._create(container, seed, igst_percent="18", cgst_percent="9")
+        assert (po.igst_percent, po.cgst_percent, po.sgst_percent) == (0, 0, 0)
+
+    def test_unknown_purchase_type_is_rejected(self, container, seed):
+        with pytest.raises(ValidationError):
+            self._create(container, seed, purchase_type="no_tax_at_all")
 
     def test_prefill_from_proforma(self, container, seed):
         pi = container.proforma_invoice_service.create(

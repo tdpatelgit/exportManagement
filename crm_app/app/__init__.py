@@ -111,7 +111,7 @@ class ServiceContainer:
         )
         self.purchase_order_service = PurchaseOrderService(
             self.purchase_order_repo, self.product_repo, self.lead_repo, self.proforma_invoice_repo,
-            self.document_version_service, self.party_repos, self.supplier_repo,
+            self.document_version_service, self.party_repos, self.supplier_repo, self.company_repo,
         )
         self.packing_list_service = PackingListService(
             self.packing_list_repo, self.product_repo, self.design_repo,
@@ -148,7 +148,8 @@ def create_app(config_class=Config) -> Flask:
     # --- make the current user + status constants available in every template --------------------------------------------------
     @app.context_processor
     def inject_globals():
-        from app.models import LEAD_STATUSES, CLIENT_STATUSES, CLIENT_TYPES, COMMUNICATION_MODES, PRODUCT_UNITS
+        from app.models import (LEAD_STATUSES, CLIENT_STATUSES, CLIENT_TYPES, COMMUNICATION_MODES,
+                                PRODUCT_UNITS, PURCHASE_TYPES, EXEMPTION_IGST_PERCENT)
         # The logged-in tenant's own company profile (for the sidebar logo) -
         # one small query per request, only when someone is signed in.
         user = g.get("user")
@@ -161,6 +162,8 @@ def create_app(config_class=Config) -> Flask:
             CLIENT_TYPES=CLIENT_TYPES,
             COMMUNICATION_MODES=COMMUNICATION_MODES,
             PRODUCT_UNITS=PRODUCT_UNITS,
+            PURCHASE_TYPES=PURCHASE_TYPES,
+            EXEMPTION_IGST_PERCENT=EXEMPTION_IGST_PERCENT,
         )
 
     register_template_helpers(app)

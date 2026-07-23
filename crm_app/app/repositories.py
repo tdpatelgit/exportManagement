@@ -1501,8 +1501,8 @@ class PurchaseOrderRepository:
                 seller_name, seller_address, seller_pan, seller_gstin, seller_ref_no,
                 port_of_loading, port_of_discharge, container_details, delivery_time,
                 advance_percent, payment_terms, remarks, igst_percent, cgst_percent, sgst_percent,
-                created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                purchase_type, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (purchase_order.company_id, purchase_order.po_number, purchase_order.po_date,
              purchase_order.lead_id, purchase_order.proforma_invoice_id, purchase_order.seller_supplier_id,
              purchase_order.seller_name, purchase_order.seller_address, purchase_order.seller_pan,
@@ -1510,7 +1510,7 @@ class PurchaseOrderRepository:
              purchase_order.port_of_discharge, purchase_order.container_details, purchase_order.delivery_time,
              purchase_order.advance_percent, purchase_order.payment_terms, purchase_order.remarks,
              purchase_order.igst_percent, purchase_order.cgst_percent, purchase_order.sgst_percent,
-             purchase_order.created_by),
+             purchase_order.purchase_type, purchase_order.created_by),
         )
         self._replace_items(new_id, purchase_order.items)
         return self.get_by_id(new_id)
@@ -1523,7 +1523,7 @@ class PurchaseOrderRepository:
                                            port_of_loading = ?, port_of_discharge = ?, container_details = ?,
                                            delivery_time = ?, advance_percent = ?, payment_terms = ?,
                                            remarks = ?, igst_percent = ?, cgst_percent = ?, sgst_percent = ?,
-                                           updated_at = datetime('now')
+                                           purchase_type = ?, updated_at = datetime('now')
                WHERE id = ?""",
             (purchase_order.po_date, purchase_order.lead_id, purchase_order.proforma_invoice_id,
              purchase_order.seller_supplier_id, purchase_order.seller_name, purchase_order.seller_address,
@@ -1531,7 +1531,7 @@ class PurchaseOrderRepository:
              purchase_order.port_of_loading, purchase_order.port_of_discharge, purchase_order.container_details,
              purchase_order.delivery_time, purchase_order.advance_percent, purchase_order.payment_terms,
              purchase_order.remarks, purchase_order.igst_percent, purchase_order.cgst_percent,
-             purchase_order.sgst_percent, purchase_order_id),
+             purchase_order.sgst_percent, purchase_order.purchase_type, purchase_order_id),
         )
         self._replace_items(purchase_order_id, purchase_order.items)
 

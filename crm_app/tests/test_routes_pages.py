@@ -267,6 +267,17 @@ class TestDocumentRoutes:
         # ...and the submit button still lives inside the PO form.
         assert "Create purchase order" in markup
 
+    def test_purchase_order_form_derives_taxes_instead_of_asking_for_them(self, admin_ctx):
+        """The three GST percentages follow from "Purchase under" + the GSTIN
+        state-code comparison, so the form shows them rather than collecting
+        them - a posted percentage would only be a stale copy."""
+        client, *_ = admin_ctx
+        html = client.get("/purchase-orders/new").get_data(as_text=True)
+        assert "Purchase under" in html
+        assert 'value="full_tax"' in html and 'value="exemption"' in html
+        for field in ("igst_percent", "cgst_percent", "sgst_percent"):
+            assert f'name="{field}"' not in html
+
 
 # ==========================================================================
 # Reports

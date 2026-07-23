@@ -34,7 +34,7 @@ from app.models import (
     ProductPalletType, ProductFolder,
     Design, Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
     PurchaseOrder, PurchaseOrderItem, PackingList, PackingListItem,
-    DocumentVersion,
+    DocumentVersion, PURCHASE_TYPES, DEFAULT_PURCHASE_TYPE, EXEMPTION_IGST_PERCENT,
 )
 from app.repositories import (
     TenantRepository, UserRepositoryBase, LeadRepositoryBase, PartyRepositoryBase, SupplierRepositoryBase,
@@ -1864,6 +1864,17 @@ class ProformaInvoiceService:
 # ============================================================
 # PURCHASE ORDER SERVICE
 # ============================================================
+def is_intra_state(gstin_a: Optional[str], gstin_b: Optional[str]) -> bool:
+    """True when both GSTINs belong to the same state - the first two digits
+    of a GSTIN are its state code. A purchase inside one state is taxed
+    CGST + SGST; across states it's IGST instead. Unknown either way (a
+    missing or malformed GSTIN) counts as inter-state, which is the norm for
+    an exporter buying from out-of-state suppliers."""
+    a = (gstin_a or "").strip()[:2]
+    b = (gstin_b or "").strip()[:2]
+    return len(a) == 2 and a.isdigit() and a == b
+
+
 class PurchaseOrderService:
     """Mirrors ProformaInvoiceService layer-for-layer. A purchase order is
     the next document after the Proforma Invoice in the client pipeline, but
@@ -1875,7 +1886,8 @@ class PurchaseOrderService:
     def __init__(self, purchase_order_repo: PurchaseOrderRepository, product_repo: ProductRepository,
                  lead_repo: LeadRepositoryBase, proforma_invoice_repo: ProformaInvoiceRepository,
                  version_service: "DocumentVersionService", party_repos: Optional[dict] = None,
-                 supplier_repo: Optional[SupplierRepositoryBase] = None):
+                 supplier_repo: Optional[SupplierRepositoryBase] = None,
+                 company_repo: Optional[CompanyRepository] = None):
         self.purchase_order_repo = purchase_order_repo
         self.product_repo = product_repo
         self.lead_repo = lead_repo
@@ -1883,6 +1895,7 @@ class PurchaseOrderService:
         self.version_service = version_service
         self.party_repos = party_repos  # {'Buyer': ..., 'Supplier': ..., 'Exporter': ...} for advance_client_status
         self.supplier_repo = supplier_repo  # for validating seller_supplier_id belongs to this company
+        self.company_repo = company_repo  # our own GSTIN, for the intra/inter-state tax split
 
     # ---- reads --------------------------------------------------
     def get(self, purchase_order_id: int, company_id: int) -> PurchaseOrder:
@@ -2015,21 +2028,55 @@ class PurchaseOrderService:
             raise ValidationError("At least one product line is compulsory.")
         return items
 
+    # ---- tax derivation --------------------------------------------------
+    def base_igst_percent(self, company_id: int, purchase_type: str, items: List[PurchaseOrderItem]) -> float:
+        """The full order's tax rate before it is split into IGST or
+        CGST+SGST. Under Exemption it's the flat concessional rate; under a
+        Full Tax Purchase it comes from the catalog products on the lines
+        (their own stored IGST %). Lines can in principle carry different
+        rates while the order stores one - the highest wins, so the order is
+        never under-taxed. Typed-in lines with no catalog product behind them
+        contribute nothing."""
+        if purchase_type == "exemption":
+            return EXEMPTION_IGST_PERCENT
+        rate = 0.0
+        for item in items:
+            if not item.product_id:
+                continue
+            product = self.product_repo.get_by_id(item.product_id)
+            if product and product.company_id == company_id and product.igst_percent:
+                rate = max(rate, float(product.igst_percent))
+        return rate
+
+    def _tax_percentages(self, company_id: int, purchase_type: str, seller_gstin: Optional[str],
+                         items: List[PurchaseOrderItem]) -> tuple:
+        """(igst, cgst, sgst) for the order. The rate itself comes from
+        `purchase_type` (see base_igst_percent); where it lands depends on
+        the state codes of our GSTIN and the seller's - same state means
+        CGST + SGST at half each, different states means IGST alone."""
+        rate = self.base_igst_percent(company_id, purchase_type, items)
+        our_company = self.company_repo.get(company_id) if self.company_repo else None
+        if is_intra_state(our_company.gstin if our_company else None, seller_gstin):
+            half = round(rate / 2, 4)
+            return 0.0, half, half
+        return rate, 0.0, 0.0
+
     def _build_header(self, current_user: User, fields: dict, items: List[PurchaseOrderItem]) -> PurchaseOrder:
         seller_name = (fields.get("seller_name") or "").strip()
         if not seller_name:
             raise ValidationError("Seller name is compulsory.")
         po_date = (fields.get("po_date") or "").strip() or date.today().isoformat()
 
-        def _percent(key):
-            raw = fields.get(key)
-            try:
-                value = float(raw) if raw not in (None, "") else 0
-            except ValueError:
-                raise ValidationError(f"'{key}' must be a number (percentage).")
-            if value < 0 or value > 100:
-                raise ValidationError(f"'{key}' must be between 0 and 100 (it's a percentage).")
-            return value
+        purchase_type = (fields.get("purchase_type") or "").strip() or DEFAULT_PURCHASE_TYPE
+        if purchase_type not in PURCHASE_TYPES:
+            raise ValidationError("'Purchase under' must be either a full tax purchase or an exemption.")
+        seller_gstin = (fields.get("seller_gstin") or "").strip() or None
+        # Percentages are never taken from the form - the form only displays
+        # them, so a posted value would be a stale (or crafted) copy of what
+        # is derived here.
+        igst_percent, cgst_percent, sgst_percent = self._tax_percentages(
+            current_user.company_id, purchase_type, seller_gstin, items
+        )
 
         lead_id = int(fields["lead_id"]) if fields.get("lead_id") else None
         if lead_id is not None:
@@ -2059,7 +2106,7 @@ class PurchaseOrderService:
             proforma_invoice_id=proforma_invoice_id, seller_supplier_id=seller_supplier_id,
             seller_address=(fields.get("seller_address") or "").strip() or None,
             seller_pan=(fields.get("seller_pan") or "").strip() or None,
-            seller_gstin=(fields.get("seller_gstin") or "").strip() or None,
+            seller_gstin=seller_gstin,
             seller_ref_no=(fields.get("seller_ref_no") or "").strip() or None,
             port_of_loading=(fields.get("port_of_loading") or "").strip() or None,
             port_of_discharge=(fields.get("port_of_discharge") or "").strip() or None,
@@ -2068,9 +2115,10 @@ class PurchaseOrderService:
             advance_percent=(fields.get("advance_percent") or "").strip() or None,
             payment_terms=(fields.get("payment_terms") or "").strip() or None,
             remarks=(fields.get("remarks") or "").strip() or None,
-            igst_percent=_percent("igst_percent"),
-            cgst_percent=_percent("cgst_percent"),
-            sgst_percent=_percent("sgst_percent"),
+            igst_percent=igst_percent,
+            cgst_percent=cgst_percent,
+            sgst_percent=sgst_percent,
+            purchase_type=purchase_type,
             items=items,
         )
 
