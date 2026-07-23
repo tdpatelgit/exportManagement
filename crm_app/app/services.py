@@ -1484,8 +1484,9 @@ class QuotationService:
                 quantity_value = float(raw.get("quantity_value") or 0)
                 price_usd = float(raw.get("price_usd") or 0)
                 quantity_boxes = float(raw["quantity_boxes"]) if raw.get("quantity_boxes") else None
+                pallets = float(raw["pallets"]) if raw.get("pallets") else None
             except ValueError:
-                raise ValidationError(f"Row {i}: quantity and price must be numbers.")
+                raise ValidationError(f"Row {i}: quantity, pallets and price must be numbers.")
             product_id = int(raw["product_id"]) if raw.get("product_id") else None
 
             # Only trust a product from this same company - otherwise a
@@ -1510,7 +1511,7 @@ class QuotationService:
             items.append(QuotationItem(
                 id=None, quotation_id=None, sr_no=i, product_id=product_id, product_name=product_name,
                 hsn_code=(raw.get("hsn_code") or "").strip() or None,
-                quantity_boxes=quantity_boxes, quantity_value=quantity_value,
+                quantity_boxes=quantity_boxes, pallets=pallets, quantity_value=quantity_value,
                 unit=(raw.get("unit") or "SQM").strip() or "SQM",
                 price_usd=price_usd, total_usd=round(quantity_value * price_usd, 2),
             ))
@@ -1743,7 +1744,7 @@ class ProformaInvoiceService:
             {
                 "product_id": item.product_id, "product_name": item.product_name,
                 "hsn_code": item.hsn_code, "quantity_boxes": item.quantity_boxes,
-                "quantity_value": item.quantity_value, "unit": item.unit,
+                "pallets": item.pallets, "quantity_value": item.quantity_value, "unit": item.unit,
                 "price_usd": item.price_usd,
             }
             for item in quotation.items
@@ -1786,7 +1787,6 @@ class ProformaInvoiceService:
             items.append(ProformaInvoiceItem(
                 id=None, proforma_invoice_id=None, sr_no=i, product_id=product_id, product_name=product_name,
                 hsn_code=(raw.get("hsn_code") or "").strip() or None,
-                surface=(raw.get("surface") or "").strip() or None,
                 pallets=pallets, quantity_boxes=quantity_boxes, quantity_value=quantity_value,
                 unit=(raw.get("unit") or "SQM").strip() or "SQM",
                 price_usd=price_usd, total_usd=round(quantity_value * price_usd, 2),

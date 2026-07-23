@@ -1,18 +1,13 @@
 {# The ANNEXURE sheet: overflow goods lines that didn't fit on the invoice
    page, with their own TOTAL row and signatory block - like the original
    Excel document's "(CONTINUE TO ANNEXURE----->)" pages. Renders nothing at
-   all when every item fits on the invoice page - UNLESS the including
-   template sets `annex_force = true` (the combined document does), in which
-   case an invoice without overflow still gets an annexure page listing the
-   full goods detail. Must be included AFTER proforma_invoices/_sheet.html
-   (it reuses the .pi-* styles that partial brings along). Keep
-   PI_ANNEX_START in sync with _sheet.html. #}
+   all when every item fits on the invoice page, in the combined document
+   the same as the single invoice view. Must be included AFTER
+   proforma_invoices/_sheet.html (it reuses the .pi-* styles that partial
+   brings along). Keep PI_ANNEX_START in sync with _sheet.html. #}
 {% import 'proforma_invoices/_goods_rows.html' as goods %}
 {% set PI_ANNEX_START = 6 %}
 {% set annex_items = invoice.items[PI_ANNEX_START:] %}
-{% if not annex_items and (annex_force | default(false)) %}
-  {% set annex_items = invoice.items %}
-{% endif %}
 {% if annex_items %}
 {% set pi_mode = invoice.display_mode or 'index' %}
 {# line numbering continues from the invoice page (index view) #}

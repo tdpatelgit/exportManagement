@@ -1239,10 +1239,10 @@ class QuotationRepository:
                 conn.execute(
                     """INSERT INTO quotation_items
                        (quotation_id, sr_no, product_id, product_name, dimension_mm, hsn_code,
-                        quantity_boxes, quantity_value, unit, price_usd, total_usd)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        quantity_boxes, pallets, quantity_value, unit, price_usd, total_usd)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (quotation_id, item.sr_no, item.product_id, item.product_name, item.dimension_mm,
-                     item.hsn_code, item.quantity_boxes, item.quantity_value, item.unit,
+                     item.hsn_code, item.quantity_boxes, item.pallets, item.quantity_value, item.unit,
                      item.price_usd, item.total_usd),
                 )
 

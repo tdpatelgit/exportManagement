@@ -67,6 +67,31 @@ class TestProformaPrefill:
         assert items[0]["price_usd"] == 2
         assert items[0]["quantity_value"] == 100
 
+    def test_prefill_carries_pallets_from_the_quotation_line(self, container, seed):
+        q = container.quotation_service.create(
+            seed.admin, {"buyer_name": "Buyer Co", "quotation_date": "2026-01-01"},
+            [{"product_name": "Tiles", "quantity_value": "100", "price_usd": "2", "pallets": "4.5"}])
+        items = container.proforma_invoice_service.build_prefill_from_quotation(q)["items"]
+        assert items[0]["pallets"] == 4.5
+
+    def test_prefill_pallets_is_none_when_the_quotation_line_has_none(self, container, seed):
+        q = make_quotation(container, seed)
+        items = container.proforma_invoice_service.build_prefill_from_quotation(q)["items"]
+        assert items[0]["pallets"] is None
+
+    def test_generated_invoice_persists_the_carried_over_pallets(self, container, seed):
+        """End to end: the number surviving the prefill dict also survives
+        being submitted back through create() as a real PI item."""
+        q = container.quotation_service.create(
+            seed.admin, {"buyer_name": "Buyer Co", "quotation_date": "2026-01-01"},
+            [{"product_name": "Tiles", "quantity_value": "100", "price_usd": "2", "pallets": "4.5"}])
+        prefill = container.proforma_invoice_service.build_prefill_from_quotation(q)
+        pi = container.proforma_invoice_service.create(
+            seed.admin, {"consignee_name": "Buyer Co", "invoice_date": "2026-02-01",
+                        **prefill["fields"]},
+            prefill["items"])
+        assert pi.items[0].pallets == 4.5
+
 
 class TestProformaCrud:
     def _create(self, container, seed, **over):
