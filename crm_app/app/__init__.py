@@ -20,14 +20,14 @@ from app.repositories import (
     SqlitePartyRepository, SqliteSupplierRepository,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
     CategoryRepository, ProductRepository, ProductPalletTypeRepository, ProductFolderRepository, DesignRepository,
-    QuotationRepository, ProformaInvoiceRepository, PurchaseOrderRepository, PackingListRepository,
-    DocumentVersionRepository,
+    QuotationRepository, ProformaInvoiceRepository, PurchaseOrderRepository, PurchaseInvoiceRepository,
+    PackingListRepository, DocumentVersionRepository,
 )
 from app.services import (
     AuthService, LeadService, PartyService, SupplierService, CurrencyService,
     CommunicationService, StatsService, CompanyService, ReportService, ProductService,
-    QuotationService, ProformaInvoiceService, PurchaseOrderService, PackingListService, BackupService,
-    DocumentVersionService, ProformaFulfilmentService,
+    QuotationService, ProformaInvoiceService, PurchaseOrderService, PurchaseInvoiceService,
+    PackingListService, BackupService, DocumentVersionService, ProformaFulfilmentService,
 )
 from app.utils import register_template_helpers
 
@@ -60,6 +60,7 @@ class ServiceContainer:
         self.quotation_repo = QuotationRepository(db)
         self.proforma_invoice_repo = ProformaInvoiceRepository(db)
         self.purchase_order_repo = PurchaseOrderRepository(db)
+        self.purchase_invoice_repo = PurchaseInvoiceRepository(db)
         self.packing_list_repo = PackingListRepository(db)
         self.document_version_repo = DocumentVersionRepository(db)
 
@@ -127,8 +128,18 @@ class ServiceContainer:
             self.lead_repo, self.proforma_invoice_repo, self.document_version_service,
             self.quotation_repo, self.purchase_order_repo, self.proforma_fulfilment_service,
         )
+        self.purchase_invoice_service = PurchaseInvoiceService(
+            self.purchase_invoice_repo, self.product_repo, self.lead_repo, self.purchase_order_repo,
+            self.document_version_service, self.party_repos, self.supplier_repo,
+            Config.PURCHASE_INVOICE_UPLOAD_FOLDER, Config.ALLOWED_DOCUMENT_EXTENSIONS,
+        )
         self.backup_service = BackupService(
-            db, Config.DATABASE_PATH, Config.PRODUCT_UPLOAD_FOLDER, Config.SCHEMA_PATH,
+            db, Config.DATABASE_PATH,
+            {
+                "uploads/products": Config.PRODUCT_UPLOAD_FOLDER,
+                "uploads/purchase_invoices": Config.PURCHASE_INVOICE_UPLOAD_FOLDER,
+            },
+            Config.SCHEMA_PATH,
         )
 
 
@@ -192,6 +203,7 @@ def create_app(config_class=Config) -> Flask:
     from app.routes.quotations import quotations_bp
     from app.routes.proforma_invoices import proforma_invoices_bp
     from app.routes.purchase_orders import purchase_orders_bp
+    from app.routes.purchase_invoices import purchase_invoices_bp
     from app.routes.packing_lists import packing_lists_bp
     from app.routes.profile import profile_bp
     from app.routes.backup import backup_bp
@@ -212,6 +224,7 @@ def create_app(config_class=Config) -> Flask:
     app.register_blueprint(quotations_bp)
     app.register_blueprint(proforma_invoices_bp)
     app.register_blueprint(purchase_orders_bp)
+    app.register_blueprint(purchase_invoices_bp)
     app.register_blueprint(packing_lists_bp)
     app.register_blueprint(profile_bp)
     app.register_blueprint(backup_bp)

@@ -29,6 +29,7 @@
       <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('quotations.') }}" href="{{ url_for('quotations.list_quotations') }}">🧾 Quotations</a>
       <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('proforma_invoices.') }}" href="{{ url_for('proforma_invoices.list_proforma_invoices') }}">📄 Proforma Invoices</a>
       <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('purchase_orders.') }}" href="{{ url_for('purchase_orders.list_purchase_orders') }}">🧾 Purchase Orders</a>
+      <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('purchase_invoices.') }}" href="{{ url_for('purchase_invoices.list_purchase_invoices') }}">🧾 Purchase Invoices</a>
       <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('packing_lists.') }}" href="{{ url_for('packing_lists.list_packing_lists') }}">📦 Packing Lists</a>
 
       {% if current_user and current_user.is_admin %}

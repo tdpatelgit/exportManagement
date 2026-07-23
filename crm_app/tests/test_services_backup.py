@@ -42,7 +42,8 @@ class FakeUpload:
 def backup_service(container, tmp_config):
     return BackupService(
         container.db, tmp_config.DATABASE_PATH,
-        tmp_config.PRODUCT_UPLOAD_FOLDER, tmp_config.SCHEMA_PATH,
+        {"uploads/products": tmp_config.PRODUCT_UPLOAD_FOLDER},
+        tmp_config.SCHEMA_PATH,
     )
 
 

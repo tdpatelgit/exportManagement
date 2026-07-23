@@ -159,8 +159,9 @@ def view_purchase_order(purchase_order_id):
         abort(404)
     company = container.company_service.get(g.user.company_id)
     packing_lists = container.packing_list_service.list_for_purchase_order(purchase_order_id, g.user.company_id)
+    purchase_invoices = container.purchase_invoice_service.list_for_purchase_order(purchase_order_id, g.user.company_id)
     return render_template("purchase_orders/print.html", purchase_order=purchase_order, company=company,
-                           packing_lists=packing_lists)
+                           packing_lists=packing_lists, purchase_invoices=purchase_invoices)
 
 
 @purchase_orders_bp.route("/<int:purchase_order_id>/combined")

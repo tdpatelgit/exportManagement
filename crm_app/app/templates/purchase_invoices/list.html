@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Purchase Invoices{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Sales documents</div>
+    <h1>Purchase Invoices</h1>
+  </div>
+  <div class="topbar-actions">
+    <a href="{{ url_for('purchase_invoices.new_purchase_invoice') }}" class="btn btn-primary">+ New purchase invoice</a>
+  </div>
+</div>
+
+<div class="card">
+  {% if purchase_invoices %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th>Our ref.</th>
+          <th>Supplier invoice no.</th>
+          <th>Invoice date</th>
+          <th>Seller</th>
+          <th>From PO</th>
+          <th>Created by</th>
+          <th class="num">Invoice value (INR)</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for pinv in purchase_invoices %}
+        <tr>
+          <td class="mono">{{ pinv.purchase_invoice_number }}</td>
+          <td class="text-sm">{{ pinv.invoice_number }}</td>
+          <td class="text-sm">{{ pinv.invoice_date }}</td>
+          <td><strong>{{ pinv.seller_name }}</strong></td>
+          <td class="text-sm">{{ pinv.purchase_order_number or '—' }}</td>
+          <td class="text-sm">{{ pinv.created_by_name }}</td>
+          <td class="num">₹ {{ '{:,.2f}'.format(pinv.invoice_value_inr) }}</td>
+          <td><a href="{{ url_for('purchase_invoices.view_purchase_invoice', purchase_invoice_id=pinv.id) }}" class="text-sm">Open →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No purchase invoices yet. <a href="{{ url_for('purchase_invoices.new_purchase_invoice') }}">Create one →</a></div>
+  {% endif %}
+</div>
+
+{% endblock %}
