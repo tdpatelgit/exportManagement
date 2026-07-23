@@ -41,7 +41,7 @@ from datetime import datetime
 # Because `_migrate` is idempotent and runs on every startup AND on every
 # restore, any backup - however old - is carried forward through the whole
 # chain of steps, never discarded.
-SCHEMA_VERSION = 15  # v15: purchase_orders.purchase_type ('full_tax' | 'exemption') - a PO's GST percentages are no longer typed in by hand, they follow from this choice plus the GSTIN state-code comparison between our company and the seller. v14: our_company_rcmc_details (new table) - repeatable RCMC (Registration-cum-Membership Certificate) records per company, same shape/pattern as our_company_lut_details. v13: the single `clients` table (Buyer/Supplier/Exporter via client_type) is split into three separate entities - buyers/exporters (same shape as before, minus client_type), and suppliers (an our_company-shaped profile: GSTIN/PAN/IEC/bank/contacts, no logo/BIN/LUT). party_contacts replaces client_contacts for buyer/exporter; payment_history/documents/communications gain a parent_type discriminator so one type's ids can't collide with another's; purchase_orders.seller_client_id becomes seller_supplier_id; leads gains converted_client_type alongside converted_client_id. v12: purchase orders (new purchase_orders/purchase_order_items tables via schema.sql, plus packing_lists.purchase_order_id so a PO can carry its own packing list) and our_company.logo_path (company logo shown in the app and on generated documents). v11: each product quantity gets its own unit - quantity_unit (new, 'PCS' for existing rows) and alternate_quantity_unit (renamed from `unit`)
+SCHEMA_VERSION = 16  # v16: proforma_invoices.status ('draft' | 'confirmed') - confirming a PI locks it for editing (an admin can move it back to draft) and starts the "still to be ordered" reminder that runs until every design on the PI's packing list has been placed on the packing list of some purchase order linked to that PI. v15: purchase_orders.purchase_type ('full_tax' | 'exemption') - a PO's GST percentages are no longer typed in by hand, they follow from this choice plus the GSTIN state-code comparison between our company and the seller. v14: our_company_rcmc_details (new table) - repeatable RCMC (Registration-cum-Membership Certificate) records per company, same shape/pattern as our_company_lut_details. v13: the single `clients` table (Buyer/Supplier/Exporter via client_type) is split into three separate entities - buyers/exporters (same shape as before, minus client_type), and suppliers (an our_company-shaped profile: GSTIN/PAN/IEC/bank/contacts, no logo/BIN/LUT). party_contacts replaces client_contacts for buyer/exporter; payment_history/documents/communications gain a parent_type discriminator so one type's ids can't collide with another's; purchase_orders.seller_client_id becomes seller_supplier_id; leads gains converted_client_type alongside converted_client_id. v12: purchase orders (new purchase_orders/purchase_order_items tables via schema.sql, plus packing_lists.purchase_order_id so a PO can carry its own packing list) and our_company.logo_path (company logo shown in the app and on generated documents). v11: each product quantity gets its own unit - quantity_unit (new, 'PCS' for existing rows) and alternate_quantity_unit (renamed from `unit`)
 
 
 class Database:
@@ -993,6 +993,13 @@ class Database:
             existing = {r["name"] for r in conn.execute("PRAGMA table_info(purchase_orders)")}
             if existing and "purchase_type" not in existing:
                 conn.execute("ALTER TABLE purchase_orders ADD COLUMN purchase_type TEXT NOT NULL DEFAULT 'full_tax'")
+
+            # v16: a proforma invoice is now either a draft or confirmed.
+            # Existing invoices stay drafts (freely editable, no reminder) -
+            # confirming one is always an explicit action on the PI page.
+            existing = {r["name"] for r in conn.execute("PRAGMA table_info(proforma_invoices)")}
+            if existing and "status" not in existing:
+                conn.execute("ALTER TABLE proforma_invoices ADD COLUMN status TEXT NOT NULL DEFAULT 'draft'")
 
     def _backup_db_file(self, tag: str) -> None:
         """Copies the live DB file into instance/backups/ before a

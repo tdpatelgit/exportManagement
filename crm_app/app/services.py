@@ -35,6 +35,7 @@ from app.models import (
     Design, Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
     PurchaseOrder, PurchaseOrderItem, PackingList, PackingListItem,
     DocumentVersion, PURCHASE_TYPES, DEFAULT_PURCHASE_TYPE, EXEMPTION_IGST_PERCENT,
+    PROFORMA_STATUSES, PROFORMA_STATUS_DRAFT, PROFORMA_STATUS_CONFIRMED,
 )
 from app.repositories import (
     TenantRepository, UserRepositoryBase, LeadRepositoryBase, PartyRepositoryBase, SupplierRepositoryBase,
@@ -1664,12 +1665,40 @@ class ProformaInvoiceService:
         list page to switch "Generate PI" to "View PI" without an N+1 query."""
         return self.invoice_repo.map_by_quotation(company_id)
 
+    def list_by_status(self, company_id: int, status: str) -> List[ProformaInvoice]:
+        return self.invoice_repo.list_by_status(company_id, status)
+
     # ---- permission --------------------------------------------------
     def _assert_can_modify(self, invoice: ProformaInvoice, current_user: User):
-        if current_user.is_admin:
-            return
-        if invoice.created_by != current_user.id:
+        """Ownership first, then the confirmation lock: a confirmed invoice is
+        the version the buyer has agreed to and the version the purchase
+        orders are being placed against, so it is frozen for everyone until
+        an admin deliberately moves it back to draft (set_status below)."""
+        if not current_user.is_admin and invoice.created_by != current_user.id:
             raise PermissionDeniedError("You can only manage proforma invoices you created yourself.")
+        if invoice.is_confirmed:
+            raise ValidationError(
+                f"Proforma invoice {invoice.invoice_number} is confirmed and locked. "
+                "An admin has to move it back to draft before it can be edited or deleted."
+            )
+
+    # ---- status --------------------------------------------------
+    def set_status(self, current_user: User, invoice_id: int, status: str) -> ProformaInvoice:
+        """Confirm an invoice (anyone who could edit it) or send it back to
+        draft (admins only - reopening a confirmed document is the override,
+        not the everyday action). Deliberately does not go through
+        _assert_can_modify, which is what enforces the lock this method
+        releases."""
+        invoice = self.get(invoice_id, current_user.company_id)
+        if status not in dict(PROFORMA_STATUSES):
+            raise ValidationError("Invalid proforma invoice status.")
+        if not current_user.is_admin and invoice.created_by != current_user.id:
+            raise PermissionDeniedError("You can only manage proforma invoices you created yourself.")
+        if status == PROFORMA_STATUS_DRAFT and not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can move a confirmed proforma invoice back to draft.")
+        if status != invoice.status:
+            self.invoice_repo.update_status(invoice_id, status)
+        return self.get(invoice_id, current_user.company_id)
 
     # ---- number generation --------------------------------------------------
     def _generate_number(self, company_id: int, invoice_date: str) -> str:
@@ -1887,7 +1916,8 @@ class PurchaseOrderService:
                  lead_repo: LeadRepositoryBase, proforma_invoice_repo: ProformaInvoiceRepository,
                  version_service: "DocumentVersionService", party_repos: Optional[dict] = None,
                  supplier_repo: Optional[SupplierRepositoryBase] = None,
-                 company_repo: Optional[CompanyRepository] = None):
+                 company_repo: Optional[CompanyRepository] = None,
+                 fulfilment_service: Optional["ProformaFulfilmentService"] = None):
         self.purchase_order_repo = purchase_order_repo
         self.product_repo = product_repo
         self.lead_repo = lead_repo
@@ -1896,6 +1926,9 @@ class PurchaseOrderService:
         self.party_repos = party_repos  # {'Buyer': ..., 'Supplier': ..., 'Exporter': ...} for advance_client_status
         self.supplier_repo = supplier_repo  # for validating seller_supplier_id belongs to this company
         self.company_repo = company_repo  # our own GSTIN, for the intra/inter-state tax split
+        # Optional: when present, a new PO's product lines are cut down to
+        # what the invoice still needs ordered (see build_prefill_from_proforma).
+        self.fulfilment_service = fulfilment_service
 
     # ---- reads --------------------------------------------------
     def get(self, purchase_order_id: int, company_id: int) -> PurchaseOrder:
@@ -1915,19 +1948,20 @@ class PurchaseOrderService:
             return []
         return self.purchase_order_repo.list_for_lead(lead_id)
 
-    def get_for_proforma(self, proforma_invoice_id: Optional[int]) -> Optional[PurchaseOrder]:
-        """The most recently created purchase order already generated from
-        this proforma invoice, or None if none exists yet."""
+    def list_for_proforma(self, proforma_invoice_id: Optional[int], company_id: int) -> List[PurchaseOrder]:
+        """Every purchase order generated from this proforma invoice, newest
+        first. One PI is normally ordered from several suppliers, so its page
+        lists all of them; company_id is re-checked here because the caller
+        passes an id straight off the invoice."""
         if not proforma_invoice_id:
-            return None
-        purchase_orders = self.purchase_order_repo.list_for_proforma(proforma_invoice_id)
-        return purchase_orders[0] if purchase_orders else None
+            return []
+        return [po for po in self.purchase_order_repo.list_for_proforma(proforma_invoice_id)
+                if po.company_id == company_id]
 
-    def map_by_proforma(self, company_id: int) -> dict:
-        """proforma_invoice_id -> most recent purchase_order id, for the
-        proforma list page to switch "Generate PO" to "View PO" without an
-        N+1 query."""
-        return self.purchase_order_repo.map_by_proforma(company_id)
+    def count_map_by_proforma(self, company_id: int) -> dict:
+        """proforma_invoice_id -> number of purchase orders placed against it,
+        for the proforma list page's PO column."""
+        return self.purchase_order_repo.count_map_by_proforma(company_id)
 
     # ---- permission --------------------------------------------------
     def _assert_can_modify(self, purchase_order: PurchaseOrder, current_user: User):
@@ -1954,7 +1988,16 @@ class PurchaseOrderService:
         different figure from the proforma's USD selling price, so it is
         left for the user to type in. Seller details also stay blank - the
         proforma's consignee is the foreign buyer, not the supplier this PO
-        is being placed with."""
+        is being placed with.
+
+        One invoice is normally split across several suppliers, so the
+        product lines are cut down to what's still outstanding - a line
+        already placed in full on another purchase order linked to this
+        same invoice is dropped, and a partly-placed one comes through at
+        its remaining boxes/quantity only (see _remaining_products). The
+        second and third PO built from the same invoice therefore don't
+        start out re-ordering the first one's goods, same as the packing-
+        list side already does (PackingListService._remaining_designs)."""
         fields = {
             "proforma_invoice_id": invoice.id,
             "lead_id": invoice.lead_id,
@@ -1962,16 +2005,59 @@ class PurchaseOrderService:
             "port_of_discharge": invoice.port_of_discharge,
             "container_details": invoice.container_details,
         }
-        items = [
-            {
-                "product_id": item.product_id, "product_name": item.product_name,
-                "hsn_code": item.hsn_code, "quantity_boxes": item.quantity_boxes,
-                "quantity_value": item.quantity_value, "unit": item.unit,
-                "price_inr": "", "price_per": "BOX",
-            }
-            for item in invoice.items
-        ]
-        return {"fields": fields, "items": items}
+        return {"fields": fields, "items": self._remaining_products(invoice)}
+
+    @staticmethod
+    def _raw_item(item: ProformaInvoiceItem) -> dict:
+        return {
+            "product_id": item.product_id, "product_name": item.product_name,
+            "hsn_code": item.hsn_code, "quantity_boxes": item.quantity_boxes,
+            "quantity_value": item.quantity_value, "unit": item.unit,
+            "price_inr": "", "price_per": "BOX",
+        }
+
+    def _remaining_products(self, invoice: ProformaInvoice) -> list:
+        """Every one of the invoice's product lines, cut down to what's
+        still outstanding and scaled to that outstanding share - the
+        product-level counterpart of PackingListService._remaining_designs.
+
+        No-op (every line unchanged) when there's no fulfilment service
+        wired in, so the plain "copy the invoice's product lines over"
+        behaviour still holds wherever this isn't available."""
+        if not self.fulfilment_service:
+            return [self._raw_item(item) for item in invoice.items]
+        status = self.fulfilment_service.product_status(invoice.company_id, invoice)
+        pending = {_product_key({"product_id": p["product_id"], "product_name": p["product_name"]}): p
+                   for p in status["pending"]}
+
+        remaining = []
+        for item in invoice.items:
+            key = _product_key({"product_id": item.product_id, "product_name": item.product_name})
+            product = pending.get(key)
+            if not product:
+                continue  # already placed in full on another linked purchase order
+            remaining.append(self._scaled_item(item, product))
+        return remaining
+
+    @classmethod
+    def _scaled_item(cls, item: ProformaInvoiceItem, product: dict) -> dict:
+        """One invoice product line rescaled to its outstanding share - same
+        ratio approach as PackingListService._scaled_row. A ratio of 1 -
+        nothing placed yet, the usual case for the first PO - leaves the
+        row unchanged."""
+        row = cls._raw_item(item)
+        if product["required_boxes"] > 0:
+            ratio = product["pending_boxes"] / product["required_boxes"]
+        elif product["required_quantity"] > 0:
+            ratio = product["pending_quantity"] / product["required_quantity"]
+        else:
+            ratio = 1
+        if ratio >= 1:
+            return row
+        for key in ("quantity_boxes", "quantity_value"):
+            if row.get(key) not in (None, ""):
+                row[key] = round(float(row[key]) * ratio, 2) or ""
+        return row
 
     # ---- validation --------------------------------------------------
     def _build_items(self, company_id: int, raw_items: list) -> List[PurchaseOrderItem]:
@@ -2190,7 +2276,8 @@ class PackingListService:
                  design_repo: DesignRepository, lead_repo: LeadRepositoryBase,
                  proforma_invoice_repo: ProformaInvoiceRepository, version_service: "DocumentVersionService",
                  quotation_repo: Optional[QuotationRepository] = None,
-                 purchase_order_repo: Optional[PurchaseOrderRepository] = None):
+                 purchase_order_repo: Optional[PurchaseOrderRepository] = None,
+                 fulfilment_service: Optional["ProformaFulfilmentService"] = None):
         self.packing_list_repo = packing_list_repo
         self.product_repo = product_repo
         self.design_repo = design_repo
@@ -2199,6 +2286,9 @@ class PackingListService:
         self.version_service = version_service
         self.quotation_repo = quotation_repo
         self.purchase_order_repo = purchase_order_repo
+        # Optional: when present, a PO's packing list is prefilled with only
+        # the designs its proforma invoice still needs ordered.
+        self.fulfilment_service = fulfilment_service
 
     # ---- reads --------------------------------------------------
     def get(self, packing_list_id: int, company_id: int) -> PackingList:
@@ -2377,7 +2467,14 @@ class PackingListService:
         the quotation that invoice came from - that PL's full design-level
         rows are imported as the starting point (the goods being ordered are
         the goods being shipped); otherwise each PO product line becomes one
-        empty product block, same as build_prefill_from_proforma."""
+        empty product block, same as build_prefill_from_proforma.
+
+        When the PO came from a proforma invoice that has a packing list of
+        its own, the imported rows are cut down to what that invoice still
+        needs ordered (_remaining_designs below) - a design already covered
+        in full by an earlier PO for the same invoice is dropped, so the
+        second and third PO don't start out re-ordering the first one's
+        goods."""
         fields = {
             "purchase_order_id": purchase_order.id,
             "lead_id": purchase_order.lead_id,
@@ -2388,10 +2485,72 @@ class PackingListService:
             purchase_order.company_id, proforma_invoice_id=purchase_order.proforma_invoice_id)
         if source_pl:
             items = self._items_from_packing_list(source_pl)
+            items = self._remaining_designs(
+                purchase_order.company_id, purchase_order.proforma_invoice_id, items)
             fields["remarks"] = source_pl.remarks or fields["remarks"]
         else:
             items = self._placeholder_items(purchase_order.items)
         return {"fields": fields, "items": items}
+
+    def _remaining_designs(self, company_id: int, proforma_invoice_id: Optional[int], items: list) -> list:
+        """Filters imported packing-list rows down to the designs the invoice
+        still needs placed, scaling each surviving row to its outstanding
+        share. A design that is half ordered comes through at half its
+        boxes/pallets/pcs/quantity/weights; one that is fully ordered is
+        dropped entirely.
+
+        No-ops (returns `items` untouched) when there is nothing to compare
+        against - no fulfilment service wired in, no invoice, or an invoice
+        whose own packing list doesn't exist yet - so importing from a
+        quotation's packing list still behaves exactly as before."""
+        if not self.fulfilment_service or not proforma_invoice_id:
+            return items
+        status = self.fulfilment_service.design_status(company_id, proforma_invoice_id)
+        if not status["designs"]:
+            return items
+        pending = {_design_key(design): design for design in status["pending"]}
+
+        remaining = []
+        for item in items:
+            if item.get("is_placeholder"):
+                remaining.append(item)
+                continue
+            design = pending.get(_design_key(item))
+            if not design:
+                continue  # already ordered in full on another purchase order
+            remaining.append(self._scaled_row(item, design))
+        return remaining
+
+    @staticmethod
+    def _scaled_row(item: dict, design: dict) -> dict:
+        """One imported row rescaled to the outstanding part of its design.
+        Every per-row figure moves together (they all describe the same
+        goods), so one ratio drives them all; a ratio of 1 - nothing ordered
+        yet, the usual case for the first PO - copies the row unchanged.
+        box_per_pallet is a packing spec, not a quantity, so it never
+        scales."""
+        if design["required_boxes"] > 0:
+            ratio = design["pending_boxes"] / design["required_boxes"]
+        elif design["required_quantity"] > 0:
+            ratio = design["pending_quantity"] / design["required_quantity"]
+        else:
+            ratio = 1
+        if ratio >= 1:
+            return item
+
+        def scale(value):
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                return value
+            return round(number * ratio, 2) or ""
+
+        scaled = dict(item)
+        for key in ("pallets", "quantity_boxes", "pcs", "quantity_value",
+                    "net_weight_kg", "gross_weight_kg"):
+            if scaled.get(key) not in (None, ""):
+                scaled[key] = scale(scaled[key])
+        return scaled
 
     # ---- validation --------------------------------------------------
     def _build_items(self, company_id: int, raw_items: list) -> List[PackingListItem]:
@@ -2566,6 +2725,264 @@ class PackingListService:
         existing = self.get(packing_list_id, current_user.company_id)
         self._assert_can_modify(existing, current_user)
         self.packing_list_repo.delete(packing_list_id)
+
+
+# ============================================================
+# PROFORMA FULFILMENT SERVICE
+# ============================================================
+# A proforma invoice says WHAT is being sold; its packing list breaks that
+# down into the individual DESIGNS that actually have to be manufactured.
+# Those designs are then ordered from suppliers through purchase orders, and
+# each purchase order carries its own packing list saying which designs (and
+# how many boxes) that supplier is making. One invoice is normally split
+# across several suppliers, so "have we ordered everything yet?" means
+# comparing the invoice's packing list against the packing lists of every PO
+# linked to it. That comparison lives here.
+#
+# Rounding tolerance: box counts are stored as REALs, so a design that is
+# covered to within a thousandth of a box counts as fully placed rather than
+# leaving a 0.0000001 sliver pending forever.
+_DESIGN_QTY_TOLERANCE = 0.001
+
+
+def _normalize_name(value: Optional[str]) -> str:
+    """Case/whitespace-insensitive comparison key for a hand-typed name, so
+    'Ocean Blue' and 'OCEAN BLUE ' are treated as the same thing."""
+    return " ".join((value or "").split()).upper()
+
+
+def _design_key(row: dict) -> tuple:
+    """How a packing-list line on the invoice side is matched to a line on
+    the purchase-order side. Catalog ids win when both sides have them;
+    hand-typed rows fall back to their stored names."""
+    return (
+        row.get("product_id") or _normalize_name(row.get("product_name")),
+        row.get("design_id") or _normalize_name(row.get("design_name")),
+    )
+
+
+def _product_key(row: dict):
+    """Product-level analogue of _design_key, for the PO-creation-time
+    comparison - a purchase order's product lines have no design dimension,
+    so this is just the product half of _design_key's tuple."""
+    return row.get("product_id") or _normalize_name(row.get("product_name"))
+
+
+class ProformaFulfilmentService:
+    """Answers one question per proforma invoice: which designs from its
+    packing list have NOT yet been placed on a purchase order?
+
+    Reads only - it owns no writes and no state. Everything is derived live
+    from the packing lists on both sides, so placing a design on a PO (or
+    editing/deleting that PO) updates the answer immediately with nothing to
+    keep in sync."""
+
+    def __init__(self, proforma_invoice_repo: ProformaInvoiceRepository,
+                 packing_list_repo: PackingListRepository,
+                 purchase_order_repo: PurchaseOrderRepository):
+        self.proforma_invoice_repo = proforma_invoice_repo
+        self.packing_list_repo = packing_list_repo
+        self.purchase_order_repo = purchase_order_repo
+
+    # ---- the core comparison --------------------------------------------------
+    def design_status_map(self, company_id: int, proforma_invoice_ids: List[int]) -> dict:
+        """{proforma_invoice_id: {"designs": [...], "pending": [...],
+        "placed_count": int, "is_fully_placed": bool}} for many invoices in
+        two queries, so the reminder feed never goes N+1.
+
+        Each design row carries required/placed/pending in BOTH boxes and
+        alternate quantity. Boxes are the yardstick whenever the invoice side
+        states them (that is what a PO is placed in); rows packed without a
+        box count fall back to the quantity column.
+        """
+        ids = [int(i) for i in proforma_invoice_ids if i]
+        if not ids:
+            return {}
+        required_rows = self.packing_list_repo.design_totals_for_proforma(company_id, ids)
+        required_rows += self._quotation_ancestor_fallback_rows(company_id, ids, required_rows)
+        placed_rows = self.packing_list_repo.design_totals_for_linked_purchase_orders(company_id, ids)
+
+        placed_index = {}
+        for row in placed_rows:
+            placed_index[(row["pi_id"], _design_key(row))] = row
+
+        result = {pi_id: {"designs": [], "pending": [], "placed_count": 0, "is_fully_placed": True}
+                  for pi_id in ids}
+        for row in required_rows:
+            pi_id = row["pi_id"]
+            placed = placed_index.get((pi_id, _design_key(row)))
+            required_boxes = row["boxes"] or 0
+            required_quantity = row["quantity"] or 0
+            placed_boxes = (placed["boxes"] if placed else 0) or 0
+            placed_quantity = (placed["quantity"] if placed else 0) or 0
+
+            # Which column decides "done" - boxes when the invoice's packing
+            # list stated them, otherwise the alternate quantity.
+            if required_boxes > 0:
+                outstanding = required_boxes - placed_boxes
+            else:
+                outstanding = required_quantity - placed_quantity
+            is_placed = outstanding <= _DESIGN_QTY_TOLERANCE
+
+            design = {
+                "product_id": row["product_id"],
+                "product_name": row["product_name"],
+                "design_id": row["design_id"],
+                "design_name": row["design_name"],
+                "unit": row["unit"] or "SQM",
+                "required_boxes": required_boxes,
+                "required_quantity": required_quantity,
+                "placed_boxes": placed_boxes,
+                "placed_quantity": placed_quantity,
+                "pending_boxes": max(required_boxes - placed_boxes, 0),
+                "pending_quantity": max(required_quantity - placed_quantity, 0),
+                "is_placed": is_placed,
+            }
+            status = result[pi_id]
+            status["designs"].append(design)
+            if is_placed:
+                status["placed_count"] += 1
+            else:
+                status["pending"].append(design)
+                status["is_fully_placed"] = False
+        return result
+
+    def _quotation_ancestor_fallback_rows(self, company_id: int, ids: List[int],
+                                           required_rows: List[dict]) -> List[dict]:
+        """For every invoice that got NO rows from design_totals_for_proforma
+        (no packing list directly against it), fall back to the packing
+        list of the quotation it was generated from - the same ancestor
+        PackingListService._ancestor_packing_list already walks to when
+        deciding what to IMPORT into a new PO's packing list.
+
+        Without this fallback, an invoice generated straight from a
+        quotation that skips the PI step (a supported flow: the quotation
+        already has its own packing list, the invoice never gets one of its
+        own) always reports zero required designs - which design_status_map
+        treats as "nothing to compare against" and stops filtering
+        entirely, so every purchase order after the first re-imports the
+        quotation's FULL packing list forever, oblivious to what earlier
+        purchase orders already placed. That was a real bug, not a
+        hypothetical one.
+
+        Two PIs can share the same quotation (each independently missing
+        its own PL), so this fans a quotation's totals out to every invoice
+        that resolves to it rather than picking just one."""
+        covered_ids = {row["pi_id"] for row in required_rows}
+        uncovered_ids = [pi_id for pi_id in ids if pi_id not in covered_ids]
+        if not uncovered_ids:
+            return []
+        quotation_by_pi = self.proforma_invoice_repo.quotation_id_map(uncovered_ids)
+        if not quotation_by_pi:
+            return []
+        pi_ids_by_quotation: dict = {}
+        for pi_id, quotation_id in quotation_by_pi.items():
+            pi_ids_by_quotation.setdefault(quotation_id, []).append(pi_id)
+        quotation_rows = self.packing_list_repo.design_totals_for_quotation(
+            company_id, list(pi_ids_by_quotation.keys()))
+        fallback_rows = []
+        for row in quotation_rows:
+            for pi_id in pi_ids_by_quotation[row["q_id"]]:
+                fallback_rows.append({**row, "pi_id": pi_id})
+        return fallback_rows
+
+    def design_status(self, company_id: int, proforma_invoice_id: int) -> dict:
+        """design_status_map for a single invoice. An invoice with no
+        packing list to track - neither its own nor (via the quotation
+        fallback above) its ancestor quotation's - has nothing to compare
+        against, so it reports zero designs and is_fully_placed=False -
+        there is still work to do, it just isn't broken down into designs
+        yet."""
+        status = self.design_status_map(company_id, [proforma_invoice_id]).get(proforma_invoice_id)
+        if not status:
+            status = {"designs": [], "pending": [], "placed_count": 0, "is_fully_placed": True}
+        if not status["designs"]:
+            status["is_fully_placed"] = False
+        return status
+
+    def pending_designs(self, company_id: int, proforma_invoice_id: int) -> List[dict]:
+        """Just the designs still to be ordered - what the invoice page shows
+        and what a new PO's packing list is prefilled with."""
+        return self.design_status(company_id, proforma_invoice_id)["pending"]
+
+    # ---- the same comparison one level up: PO product lines, not packing-list designs ----
+    def product_status(self, company_id: int, invoice: ProformaInvoice) -> dict:
+        """Which of the invoice's OWN product lines still have quantity not
+        yet placed on any purchase order already linked to it - the PO-
+        creation-time analogue of design_status, one level coarser
+        (product/quantity, not product+design). Takes the already-loaded
+        invoice itself rather than a bare id: its `items` ARE the 'required'
+        side, so unlike design_status (which has to go looking for the PI's
+        packing list) there is no extra read for that half."""
+        placed_rows = self.purchase_order_repo.product_totals_for_proforma(company_id, invoice.id)
+        placed_index = {_product_key(row): row for row in placed_rows}
+
+        products, pending = [], []
+        for item in invoice.items:
+            placed = placed_index.get(_product_key(
+                {"product_id": item.product_id, "product_name": item.product_name}))
+            required_boxes = item.quantity_boxes or 0
+            required_quantity = item.quantity_value or 0
+            placed_boxes = (placed["boxes"] if placed else 0) or 0
+            placed_quantity = (placed["quantity"] if placed else 0) or 0
+
+            # Same yardstick as design_status: boxes decide "done" whenever
+            # the invoice line states them, otherwise the quantity column.
+            if required_boxes > 0:
+                outstanding = required_boxes - placed_boxes
+            else:
+                outstanding = required_quantity - placed_quantity
+            is_placed = outstanding <= _DESIGN_QTY_TOLERANCE
+
+            product = {
+                "product_id": item.product_id, "product_name": item.product_name,
+                "hsn_code": item.hsn_code, "unit": item.unit,
+                "required_boxes": required_boxes, "required_quantity": required_quantity,
+                "placed_boxes": placed_boxes, "placed_quantity": placed_quantity,
+                "pending_boxes": max(required_boxes - placed_boxes, 0),
+                "pending_quantity": max(required_quantity - placed_quantity, 0),
+                "is_placed": is_placed,
+            }
+            products.append(product)
+            if not is_placed:
+                pending.append(product)
+        return {"products": products, "pending": pending,
+                "placed_count": len(products) - len(pending), "is_fully_placed": not pending}
+
+    # ---- the reminder feed --------------------------------------------------
+    def pending_purchase_order_reminders(self, company_id: int,
+                                          created_by: Optional[int] = None) -> List[dict]:
+        """Every CONFIRMED proforma invoice that still has designs nobody has
+        placed a purchase order for, newest invoice first. Derived live on
+        each page load rather than stored, so a reminder appears the moment
+        an invoice is confirmed and disappears the moment the last design is
+        placed - there is no reminder row that can go stale.
+
+        `created_by` narrows the feed to one employee's own invoices (the
+        employee dashboard); admins pass None and see the whole company."""
+        invoices = self.proforma_invoice_repo.list_by_status(company_id, PROFORMA_STATUS_CONFIRMED)
+        if created_by is not None:
+            invoices = [i for i in invoices if i.created_by == created_by]
+        if not invoices:
+            return []
+        status_map = self.design_status_map(company_id, [i.id for i in invoices])
+        po_counts = self.purchase_order_repo.count_map_by_proforma(company_id)
+        reminders = []
+        for invoice in invoices:
+            status = status_map.get(invoice.id) or {}
+            pending = status.get("pending", [])
+            has_packing_list = bool(status.get("designs"))
+            if not pending and has_packing_list:
+                continue  # fully ordered - nothing left to chase
+            reminders.append({
+                "invoice": invoice,
+                "pending": pending,
+                "pending_count": len(pending),
+                "placed_count": status.get("placed_count", 0),
+                "purchase_order_count": po_counts.get(invoice.id, 0),
+                "has_packing_list": has_packing_list,
+            })
+        return reminders
 
 
 # ============================================================

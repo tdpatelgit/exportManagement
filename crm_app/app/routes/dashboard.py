@@ -17,6 +17,12 @@ dashboard_bp = Blueprint("dashboard", __name__)
 def home():
     container = current_app.container
 
+    # Confirmed proforma invoices whose designs aren't all on a purchase
+    # order yet - the whole company's for an admin, your own otherwise.
+    po_reminders = container.proforma_fulfilment_service.pending_purchase_order_reminders(
+        g.user.company_id, created_by=None if g.user.is_admin else g.user.id
+    )
+
     if g.user.is_admin:
         performance = container.stats_service.employee_performance(g.user.company_id)
         overview = container.stats_service.overview_counts(g.user.company_id)
@@ -28,6 +34,7 @@ def home():
             overview=overview,
             recent_leads=recent_leads,
             recent_buyers=recent_buyers,
+            po_reminders=po_reminders,
         )
 
     # Employee view: their own leads + upcoming/overdue follow-ups.
@@ -46,4 +53,5 @@ def home():
         my_lead_count=my_lead_count,
         my_comm_count=my_comm_count,
         followups=followups,
+        po_reminders=po_reminders,
     )

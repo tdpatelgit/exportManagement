@@ -21,6 +21,8 @@
           <th>Invoice no.</th>
           <th>Date</th>
           <th>Consignee</th>
+          <th>Status</th>
+          <th>Purchase orders</th>
           <th>Created by</th>
           <th class="num">Invoice value (USD)</th>
           <th></th>
@@ -32,6 +34,20 @@
           <td class="mono">{{ pi.invoice_number }}</td>
           <td class="text-sm">{{ pi.invoice_date }}</td>
           <td><strong>{{ pi.consignee_name }}</strong></td>
+          <td><span class="stamp {{ 'stamp-green' if pi.is_confirmed else 'stamp-slate' }}">{{ pi.status_label }}</span></td>
+          {# A confirmed invoice with designs nobody has ordered yet is the
+             standing reminder - it stays flagged until the last one is placed. #}
+          <td class="text-sm">
+            {{ po_counts.get(pi.id, 0) }} placed
+            {% set reminder = reminder_map.get(pi.id) %}
+            {% if reminder %}
+              {% if reminder.has_packing_list %}
+              <span class="stamp stamp-amber">{{ reminder.pending_count }} design{{ '' if reminder.pending_count == 1 else 's' }} pending</span>
+              {% else %}
+              <span class="stamp stamp-amber">no packing list</span>
+              {% endif %}
+            {% endif %}
+          </td>
           <td class="text-sm">{{ pi.created_by_name }}</td>
           <td class="num">$ {{ '{:,.2f}'.format(pi.invoice_value_usd) }}</td>
           <td><a href="{{ url_for('proforma_invoices.view_proforma_invoice', proforma_invoice_id=pi.id) }}" class="text-sm">Open →</a></td>

@@ -509,6 +509,7 @@ CREATE TABLE IF NOT EXISTS proforma_invoices (
     bank_branch               TEXT,
     bank_address               TEXT,
     display_mode              TEXT NOT NULL DEFAULT 'index',  -- goods layout: 'index' (numbered) | 'surface' (grouped by category + surface)
+    status                    TEXT NOT NULL DEFAULT 'draft',  -- 'draft' | 'confirmed'; a confirmed PI is locked for editing and reminds until every design on its packing list is placed on a linked PO
     created_by                 INTEGER NOT NULL REFERENCES users(id),
     created_at                  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at                  TEXT NOT NULL DEFAULT (datetime('now')),
@@ -539,7 +540,10 @@ CREATE TABLE IF NOT EXISTS proforma_invoice_items (
 -- supplier is the SELLER, prices are in INR (typically ex-factory per box).
 -- Can be started from an existing proforma invoice - proforma_invoice_id is
 -- a "generated from" reference only, same pattern as
--- proforma_invoices.quotation_id. Tax percentages are stored; the amounts,
+-- proforma_invoices.quotation_id. ONE PI CAN HAVE MANY POs: a single order is
+-- normally split across several suppliers, so the PI page lists every PO
+-- pointing at it and tracks which of its packing-list designs are still
+-- unplaced. Tax percentages are stored; the amounts,
 -- round-off and final order value are always derived from the items.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS purchase_orders (

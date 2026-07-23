@@ -477,6 +477,43 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
 .quote-toolbar .btn-ghost:hover { color: #fff; border-color: var(--color-text-inverse); }
 .quote-toolbar .btn-danger { color: #e79a9a; border-color: #e79a9a; }
 .quote-toolbar .btn-danger:hover { background: rgba(231, 154, 154, 0.15); }
+
+/* Toolbar dropdown (<details>) - used where one document links to MANY of
+   another, e.g. a proforma invoice's purchase orders. No JS: <summary> is
+   styled as a .btn and the panel is absolutely positioned under it. */
+.toolbar-menu { position: relative; }
+.toolbar-menu > summary { list-style: none; cursor: pointer; }
+.toolbar-menu > summary::-webkit-details-marker { display: none; }
+.toolbar-menu-panel {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 20;
+  min-width: 280px; max-height: 60vh; overflow-y: auto;
+  background: var(--color-surface); color: var(--color-text);
+  border: 1px solid var(--color-line); border-radius: var(--radius);
+  box-shadow: var(--shadow-card); padding: 6px;
+}
+.toolbar-menu-item {
+  display: block; padding: 7px 10px; border-radius: 4px;
+  color: var(--color-text); font-size: .82rem; text-align: left;
+}
+.toolbar-menu-item:hover { background: var(--color-paper); text-decoration: none; }
+.toolbar-menu-item .mono { font-weight: 600; }
+.toolbar-menu-item .meta { display: block; font-size: .75rem; color: var(--color-text-soft); }
+.toolbar-menu-empty { padding: 8px 10px; font-size: .8rem; color: var(--color-text-soft); }
+.toolbar-menu-sep { border: 0; border-top: 1px solid var(--color-line); margin: 5px 2px; }
+
+/* Panels shown above a printable sheet (never printed): the confirmation
+   banner and the "designs still to be ordered" table on a proforma invoice. */
+.sheet-note {
+  max-width: 960px; margin: 20px auto -6px; padding: 14px 18px;
+  background: var(--color-surface); border: 1px solid var(--color-line);
+  border-left: 4px solid var(--color-accent); border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+}
+.sheet-note-warning { border-left-color: var(--status-amber); background: var(--color-warning-bg); }
+.sheet-note-done { border-left-color: var(--status-green); background: var(--color-success-bg); }
+.sheet-note h3 { margin: 0 0 4px; font-size: .95rem; }
+.sheet-note p { margin: 0; font-size: .84rem; color: var(--color-text-soft); }
+.sheet-note .ledger { margin-top: 12px; background: #fff; }
 .quote-sheet {
   max-width: 960px; margin: 24px auto 60px; background: #fff; padding: 30px 34px;
   box-shadow: var(--shadow-card); font-size: .6975rem; color: var(--color-text);

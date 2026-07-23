@@ -27,7 +27,7 @@ from app.services import (
     AuthService, LeadService, PartyService, SupplierService, CurrencyService,
     CommunicationService, StatsService, CompanyService, ReportService, ProductService,
     QuotationService, ProformaInvoiceService, PurchaseOrderService, PackingListService, BackupService,
-    DocumentVersionService,
+    DocumentVersionService, ProformaFulfilmentService,
 )
 from app.utils import register_template_helpers
 
@@ -109,14 +109,23 @@ class ServiceContainer:
             self.proforma_invoice_repo, self.product_repo, self.lead_repo, self.quotation_repo,
             self.document_version_service, self.party_repos,
         )
+        # Read-only, repo-only service: which of a proforma invoice's product
+        # lines (and, one level finer, which of its packing-list designs)
+        # are still not placed on any of its purchase orders. Wired before
+        # PurchaseOrderService/PackingListService, which use it to prefill a
+        # new PO/its packing list with just the outstanding amounts.
+        self.proforma_fulfilment_service = ProformaFulfilmentService(
+            self.proforma_invoice_repo, self.packing_list_repo, self.purchase_order_repo,
+        )
         self.purchase_order_service = PurchaseOrderService(
             self.purchase_order_repo, self.product_repo, self.lead_repo, self.proforma_invoice_repo,
             self.document_version_service, self.party_repos, self.supplier_repo, self.company_repo,
+            self.proforma_fulfilment_service,
         )
         self.packing_list_service = PackingListService(
             self.packing_list_repo, self.product_repo, self.design_repo,
             self.lead_repo, self.proforma_invoice_repo, self.document_version_service,
-            self.quotation_repo, self.purchase_order_repo,
+            self.quotation_repo, self.purchase_order_repo, self.proforma_fulfilment_service,
         )
         self.backup_service = BackupService(
             db, Config.DATABASE_PATH, Config.PRODUCT_UPLOAD_FOLDER, Config.SCHEMA_PATH,
@@ -149,7 +158,8 @@ def create_app(config_class=Config) -> Flask:
     @app.context_processor
     def inject_globals():
         from app.models import (LEAD_STATUSES, CLIENT_STATUSES, CLIENT_TYPES, COMMUNICATION_MODES,
-                                PRODUCT_UNITS, PURCHASE_TYPES, EXEMPTION_IGST_PERCENT)
+                                PRODUCT_UNITS, PURCHASE_TYPES, EXEMPTION_IGST_PERCENT,
+                                PROFORMA_STATUSES)
         # The logged-in tenant's own company profile (for the sidebar logo) -
         # one small query per request, only when someone is signed in.
         user = g.get("user")
@@ -164,6 +174,7 @@ def create_app(config_class=Config) -> Flask:
             PRODUCT_UNITS=PRODUCT_UNITS,
             PURCHASE_TYPES=PURCHASE_TYPES,
             EXEMPTION_IGST_PERCENT=EXEMPTION_IGST_PERCENT,
+            PROFORMA_STATUSES=PROFORMA_STATUSES,
         )
 
     register_template_helpers(app)
