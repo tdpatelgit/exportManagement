@@ -40,7 +40,7 @@
       {% if current_user.is_admin %}
       <a href="{{ url_for('purchase_orders.purchase_order_versions', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">Version history</a>
       {% endif %}
-      <form method="POST" action="{{ url_for('purchase_orders.delete_purchase_order', purchase_order_id=purchase_order.id) }}" onsubmit="return confirm('Delete this purchase order?');">
+      <form method="POST" action="{{ url_for('purchase_orders.delete_purchase_order', purchase_order_id=purchase_order.id) }}" onsubmit="return confirmDeleteWithPassword(this, 'Delete this purchase order? Any purchase invoice/packing lists generated from it will also be deleted.');">
         <button type="submit" class="btn btn-danger btn-sm">Delete</button>
       </form>
       <a href="{{ url_for('purchase_orders.combined_purchase_order', purchase_order_id=purchase_order.id) }}" class="btn btn-primary btn-sm">🖨 Generate combined document</a>
@@ -64,5 +64,21 @@
 
   {% include 'purchase_orders/_sheet.html' %}
 
+  <script>
+    function confirmDeleteWithPassword(form, message) {
+      if (!window.confirm(message)) return false;
+      var password = window.prompt('Enter your password to confirm deletion:');
+      if (!password) return false;
+      var input = form.querySelector('input[name="delete_password"]');
+      if (!input) {
+        input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'delete_password';
+        form.appendChild(input);
+      }
+      input.value = password;
+      return true;
+    }
+  </script>
 </body>
 </html>

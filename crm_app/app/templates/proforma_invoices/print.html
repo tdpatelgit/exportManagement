@@ -69,7 +69,7 @@
       <a href="{{ url_for('proforma_invoices.proforma_invoice_versions', proforma_invoice_id=invoice.id) }}" class="btn btn-ghost btn-sm">Version history</a>
       {% endif %}
       {% if not invoice.is_confirmed %}
-      <form method="POST" action="{{ url_for('proforma_invoices.delete_proforma_invoice', proforma_invoice_id=invoice.id) }}" onsubmit="return confirm('Delete this proforma invoice?');">
+      <form method="POST" action="{{ url_for('proforma_invoices.delete_proforma_invoice', proforma_invoice_id=invoice.id) }}" onsubmit="return confirmDeleteWithPassword(this, 'Delete this proforma invoice? Any purchase orders/invoices/packing lists generated from it will also be deleted.');">
         <button type="submit" class="btn btn-danger btn-sm">Delete</button>
       </form>
       {% endif %}
@@ -98,5 +98,21 @@
   {% include 'proforma_invoices/_sheet.html' %}
   {% include 'proforma_invoices/_annexure.html' %}
 
+  <script>
+    function confirmDeleteWithPassword(form, message) {
+      if (!window.confirm(message)) return false;
+      var password = window.prompt('Enter your password to confirm deletion:');
+      if (!password) return false;
+      var input = form.querySelector('input[name="delete_password"]');
+      if (!input) {
+        input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'delete_password';
+        form.appendChild(input);
+      }
+      input.value = password;
+      return true;
+    }
+  </script>
 </body>
 </html>

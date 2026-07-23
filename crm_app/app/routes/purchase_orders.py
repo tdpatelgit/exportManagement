@@ -16,7 +16,7 @@ from datetime import date
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
-from app.utils import login_required, admin_required
+from app.utils import login_required, admin_required, verify_delete_password
 
 purchase_orders_bp = Blueprint("purchase_orders", __name__, url_prefix="/purchase-orders")
 
@@ -282,6 +282,9 @@ def edit_purchase_order(purchase_order_id):
 @purchase_orders_bp.route("/<int:purchase_order_id>/delete", methods=["POST"])
 @login_required
 def delete_purchase_order(purchase_order_id):
+    if not verify_delete_password(g.user, request.form):
+        flash("Incorrect password. Purchase order not deleted.", "error")
+        return redirect(url_for("purchase_orders.view_purchase_order", purchase_order_id=purchase_order_id))
     try:
         purchase_order = current_app.container.purchase_order_service.get(purchase_order_id, g.user.company_id)
         current_app.container.purchase_order_service.delete(g.user, purchase_order_id)

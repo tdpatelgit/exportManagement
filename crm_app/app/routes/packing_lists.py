@@ -15,7 +15,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
 from app.services import pallet_alt_quantity
-from app.utils import login_required, admin_required
+from app.utils import login_required, admin_required, verify_delete_password
 
 packing_lists_bp = Blueprint("packing_lists", __name__, url_prefix="/packing-lists")
 
@@ -393,6 +393,9 @@ def edit_packing_list(packing_list_id):
 @packing_lists_bp.route("/<int:packing_list_id>/delete", methods=["POST"])
 @login_required
 def delete_packing_list(packing_list_id):
+    if not verify_delete_password(g.user, request.form):
+        flash("Incorrect password. Packing list not deleted.", "error")
+        return redirect(url_for("packing_lists.view_packing_list", packing_list_id=packing_list_id))
     try:
         packing_list = current_app.container.packing_list_service.get(packing_list_id, g.user.company_id)
         current_app.container.packing_list_service.delete(g.user, packing_list_id)

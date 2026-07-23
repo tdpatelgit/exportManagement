@@ -12,7 +12,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
 from app.services import pallet_alt_quantity
-from app.utils import login_required, admin_required
+from app.utils import login_required, admin_required, verify_delete_password
 
 quotations_bp = Blueprint("quotations", __name__, url_prefix="/quotations")
 
@@ -240,6 +240,9 @@ def edit_quotation(quotation_id):
 @quotations_bp.route("/<int:quotation_id>/delete", methods=["POST"])
 @login_required
 def delete_quotation(quotation_id):
+    if not verify_delete_password(g.user, request.form):
+        flash("Incorrect password. Quotation not deleted.", "error")
+        return redirect(url_for("quotations.view_quotation", quotation_id=quotation_id))
     try:
         quotation = current_app.container.quotation_service.get(quotation_id, g.user.company_id)
         current_app.container.quotation_service.delete(g.user, quotation_id)

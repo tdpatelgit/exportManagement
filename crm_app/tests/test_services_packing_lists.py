@@ -11,7 +11,7 @@ import pytest
 
 from app.services import _leading_number, pallet_alt_quantity
 from app.models import ProductPalletType, Product
-from app.exceptions import ValidationError
+from app.exceptions import ValidationError, NotFoundError
 
 
 def make_product(container, admin, **over):
@@ -334,7 +334,7 @@ class TestPurchaseInvoicePackingList:
         found = container.packing_list_service.list_for_purchase_invoice(pinv.id, seed.company_id)
         assert len(found) == 1 and found[0].id == pl.id
 
-    def test_deleting_a_purchase_invoice_nulls_its_packing_lists_fk(self, container, seed):
+    def test_deleting_a_purchase_invoice_cascades_to_its_packing_list(self, container, seed):
         po = self._po_with_pl(container, seed)
         pinv = self._purchase_invoice(container, seed, po)
         built = container.packing_list_service.build_prefill_from_purchase_invoice(pinv)
@@ -342,5 +342,5 @@ class TestPurchaseInvoicePackingList:
 
         container.purchase_invoice_service.delete(seed.admin, pinv.id)
 
-        reloaded = container.packing_list_service.get(pl.id, seed.company_id)
-        assert reloaded.purchase_invoice_id is None
+        with pytest.raises(NotFoundError):
+            container.packing_list_service.get(pl.id, seed.company_id)

@@ -30,7 +30,7 @@
     {% if current_user.is_admin %}
     <a href="{{ url_for('purchase_invoices.purchase_invoice_versions', purchase_invoice_id=purchase_invoice.id) }}" class="btn btn-ghost btn-sm">Version history</a>
     {% endif %}
-    <form method="POST" action="{{ url_for('purchase_invoices.delete_purchase_invoice', purchase_invoice_id=purchase_invoice.id) }}" onsubmit="return confirm('Delete this purchase invoice?');">
+    <form method="POST" action="{{ url_for('purchase_invoices.delete_purchase_invoice', purchase_invoice_id=purchase_invoice.id) }}" onsubmit="return confirmDeleteWithPassword(this, 'Delete this purchase invoice? Any packing lists generated from it will also be deleted.');">
       <button type="submit" class="btn btn-danger btn-sm">Delete</button>
     </form>
   </div>

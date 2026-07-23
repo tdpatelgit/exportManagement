@@ -134,6 +134,12 @@ code, .mono, .num { font-family: var(--font-mono); }
   color: #fff;
 }
 
+.nav-dropdown-summary { list-style: none; cursor: pointer; justify-content: space-between; }
+.nav-dropdown-summary::-webkit-details-marker { display: none; }
+.nav-dropdown-summary::after { content: '▸'; font-size: .75rem; color: #91a3b3; transition: transform .15s ease; }
+.nav-dropdown[open] > .nav-dropdown-summary::after { transform: rotate(90deg); }
+.nav-sublink { padding-left: 40px; font-size: .87rem; }
+
 .sidebar-footer {
   margin-top: auto;
   padding: 14px 20px 0;

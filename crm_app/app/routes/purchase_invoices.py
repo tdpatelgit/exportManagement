@@ -19,7 +19,7 @@ from datetime import date
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
-from app.utils import login_required, admin_required
+from app.utils import login_required, admin_required, verify_delete_password
 
 purchase_invoices_bp = Blueprint("purchase_invoices", __name__, url_prefix="/purchase-invoices")
 
@@ -185,6 +185,9 @@ def edit_purchase_invoice(purchase_invoice_id):
 @purchase_invoices_bp.route("/<int:purchase_invoice_id>/delete", methods=["POST"])
 @login_required
 def delete_purchase_invoice(purchase_invoice_id):
+    if not verify_delete_password(g.user, request.form):
+        flash("Incorrect password. Purchase invoice not deleted.", "error")
+        return redirect(url_for("purchase_invoices.view_purchase_invoice", purchase_invoice_id=purchase_invoice_id))
     try:
         purchase_invoice = current_app.container.purchase_invoice_service.get(purchase_invoice_id, g.user.company_id)
         current_app.container.purchase_invoice_service.delete(g.user, purchase_invoice_id)
