@@ -282,6 +282,7 @@ class Supplier:
     created_by: int
     address: Optional[str] = None
     gstin: Optional[str] = None
+    cin_llp_no: Optional[str] = None  # optional: CIN (company) or LLPIN (LLP) registration number
     pan_no: Optional[str] = None
     iec: Optional[str] = None
     created_at: Optional[str] = None
@@ -301,6 +302,7 @@ class Supplier:
             created_by=row["created_by"],
             address=row["address"],
             gstin=row["gstin"],
+            cin_llp_no=row["cin_llp_no"] if "cin_llp_no" in row.keys() else None,
             pan_no=row["pan_no"],
             iec=row["iec"],
             created_at=row["created_at"],

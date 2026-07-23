@@ -20,6 +20,7 @@
     <table class="ledger">
       <tr><td class="text-soft" style="width:40%;">Address</td><td>{{ supplier.address or '—' }}</td></tr>
       <tr><td class="text-soft">GSTIN</td><td>{{ supplier.gstin or '—' }}</td></tr>
+      <tr><td class="text-soft">CIN/LLP No.</td><td>{{ supplier.cin_llp_no or '—' }}</td></tr>
       <tr><td class="text-soft">PAN No.</td><td>{{ supplier.pan_no or '—' }}</td></tr>
       <tr><td class="text-soft">IEC</td><td>{{ supplier.iec or '—' }}</td></tr>
       <tr><td class="text-soft">Supplier since</td><td>{{ supplier.created_at|friendly_date }}</td></tr>

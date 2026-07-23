@@ -78,7 +78,7 @@ def _supplier_json(supplier) -> dict:
     return {
         "id": supplier.id, "company_name": supplier.company_name,
         "address": supplier.address or "", "pan_no": supplier.pan_no or "",
-        "gstin": supplier.gstin or "",
+        "gstin": supplier.gstin or "", "cin_llp_no": supplier.cin_llp_no or "",
     }
 
 
@@ -96,6 +96,7 @@ def api_quick_create():
             company_name=request.form.get("company_name", ""),
             address=request.form.get("address", ""),
             gstin=request.form.get("gstin", ""),
+            cin_llp_no=request.form.get("cin_llp_no", ""),
             pan_no=request.form.get("pan_no", ""),
             iec=request.form.get("iec", ""),
             contact_details=[], contact_persons=[], bank_details=[],
@@ -116,6 +117,7 @@ def new_supplier():
                 company_name=request.form.get("company_name", ""),
                 address=request.form.get("address", ""),
                 gstin=request.form.get("gstin", ""),
+                cin_llp_no=request.form.get("cin_llp_no", ""),
                 pan_no=request.form.get("pan_no", ""),
                 iec=request.form.get("iec", ""),
                 contact_details=_extract_contact_details(request.form),
@@ -165,6 +167,7 @@ def edit_supplier(supplier_id):
                 company_name=request.form.get("company_name", ""),
                 address=request.form.get("address", ""),
                 gstin=request.form.get("gstin", ""),
+                cin_llp_no=request.form.get("cin_llp_no", ""),
                 pan_no=request.form.get("pan_no", ""),
                 iec=request.form.get("iec", ""),
                 contact_details=_extract_contact_details(request.form),
