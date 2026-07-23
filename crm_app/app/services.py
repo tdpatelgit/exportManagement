@@ -2806,7 +2806,8 @@ class ProformaFulfilmentService:
         for row in placed_rows:
             placed_index[(row["pi_id"], _design_key(row))] = row
 
-        result = {pi_id: {"designs": [], "pending": [], "placed_count": 0, "is_fully_placed": True}
+        result = {pi_id: {"designs": [], "pending": [], "over_ordered": [],
+                          "placed_count": 0, "is_fully_placed": True}
                   for pi_id in ids}
         for row in required_rows:
             pi_id = row["pi_id"]
@@ -2823,6 +2824,13 @@ class ProformaFulfilmentService:
             else:
                 outstanding = required_quantity - placed_quantity
             is_placed = outstanding <= _DESIGN_QTY_TOLERANCE
+            # A design isn't only ever "not enough yet" - since it can be
+            # bought piecemeal across several purchase orders, nothing stops
+            # the same design being placed on more than one and adding up to
+            # MORE than the invoice's packing list called for. Over-ordered
+            # is its own state, not just "is_placed" - both get reported so
+            # a caller can flag it without treating it as still-pending.
+            is_over_ordered = outstanding < -_DESIGN_QTY_TOLERANCE
 
             design = {
                 "product_id": row["product_id"],
@@ -2836,10 +2844,15 @@ class ProformaFulfilmentService:
                 "placed_quantity": placed_quantity,
                 "pending_boxes": max(required_boxes - placed_boxes, 0),
                 "pending_quantity": max(required_quantity - placed_quantity, 0),
+                "excess_boxes": max(placed_boxes - required_boxes, 0),
+                "excess_quantity": max(placed_quantity - required_quantity, 0),
                 "is_placed": is_placed,
+                "is_over_ordered": is_over_ordered,
             }
             status = result[pi_id]
             status["designs"].append(design)
+            if is_over_ordered:
+                status["over_ordered"].append(design)
             if is_placed:
                 status["placed_count"] += 1
             else:
@@ -2895,7 +2908,8 @@ class ProformaFulfilmentService:
         yet."""
         status = self.design_status_map(company_id, [proforma_invoice_id]).get(proforma_invoice_id)
         if not status:
-            status = {"designs": [], "pending": [], "placed_count": 0, "is_fully_placed": True}
+            status = {"designs": [], "pending": [], "over_ordered": [],
+                      "placed_count": 0, "is_fully_placed": True}
         if not status["designs"]:
             status["is_fully_placed"] = False
         return status
@@ -2904,6 +2918,14 @@ class ProformaFulfilmentService:
         """Just the designs still to be ordered - what the invoice page shows
         and what a new PO's packing list is prefilled with."""
         return self.design_status(company_id, proforma_invoice_id)["pending"]
+
+    def over_ordered_designs(self, company_id: int, proforma_invoice_id: int) -> List[dict]:
+        """Designs bought (summed across every purchase order linked to this
+        invoice) in excess of what the invoice's own packing list called
+        for - a design need not come from a single PO, so this only shows up
+        once the total across all of them overshoots. What the "bought more
+        than necessary" notification is built from."""
+        return self.design_status(company_id, proforma_invoice_id)["over_ordered"]
 
     # ---- the same comparison one level up: PO product lines, not packing-list designs ----
     def product_status(self, company_id: int, invoice: ProformaInvoice) -> dict:
@@ -2933,6 +2955,7 @@ class ProformaFulfilmentService:
             else:
                 outstanding = required_quantity - placed_quantity
             is_placed = outstanding <= _DESIGN_QTY_TOLERANCE
+            is_over_ordered = outstanding < -_DESIGN_QTY_TOLERANCE
 
             product = {
                 "product_id": item.product_id, "product_name": item.product_name,
@@ -2941,12 +2964,16 @@ class ProformaFulfilmentService:
                 "placed_boxes": placed_boxes, "placed_quantity": placed_quantity,
                 "pending_boxes": max(required_boxes - placed_boxes, 0),
                 "pending_quantity": max(required_quantity - placed_quantity, 0),
+                "excess_boxes": max(placed_boxes - required_boxes, 0),
+                "excess_quantity": max(placed_quantity - required_quantity, 0),
                 "is_placed": is_placed,
+                "is_over_ordered": is_over_ordered,
             }
             products.append(product)
             if not is_placed:
                 pending.append(product)
-        return {"products": products, "pending": pending,
+        over_ordered = [p for p in products if p["is_over_ordered"]]
+        return {"products": products, "pending": pending, "over_ordered": over_ordered,
                 "placed_count": len(products) - len(pending), "is_fully_placed": not pending}
 
     # ---- the reminder feed --------------------------------------------------

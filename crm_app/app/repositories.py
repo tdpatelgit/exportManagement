@@ -1246,7 +1246,19 @@ class QuotationRepository:
                 )
 
     def delete(self, quotation_id: int) -> None:
-        self.db.execute("DELETE FROM quotations WHERE id = ?", (quotation_id,))
+        """proforma_invoices.quotation_id and packing_lists.quotation_id are
+        "generated from" references only (see schema.sql), not an ownership
+        link - deleting the quotation must not be blocked by, or destroy,
+        a document generated from it. Neither column has an ON DELETE clause,
+        so with `PRAGMA foreign_keys = ON` (always on - see Database._connect)
+        SQLite would otherwise reject the delete outright with
+        IntegrityError. Null the references out first, in the same
+        transaction, so those documents simply lose the "generated from"
+        breadcrumb and keep existing standalone."""
+        with self.db.get_connection() as conn:
+            conn.execute("UPDATE proforma_invoices SET quotation_id = NULL WHERE quotation_id = ?", (quotation_id,))
+            conn.execute("UPDATE packing_lists SET quotation_id = NULL WHERE quotation_id = ?", (quotation_id,))
+            conn.execute("DELETE FROM quotations WHERE id = ?", (quotation_id,))
 
 
 class ProformaInvoiceRepository:
@@ -1440,7 +1452,20 @@ class ProformaInvoiceRepository:
                 )
 
     def delete(self, invoice_id: int) -> None:
-        self.db.execute("DELETE FROM proforma_invoices WHERE id = ?", (invoice_id,))
+        """purchase_orders.proforma_invoice_id and packing_lists.
+        proforma_invoice_id are "generated from" references only, same
+        reasoning as QuotationRepository.delete above - null them out first
+        so deleting a proforma invoice that already has purchase orders
+        and/or packing lists generated from it doesn't get rejected by the
+        FK constraint (there is no ON DELETE clause on either column)."""
+        with self.db.get_connection() as conn:
+            conn.execute(
+                "UPDATE purchase_orders SET proforma_invoice_id = NULL WHERE proforma_invoice_id = ?",
+                (invoice_id,))
+            conn.execute(
+                "UPDATE packing_lists SET proforma_invoice_id = NULL WHERE proforma_invoice_id = ?",
+                (invoice_id,))
+            conn.execute("DELETE FROM proforma_invoices WHERE id = ?", (invoice_id,))
 
 
 class PurchaseOrderRepository:
@@ -1608,7 +1633,17 @@ class PurchaseOrderRepository:
                 )
 
     def delete(self, purchase_order_id: int) -> None:
-        self.db.execute("DELETE FROM purchase_orders WHERE id = ?", (purchase_order_id,))
+        """packing_lists.purchase_order_id is a "generated from" reference
+        only, same reasoning as QuotationRepository.delete above - null it
+        out first so deleting a purchase order that already has its own
+        packing list doesn't get rejected by the FK constraint (the column
+        has no ON DELETE clause). This is the exact bug that made every PO
+        with a packing list of its own permanently undeletable."""
+        with self.db.get_connection() as conn:
+            conn.execute(
+                "UPDATE packing_lists SET purchase_order_id = NULL WHERE purchase_order_id = ?",
+                (purchase_order_id,))
+            conn.execute("DELETE FROM purchase_orders WHERE id = ?", (purchase_order_id,))
 
 
 class PackingListRepository:

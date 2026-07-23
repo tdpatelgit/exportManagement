@@ -158,6 +158,40 @@ def _pallet_types_map(product_map) -> dict:
     return result
 
 
+def _flash_if_over_ordered(container, packing_list) -> None:
+    """A design need not be bought from a single PO - it can be split across
+    several, and nothing stops their packing lists from adding up to MORE
+    boxes than the proforma invoice's own packing list called for. Saving a
+    purchase order's own packing list is the moment that becomes visible, so
+    check right after and flash every design currently over its requirement
+    for that invoice (not just the rows on this particular save - the whole
+    current picture, since an earlier PO could be the one now pushed over by
+    this save)."""
+    if not packing_list.purchase_order_id:
+        return
+    try:
+        purchase_order = container.purchase_order_service.get(packing_list.purchase_order_id, g.user.company_id)
+    except NotFoundError:
+        return
+    if not purchase_order.proforma_invoice_id:
+        return
+    over_ordered = container.proforma_fulfilment_service.over_ordered_designs(
+        g.user.company_id, purchase_order.proforma_invoice_id)
+    if not over_ordered:
+        return
+    parts = []
+    for d in over_ordered:
+        if d["required_boxes"] or d["placed_boxes"]:
+            excess, unit = d["excess_boxes"], "boxes"
+        else:
+            excess, unit = d["excess_quantity"], d["unit"]
+        parts.append(f"{d['design_name'] or d['product_name']} (+{excess:,.2f} {unit})")
+    flash(
+        "Bought more than the proforma invoice's packing list calls for: "
+        + ", ".join(parts) + ".", "error",
+    )
+
+
 def catalog_maps(packing_lists) -> tuple:
     """(product_map, design_map) for every item across the given packing
     lists - the print sheet reads each product's shared per-box packing spec
@@ -204,6 +238,7 @@ def new_packing_list():
                 current_user=g.user, fields=_extract_header(request.form), raw_items=_extract_items(request.form),
             )
             flash(f"Packing list {packing_list.packing_list_number} created.", "success")
+            _flash_if_over_ordered(container, packing_list)
             return redirect(url_for("packing_lists.view_packing_list", packing_list_id=packing_list.id))
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
@@ -298,11 +333,12 @@ def edit_packing_list(packing_list_id):
 
     if request.method == "POST":
         try:
-            container.packing_list_service.update(
+            updated = container.packing_list_service.update(
                 current_user=g.user, packing_list_id=packing_list_id,
                 fields=_extract_header(request.form), raw_items=_extract_items(request.form),
             )
             flash(f"Packing list {packing_list.packing_list_number} updated.", "success")
+            _flash_if_over_ordered(container, updated)
             return redirect(url_for("packing_lists.view_packing_list", packing_list_id=packing_list_id))
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")

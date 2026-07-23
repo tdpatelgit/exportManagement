@@ -6,6 +6,51 @@
    are counted in the summary line instead. Screen only, never printed. #}
 {% if design_status %}
 
+{% if design_status.over_ordered %}
+{# A design need not be bought from a single PO - it can be split across
+   several, and their packing lists can add up to MORE boxes than this
+   invoice's own packing list called for. Shown independently of the
+   pending/done state below: some designs can be short while others are
+   over, at the same time. #}
+<div class="sheet-note sheet-note-error no-print">
+  <h3>⚠ Bought more than necessary</h3>
+  <p>
+    {{ design_status.over_ordered | length }} design{{ '' if design_status.over_ordered | length == 1 else 's' }} on this invoice's packing list
+    {{ 'has' if design_status.over_ordered | length == 1 else 'have' }} more boxes placed across its purchase orders than required.
+  </p>
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th>Product</th>
+          <th>Design</th>
+          <th class="num">Boxes needed</th>
+          <th class="num">Ordered</th>
+          <th class="num">Excess</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for design in design_status.over_ordered %}
+        <tr>
+          <td>{{ design.product_name }}</td>
+          <td><strong>{{ design.design_name or '(no design named)' }}</strong></td>
+          {% if design.required_boxes or design.placed_boxes %}
+          <td class="num">{{ '{:,.2f}'.format(design.required_boxes) }}</td>
+          <td class="num">{{ '{:,.2f}'.format(design.placed_boxes) }}</td>
+          <td class="num"><strong>+{{ '{:,.2f}'.format(design.excess_boxes) }}</strong></td>
+          {% else %}
+          <td class="num">{{ '{:,.2f}'.format(design.required_quantity) }} {{ design.unit }}</td>
+          <td class="num">{{ '{:,.2f}'.format(design.placed_quantity) }} {{ design.unit }}</td>
+          <td class="num"><strong>+{{ '{:,.2f}'.format(design.excess_quantity) }} {{ design.unit }}</strong></td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 {% if not design_status.designs %}
   {# Nothing to compare yet: the invoice has no packing list of its own, so
      no design has been broken out to order. Only worth nagging about once
