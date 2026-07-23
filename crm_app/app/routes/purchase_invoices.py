@@ -140,7 +140,9 @@ def view_purchase_invoice(purchase_invoice_id):
         purchase_invoice = container.purchase_invoice_service.get(purchase_invoice_id, g.user.company_id)
     except NotFoundError:
         abort(404)
-    return render_template("purchase_invoices/view.html", purchase_invoice=purchase_invoice)
+    packing_lists = container.packing_list_service.list_for_purchase_invoice(purchase_invoice_id, g.user.company_id)
+    return render_template("purchase_invoices/view.html", purchase_invoice=purchase_invoice,
+                           packing_lists=packing_lists)
 
 
 @purchase_invoices_bp.route("/<int:purchase_invoice_id>/edit", methods=["GET", "POST"])

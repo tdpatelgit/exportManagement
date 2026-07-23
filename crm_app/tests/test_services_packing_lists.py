@@ -271,3 +271,76 @@ class TestPackingListCrud:
             [{"product_name": "P", "quantity_boxes": "5"}])
         found = container.packing_list_service.list_for_quotation(q.id, seed.company_id)
         assert len(found) == 1
+
+
+# ==========================================================================
+# Purchase Invoice's own packing list - imports its linked PO's PL wholesale
+# ==========================================================================
+class TestPurchaseInvoicePackingList:
+    def _po_with_pl(self, container, seed, boxes="10"):
+        po = container.purchase_order_service.create(
+            seed.admin, {"seller_name": "Supplier Ltd", "po_date": "2026-03-01"},
+            [{"product_name": "Tiles", "quantity_boxes": "10", "quantity_value": "100",
+              "price_inr": "500", "price_per": "BOX"}])
+        container.packing_list_service.create(
+            seed.admin, {"packing_list_date": "2026-03-02", "purchase_order_id": po.id},
+            [{"product_name": "Tiles", "design_name": "GLOSSY", "quantity_boxes": boxes,
+              "net_weight_kg": "20"}])
+        return po
+
+    def _purchase_invoice(self, container, seed, po):
+        return container.purchase_invoice_service.create(
+            seed.admin, {
+                "seller_name": "Supplier Ltd", "invoice_number": "SUP-1", "invoice_date": "2026-03-05",
+                "purchase_order_id": str(po.id),
+            },
+            [{"product_name": "Tiles", "quantity_boxes": "10", "quantity_value": "100",
+              "price_inr": "500", "price_per": "BOX"}],
+            [],
+        )
+
+    def test_prefill_imports_the_pos_own_packing_list_wholesale(self, container, seed):
+        po = self._po_with_pl(container, seed, boxes="10")
+        pinv = self._purchase_invoice(container, seed, po)
+
+        prefill = container.packing_list_service.build_prefill_from_purchase_invoice(pinv)
+        assert prefill["fields"]["purchase_invoice_id"] == pinv.id
+        assert len(prefill["items"]) == 1
+        line = prefill["items"][0]
+        assert line["design_name"] == "GLOSSY"
+        assert line["quantity_boxes"] == 10  # imported in FULL, not scaled down
+        assert line["net_weight_kg"] == 20
+        assert "is_placeholder" not in line
+
+    def test_prefill_falls_back_to_placeholders_when_po_has_no_packing_list(self, container, seed):
+        po = container.purchase_order_service.create(
+            seed.admin, {"seller_name": "Supplier Ltd", "po_date": "2026-03-01"},
+            [{"product_name": "Tiles", "quantity_boxes": "10", "quantity_value": "100",
+              "price_inr": "500", "price_per": "BOX"}])
+        pinv = self._purchase_invoice(container, seed, po)
+
+        prefill = container.packing_list_service.build_prefill_from_purchase_invoice(pinv)
+        assert len(prefill["items"]) == 1
+        assert prefill["items"][0]["is_placeholder"] is True
+
+    def test_create_persists_and_links_back(self, container, seed):
+        po = self._po_with_pl(container, seed)
+        pinv = self._purchase_invoice(container, seed, po)
+        built = container.packing_list_service.build_prefill_from_purchase_invoice(pinv)
+        pl = container.packing_list_service.create(
+            seed.admin, built["fields"], built["items"])
+
+        assert pl.purchase_invoice_id == pinv.id
+        found = container.packing_list_service.list_for_purchase_invoice(pinv.id, seed.company_id)
+        assert len(found) == 1 and found[0].id == pl.id
+
+    def test_deleting_a_purchase_invoice_nulls_its_packing_lists_fk(self, container, seed):
+        po = self._po_with_pl(container, seed)
+        pinv = self._purchase_invoice(container, seed, po)
+        built = container.packing_list_service.build_prefill_from_purchase_invoice(pinv)
+        pl = container.packing_list_service.create(seed.admin, built["fields"], built["items"])
+
+        container.purchase_invoice_service.delete(seed.admin, pinv.id)
+
+        reloaded = container.packing_list_service.get(pl.id, seed.company_id)
+        assert reloaded.purchase_invoice_id is None

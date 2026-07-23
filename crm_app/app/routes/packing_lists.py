@@ -21,7 +21,7 @@ packing_lists_bp = Blueprint("packing_lists", __name__, url_prefix="/packing-lis
 
 _HEADER_FIELDS = [
     "packing_list_date", "lead_id", "proforma_invoice_id", "quotation_id", "purchase_order_id",
-    "export_ref_no", "buyer_order_no", "other_reference", "remarks",
+    "purchase_invoice_id", "export_ref_no", "buyer_order_no", "other_reference", "remarks",
 ]
 
 
@@ -83,14 +83,21 @@ def _group_items_by_product(items) -> list:
     return groups
 
 
-def _source_boxes_map(proforma_invoice_id, quotation_id, company_id, purchase_order_id=None) -> dict:
+def _source_boxes_map(proforma_invoice_id, quotation_id, company_id, purchase_order_id=None,
+                       purchase_invoice_id=None) -> dict:
     """product_id -> boxes for that product on the linked quotation/proforma
-    invoice/purchase order, so the packing list form can remind the user how
-    many boxes they're meant to split across design rows - even when
-    reopening a packing list that was created a while ago."""
+    invoice/purchase order/purchase invoice, so the packing list form can
+    remind the user how many boxes they're meant to split across design rows
+    - even when reopening a packing list that was created a while ago."""
     container = current_app.container
     source_items = []
-    if purchase_order_id:
+    if purchase_invoice_id:
+        try:
+            purchase_invoice = container.purchase_invoice_service.get(int(purchase_invoice_id), company_id)
+            source_items = purchase_invoice.items
+        except (NotFoundError, ValueError, TypeError):
+            pass
+    elif purchase_order_id:
         try:
             purchase_order = container.purchase_order_service.get(int(purchase_order_id), company_id)
             source_items = purchase_order.items
@@ -117,7 +124,8 @@ def _form_context():
     invoices = container.proforma_invoice_service.list_all(g.user.company_id)
     quotations = container.quotation_service.list_all(g.user.company_id)
     purchase_orders = container.purchase_order_service.list_all(g.user.company_id)
-    return leads, invoices, quotations, purchase_orders
+    purchase_invoices = container.purchase_invoice_service.list_all(g.user.company_id)
+    return leads, invoices, quotations, purchase_orders, purchase_invoices
 
 
 def _product_map(items) -> dict:
@@ -242,29 +250,39 @@ def new_packing_list():
             return redirect(url_for("packing_lists.view_packing_list", packing_list_id=packing_list.id))
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
-            leads, invoices, quotations, purchase_orders = _form_context()
+            leads, invoices, quotations, purchase_orders, purchase_invoices = _form_context()
             items = _extract_items(request.form)
             product_map = _product_map(items)
             return render_template(
                 "packing_lists/form.html", packing_list=None, leads=leads, invoices=invoices, quotations=quotations,
-                purchase_orders=purchase_orders,
+                purchase_orders=purchase_orders, purchase_invoices=purchase_invoices,
                 form_data=request.form, form_items=items, item_groups=_group_items_by_product(items),
                 product_map=product_map, pallet_types_map=_pallet_types_map(product_map),
                 today=date.today().isoformat(),
                 source_boxes_map=_source_boxes_map(
                     request.form.get("proforma_invoice_id"), request.form.get("quotation_id"), g.user.company_id,
-                    request.form.get("purchase_order_id"),
+                    request.form.get("purchase_order_id"), request.form.get("purchase_invoice_id"),
                 ),
             ), 400
 
-    leads, invoices, quotations, purchase_orders = _form_context()
+    leads, invoices, quotations, purchase_orders, purchase_invoices = _form_context()
     prefill = None
     form_items = None
     proforma_invoice_id = request.args.get("proforma_invoice_id")
     quotation_id = request.args.get("quotation_id")
     purchase_order_id = request.args.get("purchase_order_id")
+    purchase_invoice_id = request.args.get("purchase_invoice_id")
     lead_id = request.args.get("lead_id")
-    if purchase_order_id:
+    if purchase_invoice_id:
+        try:
+            purchase_invoice = container.purchase_invoice_service.get(int(purchase_invoice_id), g.user.company_id)
+            built = container.packing_list_service.build_prefill_from_purchase_invoice(purchase_invoice)
+            prefill = built["fields"]
+            prefill["packing_list_date"] = date.today().isoformat()
+            form_items = built["items"]
+        except (NotFoundError, ValueError):
+            pass
+    elif purchase_order_id:
         try:
             purchase_order = container.purchase_order_service.get(int(purchase_order_id), g.user.company_id)
             built = container.packing_list_service.build_prefill_from_purchase_order(purchase_order)
@@ -300,11 +318,12 @@ def new_packing_list():
     product_map = _product_map(form_items) if form_items else {}
     return render_template(
         "packing_lists/form.html", packing_list=None, leads=leads, invoices=invoices, quotations=quotations,
-        purchase_orders=purchase_orders,
+        purchase_orders=purchase_orders, purchase_invoices=purchase_invoices,
         form_data=prefill, form_items=form_items, item_groups=_group_items_by_product(form_items or []),
         product_map=product_map, pallet_types_map=_pallet_types_map(product_map),
         today=date.today().isoformat(),
-        source_boxes_map=_source_boxes_map(proforma_invoice_id, quotation_id, g.user.company_id, purchase_order_id),
+        source_boxes_map=_source_boxes_map(proforma_invoice_id, quotation_id, g.user.company_id, purchase_order_id,
+                                           purchase_invoice_id),
     )
 
 
@@ -342,31 +361,32 @@ def edit_packing_list(packing_list_id):
             return redirect(url_for("packing_lists.view_packing_list", packing_list_id=packing_list_id))
         except (ValidationError, PermissionDeniedError) as e:
             flash(str(e), "error")
-            leads, invoices, quotations, purchase_orders = _form_context()
+            leads, invoices, quotations, purchase_orders, purchase_invoices = _form_context()
             items = _extract_items(request.form)
             product_map = _product_map(items)
             return render_template(
                 "packing_lists/form.html", packing_list=packing_list, leads=leads, invoices=invoices,
-                quotations=quotations, purchase_orders=purchase_orders,
+                quotations=quotations, purchase_orders=purchase_orders, purchase_invoices=purchase_invoices,
                 form_data=request.form, form_items=items, item_groups=_group_items_by_product(items),
                 product_map=product_map, pallet_types_map=_pallet_types_map(product_map),
                 today=date.today().isoformat(),
                 source_boxes_map=_source_boxes_map(
                     request.form.get("proforma_invoice_id"), request.form.get("quotation_id"), g.user.company_id,
-                    request.form.get("purchase_order_id"),
+                    request.form.get("purchase_order_id"), request.form.get("purchase_invoice_id"),
                 ),
             ), 400
 
-    leads, invoices, quotations, purchase_orders = _form_context()
+    leads, invoices, quotations, purchase_orders, purchase_invoices = _form_context()
     product_map = _product_map(packing_list.items)
     return render_template(
         "packing_lists/form.html", packing_list=packing_list, leads=leads, invoices=invoices, quotations=quotations,
-        purchase_orders=purchase_orders,
+        purchase_orders=purchase_orders, purchase_invoices=purchase_invoices,
         form_data=None, form_items=None, item_groups=_group_items_by_product(packing_list.items),
         product_map=product_map, pallet_types_map=_pallet_types_map(product_map),
         today=date.today().isoformat(),
         source_boxes_map=_source_boxes_map(packing_list.proforma_invoice_id, packing_list.quotation_id,
-                                           g.user.company_id, packing_list.purchase_order_id),
+                                           g.user.company_id, packing_list.purchase_order_id,
+                                           packing_list.purchase_invoice_id),
     )
 
 

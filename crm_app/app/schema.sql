@@ -673,10 +673,12 @@ CREATE TABLE IF NOT EXISTS purchase_invoice_vehicles (
 -- PACKING LISTS  (header + line items, number generated as
 -- PL{YYYYMMDD}{seq-of-that-day} per company. Normally started from an
 -- existing proforma invoice, but can also be started directly from a
--- Quotation (skipping the PI step) - proforma_invoice_id/quotation_id are
--- both "generated from" reference only, same pattern as
--- proforma_invoices.quotation_id. Each line breaks a product's quantity down
--- into a specific DESIGN in smaller quantities.)
+-- Quotation (skipping the PI step), from a Purchase Order (the PO's own
+-- PL), or from a Purchase Invoice (that invoice's own PL, importing the
+-- linked PO's PL wholesale) - proforma_invoice_id/quotation_id/
+-- purchase_order_id/purchase_invoice_id are all "generated from" reference
+-- only, same pattern as proforma_invoices.quotation_id. Each line breaks a
+-- product's quantity down into a specific DESIGN in smaller quantities.)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS packing_lists (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -687,6 +689,7 @@ CREATE TABLE IF NOT EXISTS packing_lists (
     proforma_invoice_id     INTEGER REFERENCES proforma_invoices(id),   -- optional, "generated from" reference only
     quotation_id            INTEGER REFERENCES quotations(id),         -- optional, "generated from" reference only (skips the PI step)
     purchase_order_id       INTEGER REFERENCES purchase_orders(id),    -- optional, "generated from" reference only (the PO's own PL)
+    purchase_invoice_id     INTEGER REFERENCES purchase_invoices(id),  -- optional, "generated from" reference only (the Purchase Invoice's own PL)
     export_ref_no           TEXT,
     buyer_order_no          TEXT,
     other_reference         TEXT,
