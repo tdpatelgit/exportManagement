@@ -412,55 +412,6 @@ class OurCompany:
 
 
 @dataclass
-class Permit:
-    """One "permission" the company holds, managed under the Our Company
-    area. Tied to a single supplier, it records the issuing authority and
-    place of stuffing, is either valid until an expiry date OR a one-time
-    permit (validity_type), and can carry an uploaded PDF. supplier_name is
-    joined in for display and is not a stored column."""
-    id: Optional[int]
-    company_id: int
-    supplier_id: Optional[int]
-    permission_number: str
-    created_by: int
-    date_of_issue: Optional[str] = None
-    issuing_authority: Optional[str] = None
-    issuing_authority_address: Optional[str] = None
-    place_of_stuffing: Optional[str] = None
-    validity_type: str = "expiry"  # 'expiry' | 'one_time'
-    date_of_expiry: Optional[str] = None  # only when validity_type == 'expiry'
-    pdf_path: Optional[str] = None  # relative to static/
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
-    supplier_name: Optional[str] = None  # joined for display, not stored
-
-    @property
-    def is_one_time(self) -> bool:
-        return self.validity_type == "one_time"
-
-    @staticmethod
-    def from_row(row) -> "Permit":
-        keys = row.keys()
-        return Permit(
-            id=row["id"],
-            company_id=row["company_id"],
-            supplier_id=row["supplier_id"],
-            permission_number=row["permission_number"],
-            created_by=row["created_by"],
-            date_of_issue=row["date_of_issue"],
-            issuing_authority=row["issuing_authority"],
-            issuing_authority_address=row["issuing_authority_address"],
-            place_of_stuffing=row["place_of_stuffing"],
-            validity_type=row["validity_type"],
-            date_of_expiry=row["date_of_expiry"],
-            pdf_path=row["pdf_path"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-            supplier_name=row["supplier_name"] if "supplier_name" in keys else None,
-        )
-
-
-@dataclass
 class Category:
     """A folder at the catalog root that groups products. `parent_id=None`
     means it sits at the catalog's top level; categories nest to any depth

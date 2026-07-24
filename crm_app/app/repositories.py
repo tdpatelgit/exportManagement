@@ -18,7 +18,7 @@ from typing import Optional, List
 from app.database import Database
 from app.models import (
     Tenant, User, Lead, Party, Supplier, ContactPerson, Communication,
-    PaymentEntry, DocumentEntry, OurCompany, Permit, Category, Product, ProductPalletType, ProductFolder, Design,
+    PaymentEntry, DocumentEntry, OurCompany, Category, Product, ProductPalletType, ProductFolder, Design,
     Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
     PurchaseOrder, PurchaseOrderItem,
     PurchaseInvoice, PurchaseInvoiceItem,
@@ -817,56 +817,6 @@ class CompanyRepository:
 # ============================================================
 # PRODUCT CATALOG (products -> folders -> designs)
 # ============================================================
-class PermitRepository:
-    """The permits ("permissions") a company holds, each tied to a supplier
-    and optionally carrying an uploaded PDF. Managed under the Our Company
-    area. The supplier's display name is joined in on every read."""
-
-    def __init__(self, db: Database):
-        self.db = db
-
-    _SELECT = (
-        "SELECT p.*, s.company_name AS supplier_name "
-        "FROM permits p LEFT JOIN suppliers s ON s.id = p.supplier_id "
-    )
-
-    def get_by_id(self, permit_id: int) -> Optional[Permit]:
-        row = self.db.query_one(self._SELECT + "WHERE p.id = ?", (permit_id,))
-        return Permit.from_row(row) if row else None
-
-    def list_all(self, company_id: int) -> List[Permit]:
-        rows = self.db.query(
-            self._SELECT + "WHERE p.company_id = ? ORDER BY p.date_of_issue DESC, p.id DESC",
-            (company_id,),
-        )
-        return [Permit.from_row(r) for r in rows]
-
-    def create(self, permit: Permit) -> Permit:
-        new_id = self.db.execute(
-            "INSERT INTO permits (company_id, supplier_id, permission_number, date_of_issue, "
-            "issuing_authority, issuing_authority_address, place_of_stuffing, validity_type, "
-            "date_of_expiry, pdf_path, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (permit.company_id, permit.supplier_id, permit.permission_number, permit.date_of_issue,
-             permit.issuing_authority, permit.issuing_authority_address, permit.place_of_stuffing,
-             permit.validity_type, permit.date_of_expiry, permit.pdf_path, permit.created_by),
-        )
-        return self.get_by_id(new_id)
-
-    def update(self, permit_id: int, permit: Permit) -> None:
-        self.db.execute(
-            "UPDATE permits SET supplier_id = ?, permission_number = ?, date_of_issue = ?, "
-            "issuing_authority = ?, issuing_authority_address = ?, place_of_stuffing = ?, "
-            "validity_type = ?, date_of_expiry = ?, pdf_path = ?, updated_at = datetime('now') "
-            "WHERE id = ?",
-            (permit.supplier_id, permit.permission_number, permit.date_of_issue,
-             permit.issuing_authority, permit.issuing_authority_address, permit.place_of_stuffing,
-             permit.validity_type, permit.date_of_expiry, permit.pdf_path, permit_id),
-        )
-
-    def delete(self, permit_id: int) -> None:
-        self.db.execute("DELETE FROM permits WHERE id = ?", (permit_id,))
-
-
 class CategoryRepository:
     """Categories are folders at the catalog root that group products, and
     (like sub categories inside a product) nest to any depth via a

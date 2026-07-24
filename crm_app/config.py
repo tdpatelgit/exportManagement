@@ -79,11 +79,6 @@ class Config:
     PURCHASE_INVOICE_UPLOAD_FOLDER = os.path.join(BASE_DIR, "app", "static", "uploads", "purchase_invoices")
     ALLOWED_DOCUMENT_EXTENSIONS = {"pdf"}
 
-    # Where an uploaded Permit ("Permission", managed under Our Company) PDF
-    # gets saved - each permit optionally carries the company's own permit
-    # document. Lives under static/ so Flask serves it via url_for('static', ...).
-    PERMIT_UPLOAD_FOLDER = os.path.join(BASE_DIR, "app", "static", "uploads", "permits")
-
     # Global cap on any single upload. Product photos are validated separately
     # by extension/type, so the only thing needing a large cap is a Database
     # Backup restore, whose ZIP holds the whole DB + every product image -

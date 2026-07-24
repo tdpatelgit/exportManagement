@@ -29,7 +29,7 @@ from werkzeug.utils import secure_filename
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
 from app.models import (
-    User, Lead, Party, Supplier, Permit, ContactPerson, Communication, PaymentEntry, DocumentEntry,
+    User, Lead, Party, Supplier, ContactPerson, Communication, PaymentEntry, DocumentEntry,
     LEAD_STATUSES, CLIENT_STATUSES, CLIENT_STATUS_ADVANCE_ON, PRODUCT_UNITS, Category, Product,
     ProductPalletType, ProductFolder,
     Design, Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
@@ -42,7 +42,7 @@ from app.repositories import (
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
     CategoryRepository, ProductRepository, ProductPalletTypeRepository, ProductFolderRepository, DesignRepository,
     QuotationRepository, ProformaInvoiceRepository, PurchaseOrderRepository, PurchaseInvoiceRepository,
-    PackingListRepository, DocumentVersionRepository, PermitRepository,
+    PackingListRepository, DocumentVersionRepository,
 )
 from app.database import Database, SCHEMA_VERSION
 
@@ -811,116 +811,6 @@ class CompanyService:
         full_path = os.path.join(self.upload_folder, os.path.basename(relative_path))
         if os.path.exists(full_path):
             os.remove(full_path)
-
-
-# ============================================================
-# PERMIT SERVICE (the "Permissions" tab under Our Company)
-# ============================================================
-class PermitService:
-    """The permits ("permissions") a company holds. Each references one
-    supplier, records the issuing-authority details and place of stuffing,
-    is either valid until an expiry date OR a one-time permit, and can carry
-    an uploaded PDF (same save/delete pattern as PurchaseInvoiceService).
-    Admin-only, like the rest of the Our Company area - the route enforces
-    that; the service still keeps everything company-scoped."""
-
-    VALIDITY_TYPES = ("expiry", "one_time")
-
-    def __init__(self, permit_repo: PermitRepository, supplier_repo: SupplierRepositoryBase,
-                 upload_folder: str = "", allowed_extensions: set = frozenset()):
-        self.permit_repo = permit_repo
-        self.supplier_repo = supplier_repo
-        self.upload_folder = upload_folder
-        self.allowed_extensions = allowed_extensions
-
-    # ---- reads --------------------------------------------------
-    def get(self, permit_id: int, company_id: int) -> Permit:
-        permit = self.permit_repo.get_by_id(permit_id)
-        if not permit or permit.company_id != company_id:
-            # 404, not 403 - don't reveal that another company's permit exists.
-            raise NotFoundError(f"Permit #{permit_id} not found.")
-        return permit
-
-    def list_all(self, company_id: int) -> List[Permit]:
-        return self.permit_repo.list_all(company_id)
-
-    # ---- PDF storage (mirrors PurchaseInvoiceService._save_pdf) --------------------------------------------------
-    def _save_pdf(self, file_storage) -> Optional[str]:
-        if not file_storage or not file_storage.filename:
-            return None
-        filename = secure_filename(file_storage.filename)
-        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-        if ext not in self.allowed_extensions:
-            raise ValidationError(f"Unsupported file type '.{ext}'. Allowed: {', '.join(sorted(self.allowed_extensions))}.")
-        os.makedirs(self.upload_folder, exist_ok=True)
-        stored_name = f"{uuid.uuid4().hex}_{filename}"
-        file_storage.save(os.path.join(self.upload_folder, stored_name))
-        return f"uploads/permits/{stored_name}"
-
-    def _delete_pdf_file(self, relative_path: Optional[str]) -> None:
-        if not relative_path:
-            return
-        full_path = os.path.join(self.upload_folder, os.path.basename(relative_path))
-        if os.path.exists(full_path):
-            os.remove(full_path)
-
-    # ---- validation --------------------------------------------------
-    def _build(self, current_user: User, fields: dict) -> Permit:
-        permission_number = (fields.get("permission_number") or "").strip()
-        if not permission_number:
-            raise ValidationError("Permission number is compulsory.")
-
-        supplier_id = int(fields["supplier_id"]) if fields.get("supplier_id") else None
-        if supplier_id is None:
-            raise ValidationError("Supplier is compulsory.")
-        supplier = self.supplier_repo.get_by_id(supplier_id)
-        if not supplier or supplier.company_id != current_user.company_id:
-            raise ValidationError("Please choose a valid supplier.")
-
-        validity_type = (fields.get("validity_type") or "expiry").strip()
-        if validity_type not in self.VALIDITY_TYPES:
-            validity_type = "expiry"
-        date_of_expiry = (fields.get("date_of_expiry") or "").strip() or None
-        if validity_type == "one_time":
-            date_of_expiry = None
-        elif not date_of_expiry:
-            raise ValidationError("Date of expiry is compulsory unless the permit is one-time.")
-
-        return Permit(
-            id=None, company_id=current_user.company_id, supplier_id=supplier_id,
-            permission_number=permission_number, created_by=current_user.id,
-            date_of_issue=(fields.get("date_of_issue") or "").strip() or None,
-            issuing_authority=(fields.get("issuing_authority") or "").strip() or None,
-            issuing_authority_address=(fields.get("issuing_authority_address") or "").strip() or None,
-            place_of_stuffing=(fields.get("place_of_stuffing") or "").strip() or None,
-            validity_type=validity_type, date_of_expiry=date_of_expiry,
-        )
-
-    # ---- writes --------------------------------------------------
-    def create(self, current_user: User, fields: dict, pdf_file=None) -> Permit:
-        permit = self._build(current_user, fields)
-        permit.pdf_path = self._save_pdf(pdf_file)
-        return self.permit_repo.create(permit)
-
-    def update(self, current_user: User, permit_id: int, fields: dict,
-               pdf_file=None, remove_pdf: bool = False) -> Permit:
-        existing = self.get(permit_id, current_user.company_id)
-        permit = self._build(current_user, fields)
-        if pdf_file and pdf_file.filename:
-            permit.pdf_path = self._save_pdf(pdf_file)
-            self._delete_pdf_file(existing.pdf_path)
-        elif remove_pdf:
-            self._delete_pdf_file(existing.pdf_path)
-            permit.pdf_path = None
-        else:
-            permit.pdf_path = existing.pdf_path
-        self.permit_repo.update(permit_id, permit)
-        return self.get(permit_id, current_user.company_id)
-
-    def delete(self, current_user: User, permit_id: int) -> None:
-        existing = self.get(permit_id, current_user.company_id)
-        self._delete_pdf_file(existing.pdf_path)
-        self.permit_repo.delete(permit_id)
 
 
 # ============================================================

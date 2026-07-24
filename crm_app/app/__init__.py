@@ -21,14 +21,14 @@ from app.repositories import (
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
     CategoryRepository, ProductRepository, ProductPalletTypeRepository, ProductFolderRepository, DesignRepository,
     QuotationRepository, ProformaInvoiceRepository, PurchaseOrderRepository, PurchaseInvoiceRepository,
-    PackingListRepository, DocumentVersionRepository, PermitRepository,
+    PackingListRepository, DocumentVersionRepository,
 )
 from app.services import (
     AuthService, LeadService, PartyService, SupplierService, CurrencyService,
     CommunicationService, StatsService, CompanyService, ReportService, ProductService,
     QuotationService, ProformaInvoiceService, PurchaseOrderService, PurchaseInvoiceService,
     PackingListService, BackupService, DocumentVersionService, ProformaFulfilmentService,
-    InventoryService, PermitService,
+    InventoryService,
 )
 from app.utils import register_template_helpers
 
@@ -64,7 +64,6 @@ class ServiceContainer:
         self.purchase_invoice_repo = PurchaseInvoiceRepository(db)
         self.packing_list_repo = PackingListRepository(db)
         self.document_version_repo = DocumentVersionRepository(db)
-        self.permit_repo = PermitRepository(db)
 
         # Services (business logic layer)
         self.auth_service = AuthService(self.user_repo, self.tenant_repo)
@@ -105,10 +104,6 @@ class ServiceContainer:
             Config.PRODUCT_UPLOAD_FOLDER, Config.ALLOWED_IMAGE_EXTENSIONS,
         )
         self.inventory_service = InventoryService(self.product_service, self.packing_list_repo)
-        self.permit_service = PermitService(
-            self.permit_repo, self.supplier_repo,
-            Config.PERMIT_UPLOAD_FOLDER, Config.ALLOWED_DOCUMENT_EXTENSIONS,
-        )
         self.document_version_service = DocumentVersionService(self.document_version_repo)
         self.quotation_service = QuotationService(
             self.quotation_repo, self.product_repo, self.lead_repo, self.document_version_service,
@@ -146,7 +141,6 @@ class ServiceContainer:
             {
                 "uploads/products": Config.PRODUCT_UPLOAD_FOLDER,
                 "uploads/purchase_invoices": Config.PURCHASE_INVOICE_UPLOAD_FOLDER,
-                "uploads/permits": Config.PERMIT_UPLOAD_FOLDER,
             },
             Config.SCHEMA_PATH,
         )
@@ -207,7 +201,6 @@ def create_app(config_class=Config) -> Flask:
     from app.routes.suppliers import suppliers_bp
     from app.routes.admin import admin_bp
     from app.routes.company import company_bp
-    from app.routes.permits import permits_bp
     from app.routes.reports import reports_bp
     from app.routes.products import products_bp
     from app.routes.inventory import inventory_bp
@@ -230,7 +223,6 @@ def create_app(config_class=Config) -> Flask:
     app.register_blueprint(exporters_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(company_bp)
-    app.register_blueprint(permits_bp)
     app.register_blueprint(reports_bp)
     app.register_blueprint(products_bp)
     app.register_blueprint(inventory_bp)
