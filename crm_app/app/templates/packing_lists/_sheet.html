@@ -50,7 +50,9 @@
 
     <tr><td class="pk-title" colspan="14">&lt; &lt; &lt; &lt; &lt; &nbsp;PACKING DETAILS&nbsp; &gt; &gt; &gt; &gt; &gt;</td></tr>
 
-    {% if packing_list.purchase_invoice_id %}
+    {% if packing_list.job_work_id %}
+      {% set pk_src_label, pk_src_number = 'JOB WORK NO', packing_list.job_work_number %}
+    {% elif packing_list.purchase_invoice_id %}
       {% set pk_src_label, pk_src_number = 'PURCHASE INVOICE NO', packing_list.purchase_invoice_number %}
     {% elif packing_list.purchase_order_id %}
       {% set pk_src_label, pk_src_number = 'PURCHASE ORDER NO', packing_list.purchase_order_number %}

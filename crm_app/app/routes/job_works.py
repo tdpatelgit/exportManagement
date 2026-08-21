@@ -133,6 +133,7 @@ def _product_meta_map(products) -> dict:
             catalog_product = container.product_service.get_product(product_id, g.user.company_id)
             result[product_id] = {
                 "alt_qty": catalog_product.alternate_quantity or "", "igst": catalog_product.igst_percent or "",
+                "unit": catalog_product.alternate_quantity_unit or "",
             }
         except NotFoundError:
             pass
@@ -187,6 +188,7 @@ def _render_form(job_work, form_data, form_items, status=200, form_products=None
         products=products, form_data=form_data, form_items=form_items,
         invoice_products=invoice_products, invoice_quantities=invoice_quantities,
         invoice_quantities_by_design=invoice_quantities_by_design,
+        invoice_product_meta_map=_product_meta_map(invoice_products),
         form_products=pl_rows, product_meta_map=_product_meta_map(pl_rows),
         today=date.today().isoformat(),
     ), status
@@ -258,8 +260,9 @@ def view_job_work(job_work_id):
             invoice = container.proforma_invoice_service.get(job_work.proforma_invoice_id, g.user.company_id)
         except NotFoundError:
             pass
+    packing_lists = container.packing_list_service.list_for_job_work(job_work_id, g.user.company_id)
     return render_template("job_works/print.html", job_work=job_work, company=company,
-                           proforma_invoice=invoice)
+                           proforma_invoice=invoice, packing_lists=packing_lists)
 
 
 @job_works_bp.route("/<int:job_work_id>/edit", methods=["GET", "POST"])

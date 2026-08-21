@@ -1850,6 +1850,7 @@ class PackingList:
     quotation_id: Optional[int] = None
     purchase_order_id: Optional[int] = None
     purchase_invoice_id: Optional[int] = None
+    job_work_id: Optional[int] = None
     export_ref_no: Optional[str] = None
     buyer_order_no: Optional[str] = None
     other_reference: Optional[str] = None
@@ -1872,6 +1873,7 @@ class PackingList:
     quotation_number: Optional[str] = None  # populated by joined queries only
     purchase_order_number: Optional[str] = None  # populated by joined queries only
     purchase_invoice_number: Optional[str] = None  # populated by joined queries only
+    job_work_number: Optional[str] = None  # populated by joined queries only
     items: List[PackingListItem] = field(default_factory=list)
 
     @staticmethod
@@ -1885,6 +1887,7 @@ class PackingList:
             quotation_id=row["quotation_id"] if "quotation_id" in row.keys() else None,
             purchase_order_id=row["purchase_order_id"] if "purchase_order_id" in row.keys() else None,
             purchase_invoice_id=row["purchase_invoice_id"] if "purchase_invoice_id" in row.keys() else None,
+            job_work_id=row["job_work_id"] if "job_work_id" in row.keys() else None,
             export_ref_no=row["export_ref_no"],
             buyer_order_no=row["buyer_order_no"],
             other_reference=row["other_reference"],
@@ -1909,6 +1912,7 @@ class PackingList:
             quotation_number=row["quotation_number"] if "quotation_number" in row.keys() else None,
             purchase_order_number=row["purchase_order_number"] if "purchase_order_number" in row.keys() else None,
             purchase_invoice_number=row["purchase_invoice_number"] if "purchase_invoice_number" in row.keys() else None,
+            job_work_number=row["job_work_number"] if "job_work_number" in row.keys() else None,
         )
 
     @property

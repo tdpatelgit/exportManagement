@@ -29,6 +29,11 @@
       {% if proforma_invoice %}
       <a href="{{ url_for('proforma_invoices.view_proforma_invoice', proforma_invoice_id=proforma_invoice.id) }}" class="btn btn-ghost btn-sm">📄 View proforma invoice</a>
       {% endif %}
+      {% if packing_lists %}
+      <a href="{{ url_for('packing_lists.view_packing_list', packing_list_id=packing_lists[0].id) }}" class="btn btn-ghost btn-sm">📦 View packing list</a>
+      {% else %}
+      <a href="{{ url_for('packing_lists.new_packing_list', job_work_id=job_work.id) }}" class="btn btn-ghost btn-sm">📦 Create packing list</a>
+      {% endif %}
       <a href="{{ url_for('job_works.edit_job_work', job_work_id=job_work.id) }}" class="btn btn-ghost btn-sm">Edit</a>
       {% if current_user.is_admin %}
       <a href="{{ url_for('job_works.job_work_versions', job_work_id=job_work.id) }}" class="btn btn-ghost btn-sm">Version history</a>

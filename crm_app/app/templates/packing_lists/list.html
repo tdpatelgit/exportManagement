@@ -12,7 +12,7 @@
   </div>
 </div>
 
-{% set doc_types = [('purchase_invoice', 'Purchase Invoice'), ('purchase_order', 'Purchase Order'), ('quotation', 'Quotation'), ('proforma_invoice', 'Proforma Invoice')] %}
+{% set doc_types = [('purchase_invoice', 'Purchase Invoice'), ('purchase_order', 'Purchase Order'), ('quotation', 'Quotation'), ('proforma_invoice', 'Proforma Invoice'), ('job_work', 'Job Work')] %}
 <div class="subnav">
   <a href="{{ url_for('packing_lists.list_packing_lists', client=client_filter) }}" class="{{ 'active' if not doc_type_filter }}">All</a>
   {% for key, label in doc_types %}
@@ -53,7 +53,9 @@
           <td class="text-sm">{{ pl.packing_list_date }}</td>
           <td class="text-sm">{{ '{:,.2f}'.format(pl.total_quantity) }}</td>
           <td class="text-sm">
-            {% if pl.purchase_invoice_id %}
+            {% if pl.job_work_id %}
+              <span class="pill">Job Work</span> <a href="{{ url_for('job_works.view_job_work', job_work_id=pl.job_work_id) }}">{{ pl.job_work_number or ('#' ~ pl.job_work_id) }}</a>
+            {% elif pl.purchase_invoice_id %}
               <span class="pill">Purchase Invoice</span> <a href="{{ url_for('purchase_invoices.view_purchase_invoice', purchase_invoice_id=pl.purchase_invoice_id) }}">{{ pl.purchase_invoice_number or ('#' ~ pl.purchase_invoice_id) }}</a>
             {% elif pl.purchase_order_id %}
               <span class="pill">PO</span> <a href="{{ url_for('purchase_orders.view_purchase_order', purchase_order_id=pl.purchase_order_id) }}">{{ pl.purchase_order_number or ('#' ~ pl.purchase_order_id) }}</a>

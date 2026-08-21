@@ -13,6 +13,7 @@ unit-tested with fake in-memory repositories.
 
 import os
 import re
+import math
 import json
 import uuid
 import shutil
@@ -3632,7 +3633,7 @@ class JobWorkService:
 
             converted_quantity = round(source_quantity / conversion_value, 2)
             extra_quantity = round(converted_quantity * extra_percent / 100, 2)
-            job_quantity = round(converted_quantity + extra_quantity, 2)
+            job_quantity = math.ceil(converted_quantity + extra_quantity)
             if job_quantity <= 0:
                 raise ValidationError(
                     f"Row {i} ('{label}'): job quantity works out to zero - check that To Product's design "
@@ -5848,7 +5849,8 @@ class PackingListService:
                  quotation_repo: Optional[QuotationRepository] = None,
                  purchase_order_repo: Optional[PurchaseOrderRepository] = None,
                  fulfilment_service: Optional["ProformaFulfilmentService"] = None,
-                 purchase_invoice_repo: Optional[PurchaseInvoiceRepository] = None):
+                 purchase_invoice_repo: Optional[PurchaseInvoiceRepository] = None,
+                 job_work_repo: Optional[JobWorkRepository] = None):
         self.packing_list_repo = packing_list_repo
         self.product_repo = product_repo
         self.design_repo = design_repo
@@ -5863,6 +5865,9 @@ class PackingListService:
         # Optional: lets a Purchase Invoice's own packing list validate its
         # purchase_invoice_id and import its linked PO's PL wholesale.
         self.purchase_invoice_repo = purchase_invoice_repo
+        # Optional: lets a Job Work's own packing list validate its job_work_id
+        # and prefill from the job work's Products card.
+        self.job_work_repo = job_work_repo
 
     # ---- reads --------------------------------------------------
     def get(self, packing_list_id: int, company_id: int) -> PackingList:
@@ -5904,6 +5909,12 @@ class PackingListService:
         """Every packing list generated from one Purchase Invoice (that
         invoice's own PL), company-scoped - same as list_for_purchase_order."""
         return [pl for pl in self.packing_list_repo.list_for_purchase_invoice(purchase_invoice_id)
+                if pl.company_id == company_id]
+
+    def list_for_job_work(self, job_work_id: int, company_id: int) -> List[PackingList]:
+        """Every packing list generated from one Job Work (the job work's own
+        PL), company-scoped - same as list_for_purchase_order."""
+        return [pl for pl in self.packing_list_repo.list_for_job_work(job_work_id)
                 if pl.company_id == company_id]
 
     # ---- permission --------------------------------------------------
@@ -6095,6 +6106,65 @@ class PackingListService:
             items = self._items_from_packing_list(source_pl)
         else:
             items = self._placeholder_items(purchase_invoice.items)
+        return {"fields": fields, "items": items}
+
+    # ---- prefill from an existing job work --------------------------------------------------
+    def build_prefill_from_job_work(self, job_work: "JobWork") -> dict:
+        """The Job Work's own packing list. Caller must have already loaded
+        `job_work` via JobWorkService.get(...) so cross-company ownership is
+        already verified. Unlike the purchase order/invoice imports above,
+        there is no upstream packing list to bring in wholesale - instead the
+        design rows come straight off the Job Manufacturer card's own design
+        lines (job_work.items), one row per design, with Boxes = that
+        design's JOB QUANTITY (the document's one final figure per design)
+        rather than a typed/imported value. Quantity (SQM/LM) is left for
+        the Boxes x Alt Quantity auto-calc to fill in once the row's product
+        is recognised, same as every other packing list row.
+
+        The row's Product is taken from the Products card (job_work.products,
+        matched by product_id), NOT from the design line's own to_product -
+        to_product is only the SIZE-CONVERSION target a design line
+        optionally names (see JobWorkItem's own docstring), whereas the
+        Products card is the actual costing/reference line the goods are
+        being packed against. A design line whose product_id has no matching
+        Products card row falls back to its own product_id/product_name.
+
+        job_work_items.design_id is never posted (design is matched by NAME
+        only there, not a catalog id - see the job work form's own
+        designsForToProduct()), so it has to be re-resolved against the
+        resolved product's own catalog designs here; without it the packing
+        list's design photo column has nothing to look up and prints blank."""
+        fields = {
+            "job_work_id": job_work.id,
+            "buyer_order_no": job_work.seller_ref_no,
+            "remarks": job_work.remarks or "MADE IN INDIA",
+        }
+        products_by_id = {p.product_id: p for p in job_work.products if p.product_id}
+        design_ids_by_product: dict = {}
+        items = []
+        for item in job_work.items:
+            product = products_by_id.get(item.product_id)
+            product_id = product.product_id if product else item.product_id
+            product_name = product.product_name if product else (item.product_name or item.to_product_name)
+            hsn_code = product.hsn_code if product else item.hsn_code
+
+            design_id = None
+            if product_id and item.design_name:
+                if product_id not in design_ids_by_product:
+                    design_ids_by_product[product_id] = {
+                        _normalize_name(d.design_name): d.id
+                        for d in self.design_repo.list_for_product(product_id)
+                    }
+                design_id = design_ids_by_product[product_id].get(_normalize_name(item.design_name))
+
+            items.append({
+                "product_id": product_id, "product_name": product_name,
+                "design_id": design_id, "design_name": item.design_name or "",
+                "hsn_code": hsn_code, "box_per_pallet": "", "pallets": "",
+                "quantity_boxes": item.job_quantity or "", "pcs": "",
+                "quantity_value": "", "unit": item.unit,
+                "net_weight_kg": "", "gross_weight_kg": "",
+            })
         return {"fields": fields, "items": items}
 
     def _remaining_designs(self, company_id: int, proforma_invoice_id: Optional[int], items: list) -> list:
@@ -6298,12 +6368,19 @@ class PackingListService:
             if not purchase_invoice or purchase_invoice.company_id != current_user.company_id:
                 purchase_invoice_id = None
 
+        job_work_id = int(fields["job_work_id"]) if fields.get("job_work_id") else None
+        if job_work_id is not None and self.job_work_repo is not None:
+            # Only trust a job work from this same company - same reasoning as quotation_id above.
+            job_work = self.job_work_repo.get_by_id(job_work_id)
+            if not job_work or job_work.company_id != current_user.company_id:
+                job_work_id = None
+
         return PackingList(
             id=None, company_id=current_user.company_id, packing_list_number="",
             packing_list_date=packing_list_date, consignee_name="",
             created_by=current_user.id, proforma_invoice_id=proforma_invoice_id,
             quotation_id=quotation_id, purchase_order_id=purchase_order_id,
-            purchase_invoice_id=purchase_invoice_id,
+            purchase_invoice_id=purchase_invoice_id, job_work_id=job_work_id,
             export_ref_no=(fields.get("export_ref_no") or "").strip() or None,
             buyer_order_no=(fields.get("buyer_order_no") or "").strip() or None,
             other_reference=(fields.get("other_reference") or "").strip() or None,

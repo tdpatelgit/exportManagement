@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% from "_macros.html" import currency_select %}
 {% block title %}{{ 'Edit job work' if job_work else 'New job work' }}{% endblock %}
 {% block content %}
 
@@ -62,7 +61,11 @@
   <div class="card">
     <div class="card-header"><h3>Order details</h3></div>
     <div class="form-row">
-      {{ currency_select(chosen_currency, currency_options, hint='Shown on the printed job work.', can_add=current_user.is_admin) }}
+      <div class="field" style="max-width:140px;">
+        <label>Currency</label>
+        <input type="text" value="INR" readonly tabindex="-1">
+        <input type="hidden" name="currency_code" value="INR">
+      </div>
       <div class="field"><label for="job_work_date">Date<span class="required-mark">*</span></label><input type="date" id="job_work_date" name="job_work_date" required value="{{ data.job_work_date | default(today, true) }}"></div>
       <div class="field"><label for="seller_ref_no">Seller ref. no.</label><input type="text" id="seller_ref_no" name="seller_ref_no" value="{{ data.seller_ref_no | default('', true) }}"></div>
       <div class="field"><label for="delivery_time">Delivery time</label><input type="text" id="delivery_time" name="delivery_time" placeholder="e.g. 20 DAY FROM JOB WORK DATE" value="{{ data.delivery_time | default('', true) }}"></div>
@@ -133,7 +136,7 @@
          Jobed Qty are both driven from (see designsForToProduct() /
          chainOf() in this page's own script). #}
       <div class="field">
-        <label for="mfr_to_product_select">To Product</label>
+        <label for="mfr_to_product_select">Jobbed Product</label>
         <select id="mfr_to_product_select">
           <option value="">— Select a product to convert into —</option>
           {% for p in to_products %}
@@ -148,11 +151,12 @@
          (see plBoxesForProduct() in this page's own script); no longer
          drives Jobed Qty, that's To Product's job now. #}
       <div class="field">
-        <label for="mfr_product_select">Product</label>
+        <label for="mfr_product_select">Job Product</label>
         <select id="mfr_product_select">
           <option value="">— Select a product from the proforma invoice —</option>
           {% for p in invoice_products %}
-            <option value="{{ p.product_id or '' }}" data-name="{{ p.product_name }}" data-hsn="{{ p.hsn_code or '' }}">{{ p.product_name }}</option>
+            {% set meta = invoice_product_meta_map.get(p.product_id | int, {}) if p.product_id else {} %}
+            <option value="{{ p.product_id or '' }}" data-name="{{ p.product_name }}" data-hsn="{{ p.hsn_code or '' }}" data-alt-qty="{{ meta.get('alt_qty', '') }}" data-unit="{{ meta.get('unit', '') }}">{{ p.product_name }}</option>
           {% endfor %}
         </select>
         <div class="text-sm text-soft">Tags each design line's Product, which the Products card's Boxes total below uses — not shown on the printed sheet.</div>
@@ -182,7 +186,7 @@
       </div>
       <button type="button" class="btn btn-ghost btn-sm" id="add-design-btn" style="margin-top:10px;">+ Add design</button>
       <button type="button" class="btn btn-primary btn-sm" id="add-to-job-work" style="margin-top:10px;">+ Add to Job Work</button>
-      <p class="hint">Jobed Qty is fetched from the proforma invoice's packing list for whichever design was picked under To Product and can't be typed. Converted Qty = Jobed Qty ÷ Conversion Value; Extra Qty = Converted Qty × Extra Qty %; Job Quantity = Converted Qty + Extra Qty.</p>
+      <p class="hint">Jobed Qty is fetched from the proforma invoice's packing list for whichever design was picked under To Product and can't be typed. Converted Qty = Jobed Qty ÷ Conversion Value; Extra Qty = Converted Qty × Extra Qty %; Job Quantity = Converted Qty + Extra Qty, rounded up to the next whole number.</p>
     </div>
     {% else %}
     <div class="empty-state">
@@ -316,8 +320,7 @@
         <thead>
           <tr>
             <th>Sr</th>
-            <th style="min-width:160px;">To Product</th>
-            <th style="min-width:140px;">Product</th>
+            <th style="min-width:160px;">Jobbed Product</th>
             <th style="min-width:160px;">Design</th>
             <th>Jobed Qty</th>
             <th>Conversion Value</th>
@@ -325,6 +328,7 @@
             <th>Extra Qty %</th>
             <th>Extra Qty</th>
             <th>Job Quantity</th>
+            <th style="min-width:140px;">Job Product</th>
             <th></th>
           </tr>
         </thead>
@@ -397,7 +401,7 @@
     const convertedQuantity = conversionValue > 0 ? sourceQuantity / conversionValue : 0;
     const extraPercent = num(line.extra_percent);
     const extraQuantity = convertedQuantity * extraPercent / 100;
-    const jobQuantity = convertedQuantity + extraQuantity;
+    const jobQuantity = Math.ceil(convertedQuantity + extraQuantity);
     return { sourceQuantity, convertedQuantity, extraQuantity, jobQuantity };
   }
 
@@ -870,6 +874,8 @@
       tr.querySelector('.js-pl-product-id').value = id;
       tr.querySelector('.js-pl-product-name').value = name;
       tr.querySelector('.js-pl-hsn').value = hsn;
+      tr.dataset.altQty = (opt && opt.dataset.altQty) || '';
+      if (opt && opt.dataset.unit) plSetUnitValue(tr.querySelector('.js-pl-unit'), opt.dataset.unit);
       plRenumber();
     }
     plSyncBoxesFromLines();
@@ -939,7 +945,6 @@
       tr.innerHTML = `
         <td>${i + 1}</td>
         <td class="text-sm js-to-product"></td>
-        <td class="text-sm js-product"></td>
         <td class="text-sm js-design"></td>
         <td class="text-sm">${withUnit(chain.sourceQuantity)}</td>
         <td class="text-sm">${show(line.conversion_value)}</td>
@@ -947,6 +952,7 @@
         <td class="text-sm">${show(line.extra_percent)}%</td>
         <td class="text-sm">${withUnit(chain.extraQuantity)}</td>
         <td class="text-sm"><strong>${withUnit(chain.jobQuantity)}</strong></td>
+        <td class="text-sm js-product"></td>
         <td><button type="button" class="btn-link-danger js-remove-line" data-index="${i}">Remove</button></td>`;
       tr.querySelector('.js-to-product').textContent = line.to_product_name || '—';
       tr.querySelector('.js-product').textContent = line.product_name || '—';

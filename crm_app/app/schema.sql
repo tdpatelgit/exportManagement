@@ -1272,6 +1272,7 @@ CREATE TABLE IF NOT EXISTS packing_lists (
     quotation_id            INTEGER REFERENCES quotations(id),         -- optional, "generated from" reference only (skips the PI step)
     purchase_order_id       INTEGER REFERENCES purchase_orders(id),    -- optional, "generated from" reference only (the PO's own PL)
     purchase_invoice_id     INTEGER REFERENCES purchase_invoices(id),  -- optional, "generated from" reference only (the Purchase Invoice's own PL)
+    job_work_id             INTEGER REFERENCES job_works(id),          -- optional, "generated from" reference only (the Job Work's own PL)
     export_ref_no           TEXT,
     buyer_order_no          TEXT,
     other_reference         TEXT,

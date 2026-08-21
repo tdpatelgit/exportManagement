@@ -26,7 +26,9 @@
     <a href="{{ url_for('packing_lists.list_packing_lists') }}" class="btn btn-ghost btn-sm">← All packing lists</a>
     <div class="flex gap-8">
       {% if not historical_version %}
-      {% if packing_list.purchase_invoice_id %}
+      {% if packing_list.job_work_id %}
+      <a href="{{ url_for('job_works.view_job_work', job_work_id=packing_list.job_work_id) }}" class="btn btn-ghost btn-sm">← Back to linked document</a>
+      {% elif packing_list.purchase_invoice_id %}
       <a href="{{ url_for('purchase_invoices.view_purchase_invoice', purchase_invoice_id=packing_list.purchase_invoice_id) }}" class="btn btn-ghost btn-sm">← Back to linked document</a>
       {% elif packing_list.purchase_order_id %}
       <a href="{{ url_for('purchase_orders.view_purchase_order', purchase_order_id=packing_list.purchase_order_id) }}" class="btn btn-ghost btn-sm">← Back to linked document</a>

@@ -51,12 +51,22 @@
           {% endfor %}
         </select>
       </div>
+      <div class="field">
+        <label for="job_work_select">Prefill from an existing job work <span class="text-soft text-sm">(optional)</span></label>
+        <select id="job_work_select">
+          <option value="">— Select a job work —</option>
+          {% for jw in job_works %}
+            <option value="{{ jw.id }}" {{ 'selected' if data and data.job_work_id | string == jw.id | string }}>{{ jw.job_work_number }} — {{ jw.manufacturer_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
     </div>
-    <p class="hint">Choosing a proforma invoice or a quotation reloads this page with one starting row per product — you then pick the design for each row and split the quantities into smaller, per-design amounts. Choosing a purchase order does the same, and when that PO was generated from a proforma that already has a packing list, its design rows are imported ready-filled. Choosing a purchase invoice imports its linked purchase order's packing list wholesale, as the invoice's own PL.</p>
+    <p class="hint">Choosing a proforma invoice or a quotation reloads this page with one starting row per product — you then pick the design for each row and split the quantities into smaller, per-design amounts. Choosing a purchase order does the same, and when that PO was generated from a proforma that already has a packing list, its design rows are imported ready-filled. Choosing a purchase invoice imports its linked purchase order's packing list wholesale, as the invoice's own PL. Choosing a job work does the same as a proforma invoice/quotation, starting one row per product on the job work's own Products card.</p>
     <input type="hidden" name="proforma_invoice_id" id="proforma_invoice_id" value="{{ data.proforma_invoice_id | default('', true) }}">
     <input type="hidden" name="quotation_id" id="quotation_id" value="{{ data.quotation_id | default('', true) }}">
     <input type="hidden" name="purchase_order_id" id="purchase_order_id" value="{{ data.purchase_order_id | default('', true) }}">
     <input type="hidden" name="purchase_invoice_id" id="purchase_invoice_id" value="{{ data.purchase_invoice_id | default('', true) }}">
+    <input type="hidden" name="job_work_id" id="job_work_id" value="{{ data.job_work_id | default('', true) }}">
   </div>
 
   <div class="card">
@@ -423,13 +433,17 @@
     }
   }
 
-  function recalcQtyPcs(block, row) {
+  function recalcQtyPcs(block, row, onlyIfEmpty) {
     const boxes = parseFloat(row.querySelector('.js-boxes').value) || 0;
     const { pcsPerBox, qtyPerBox, netPerBox, grossPerBox } = packInfo(block);
-    if (boxes && pcsPerBox) row.querySelector('.js-pcs').value = +(boxes * pcsPerBox).toFixed(2);
-    if (boxes && qtyPerBox) row.querySelector('.js-qty').value = (boxes * qtyPerBox).toFixed(2);
-    if (boxes && netPerBox) row.querySelector('.js-net').value = (boxes * netPerBox).toFixed(2);
-    if (boxes && grossPerBox) row.querySelector('.js-gross').value = (boxes * grossPerBox).toFixed(2);
+    const fill = (selector, value) => {
+      const el = row.querySelector(selector);
+      if (!onlyIfEmpty || !el.value) el.value = value;
+    };
+    if (boxes && pcsPerBox) fill('.js-pcs', +(boxes * pcsPerBox).toFixed(2));
+    if (boxes && qtyPerBox) fill('.js-qty', (boxes * qtyPerBox).toFixed(2));
+    if (boxes && netPerBox) fill('.js-net', (boxes * netPerBox).toFixed(2));
+    if (boxes && grossPerBox) fill('.js-gross', (boxes * grossPerBox).toFixed(2));
   }
 
   // The row calculates from whichever of Boxes / Pallets was just filled
@@ -439,7 +453,7 @@
   // re-derives Pallets. Either way Pcs/Qty follow from the resulting Boxes.
   // Every auto-filled value stays editable - typing into it directly isn't
   // overwritten until an upstream field changes again.
-  function recalcRow(row, source) {
+  function recalcRow(row, source, onlyIfEmpty) {
     const block = row.closest('.product-block');
     const boxesEl = row.querySelector('.js-boxes');
     const perPallet = parseFloat(block.querySelector('.js-pallet-type').value) || 0;
@@ -448,7 +462,7 @@
       if (perPallet && pallets) boxesEl.value = +(perPallet * pallets).toFixed(2);
     }
     updatePallets(block, row);
-    recalcQtyPcs(block, row);
+    recalcQtyPcs(block, row, onlyIfEmpty);
   }
 
   function addProductBlock() {
@@ -547,6 +561,13 @@
     const id = e.target.value;
     if (!id) return;
     window.location = '{{ url_for("packing_lists.new_packing_list") }}?quotation_id=' + encodeURIComponent(id);
+  });
+
+  // ---- job work dropdown prefill (reloads the page with ?job_work_id=) --------------------------------------------------
+  document.getElementById('job_work_select').addEventListener('change', (e) => {
+    const id = e.target.value;
+    if (!id) return;
+    window.location = '{{ url_for("packing_lists.new_packing_list") }}?job_work_id=' + encodeURIComponent(id);
   });
 
   // ---- product picker modal (flat searchable product list) --------------------------------------------------
@@ -765,7 +786,7 @@
     let types = [];
     try { types = JSON.parse(block.dataset.palletTypes || '[]'); } catch (e) {}
     populatePalletOptions(block, types, block.dataset.boxPerPallet);
-    block.querySelectorAll('.design-row').forEach((row) => updatePallets(block, row));
+    block.querySelectorAll('.design-row').forEach((row) => recalcRow(row, null, true));
   });
   renumber();
   recalcTotals();

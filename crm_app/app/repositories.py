@@ -3526,13 +3526,15 @@ class PackingListRepository:
     _SELECT = """
         SELECT pl.*, u.full_name AS created_by_name, pi.invoice_number AS proforma_invoice_number,
                q.quotation_number AS quotation_number, po.po_number AS purchase_order_number,
-               pinv.purchase_invoice_number AS purchase_invoice_number
+               pinv.purchase_invoice_number AS purchase_invoice_number,
+               jw.job_work_number AS job_work_number
         FROM packing_lists pl
         JOIN users u ON u.id = pl.created_by
         LEFT JOIN proforma_invoices pi ON pi.id = pl.proforma_invoice_id
         LEFT JOIN quotations q ON q.id = pl.quotation_id
         LEFT JOIN purchase_orders po ON po.id = pl.purchase_order_id
         LEFT JOIN purchase_invoices pinv ON pinv.id = pl.purchase_invoice_id
+        LEFT JOIN job_works jw ON jw.id = pl.job_work_id
     """
 
     def get_by_id(self, packing_list_id: int) -> Optional[PackingList]:
@@ -3569,6 +3571,8 @@ class PackingListRepository:
             query += " AND pl.purchase_order_id IS NOT NULL"
         elif doc_type == "purchase_invoice":
             query += " AND pl.purchase_invoice_id IS NOT NULL"
+        elif doc_type == "job_work":
+            query += " AND pl.job_work_id IS NOT NULL"
         if client_name:
             query += " AND pl.consignee_name = ?"
             params.append(client_name)
@@ -3623,6 +3627,15 @@ class PackingListRepository:
         rows = self.db.query(
             self._SELECT + " WHERE pl.purchase_invoice_id = ? ORDER BY pl.id",
             (purchase_invoice_id,),
+        )
+        return self._attach_items([PackingList.from_row(r) for r in rows])
+
+    def list_for_job_work(self, job_work_id: int) -> List[PackingList]:
+        """Every packing list generated from one Job Work (the job work's own
+        PL) - same shape as list_for_purchase_order."""
+        rows = self.db.query(
+            self._SELECT + " WHERE pl.job_work_id = ? ORDER BY pl.id",
+            (job_work_id,),
         )
         return self._attach_items([PackingList.from_row(r) for r in rows])
 
@@ -3789,15 +3802,16 @@ class PackingListRepository:
         new_id = self.db.execute(
             """INSERT INTO packing_lists
                (company_id, packing_list_number, packing_list_date, proforma_invoice_id,
-                quotation_id, purchase_order_id, purchase_invoice_id, export_ref_no, buyer_order_no,
+                quotation_id, purchase_order_id, purchase_invoice_id, job_work_id, export_ref_no, buyer_order_no,
                 other_reference, consignee_name, consignee_address,
                 notify_name, notify_address, country_of_origin, country_of_destination, vessel_flight,
                 port_of_loading, port_of_discharge, final_destination, container_details,
                 terms_of_delivery, remarks, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (packing_list.company_id, packing_list.packing_list_number, packing_list.packing_list_date,
              packing_list.proforma_invoice_id, packing_list.quotation_id,
-             packing_list.purchase_order_id, packing_list.purchase_invoice_id, packing_list.export_ref_no,
+             packing_list.purchase_order_id, packing_list.purchase_invoice_id, packing_list.job_work_id,
+             packing_list.export_ref_no,
              packing_list.buyer_order_no, packing_list.other_reference, packing_list.consignee_name,
              packing_list.consignee_address, packing_list.notify_name, packing_list.notify_address,
              packing_list.country_of_origin, packing_list.country_of_destination,
@@ -3812,6 +3826,7 @@ class PackingListRepository:
         self.db.execute(
             """UPDATE packing_lists SET packing_list_date = ?, proforma_invoice_id = ?,
                                          quotation_id = ?, purchase_order_id = ?, purchase_invoice_id = ?,
+                                         job_work_id = ?,
                                          export_ref_no = ?, buyer_order_no = ?, other_reference = ?,
                                          consignee_name = ?, consignee_address = ?, notify_name = ?,
                                          notify_address = ?, country_of_origin = ?, country_of_destination = ?,
@@ -3821,6 +3836,7 @@ class PackingListRepository:
                WHERE id = ?""",
             (packing_list.packing_list_date, packing_list.proforma_invoice_id,
              packing_list.quotation_id, packing_list.purchase_order_id, packing_list.purchase_invoice_id,
+             packing_list.job_work_id,
              packing_list.export_ref_no, packing_list.buyer_order_no, packing_list.other_reference,
              packing_list.consignee_name, packing_list.consignee_address, packing_list.notify_name,
              packing_list.notify_address, packing_list.country_of_origin,

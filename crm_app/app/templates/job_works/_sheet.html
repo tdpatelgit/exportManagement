@@ -151,38 +151,46 @@
     </tr>
   </table>
 
-  <!-- Designs sent out for job work -->
+  {% set ns = namespace(boxes=0, qty=0, amount=0) %}
+  {% for p in job_work.products %}
+    {% set ns.boxes = ns.boxes + (p.quantity_boxes or 0) %}
+    {% set ns.qty = ns.qty + (p.quantity_value or 0) %}
+    {% set ns.amount = ns.amount + (p.total_inr or 0) %}
+  {% endfor %}
+
+  <!-- Products (the Products card's costing rows - same shape as the
+       quotation's own item table, not the design/job-quantity chain) -->
   <table class="jw-items">
     <colgroup>
-      <col style="width:4%"><col style="width:22%"><col style="width:14%">
-      <col style="width:10%"><col style="width:11%"><col style="width:11%">
-      <col style="width:9%"><col style="width:9%"><col style="width:10%">
+      <col style="width:4%"><col style="width:24%"><col style="width:11%">
+      <col style="width:9%"><col style="width:11%"><col style="width:8%">
+      <col style="width:11%"><col style="width:7%"><col style="width:15%">
     </colgroup>
     <thead>
       <tr>
         <td>SR<br>NO</td>
-        <td>DESCRIPTION OF GOODS</td>
-        <td>DESIGN</td>
-        <td>JOBED QTY</td>
-        <td>CONVERSION VALUE</td>
-        <td>CONVERTED QTY</td>
-        <td>EXTRA QTY %</td>
-        <td>EXTRA QTY</td>
-        <td>JOB QUANTITY</td>
+        <td>PRODUCT</td>
+        <td>HSN CODE</td>
+        <td>BOXES</td>
+        <td>QTY (SQM/LM)</td>
+        <td>UNIT</td>
+        <td>PRICE ({{ job_work.currency_code or 'INR' }})</td>
+        <td>PER</td>
+        <td>TOTAL ({{ job_work.currency_code or 'INR' }})</td>
       </tr>
     </thead>
     <tbody>
-      {% for item in job_work.items %}
+      {% for p in job_work.products %}
       <tr class="jw-goods">
-        <td class="jw-center">{{ item.sr_no }}</td>
-        <td class="jw-bottom">{{ item.to_product_name or item.product_name }}</td>
-        <td class="jw-bottom">{{ item.design_name or '-' }}</td>
-        <td class="jw-right">{{ num(item.source_quantity) }} <span class="jw-unit-sm">{{ item.unit if item.source_quantity else '' }}</span></td>
-        <td class="jw-right">{{ num(item.conversion_value) }}</td>
-        <td class="jw-right">{{ num(item.converted_quantity) }} <span class="jw-unit-sm">{{ item.unit if item.converted_quantity else '' }}</span></td>
-        <td class="jw-right">{{ num(item.extra_percent) }}%</td>
-        <td class="jw-right">{{ num(item.extra_quantity) }} <span class="jw-unit-sm">{{ item.unit if item.extra_quantity else '' }}</span></td>
-        <td class="jw-right">{{ num(item.job_quantity) }} <span class="jw-unit-sm">{{ item.unit if item.job_quantity else '' }}</span></td>
+        <td class="jw-center">{{ p.sr_no }}</td>
+        <td class="jw-bottom">{{ p.product_name }}</td>
+        <td class="jw-center">{{ p.hsn_code or '-' }}</td>
+        <td class="jw-right">{{ num(p.quantity_boxes) }}</td>
+        <td class="jw-right">{{ num(p.quantity_value) }}</td>
+        <td class="jw-center">{{ p.unit }}</td>
+        <td class="jw-right">{{ num(p.price_inr) }}</td>
+        <td class="jw-center">{{ p.price_per }}</td>
+        <td class="jw-right">{{ num(p.total_inr) }}</td>
       </tr>
       {% endfor %}
       <tr class="jw-filler js-page-filler">
@@ -191,12 +199,12 @@
       <tr>
         <td></td>
         <td class="jw-val jw-center" colspan="2">TOTAL</td>
-        <td class="jw-val jw-right">{{ num(job_work.total_source_quantity) }}</td>
+        <td class="jw-val jw-right">{{ num(ns.boxes) }}</td>
+        <td class="jw-val jw-right">{{ num(ns.qty) }}</td>
         <td></td>
-        <td class="jw-val jw-right">{{ num(job_work.total_converted_quantity) }}</td>
         <td></td>
-        <td class="jw-val jw-right">{{ num(job_work.total_extra_quantity) }}</td>
-        <td class="jw-val jw-right">{{ num(job_work.total_job_quantity) }}</td>
+        <td></td>
+        <td class="jw-val jw-right">{{ num(ns.amount) }}</td>
       </tr>
     </tbody>
   </table>
