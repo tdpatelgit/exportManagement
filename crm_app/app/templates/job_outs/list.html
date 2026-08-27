@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Job Outs{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Sales documents</div>
+    <h1>Job Outs</h1>
+    <div class="text-sm text-soft">Delivery challans for jobwork.</div>
+  </div>
+  <div class="topbar-actions">
+    <a href="{{ url_for('job_outs.new_job_out') }}" class="btn btn-primary">+ New job out</a>
+  </div>
+</div>
+
+<div class="card">
+  {% if job_outs %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th>Challan no.</th>
+          <th>Challan date</th>
+          <th>Job manufacturer</th>
+          <th>Purchase invoice</th>
+          <th>E-way bill</th>
+          <th>Vehicle</th>
+          <th>Created by</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for jo in job_outs %}
+        <tr>
+          <td class="mono">{{ jo.delivery_challan_no }}</td>
+          <td class="text-sm">{{ jo.delivery_challan_date }}</td>
+          <td><strong>{{ jo.seller_name or '—' }}</strong></td>
+          <td class="text-sm">{{ jo.purchase_invoice_number or '—' }}</td>
+          <td class="text-sm">{{ jo.eway_bill_no or '—' }}</td>
+          <td class="text-sm">{{ jo.vehicle_no or '—' }}</td>
+          <td class="text-sm">{{ jo.created_by_name }}</td>
+          <td><a href="{{ url_for('job_outs.view_job_out', job_out_id=jo.id) }}" class="text-sm">Open →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No job outs yet. A job out is normally started from a purchase invoice's own preview.</div>
+  {% endif %}
+</div>
+
+{% endblock %}

@@ -184,7 +184,7 @@
           {% set item = row.item %}
           <td class="epl-left">{{ item.product_name }}</td>
           <td class="epl-center">{{ item.hsn_code or '' }}</td>
-          <td class="epl-cnum">{{ num(item.pallets, 0) }}</td>
+          <td class="epl-cnum">{% if item.pallets %}{{ num(item.pallets, 0) }} <span class="epl-unit-sm">PLTS</span>{% endif %}</td>
           <td class="epl-cnum">{% if item.quantity_boxes %}{{ num(item.quantity_boxes, 0) }} <span class="epl-unit-sm">{{ item.quantity_unit }}</span>{% endif %}</td>
           <td class="epl-cnum">{{ num(item.quantity_value) }} <span class="epl-unit-sm">{{ item.unit }}</span></td>
           <td class="epl-num">{{ num(item.net_weight_kg) }}</td>
@@ -201,7 +201,7 @@
       </tr>
       <tr class="epl-tot">
         <td colspan="5" style="font-weight:normal;">TOTAL</td>
-        <td class="epl-cnum">{{ num(packing_list.total_pallets, 0) }}</td>
+        <td class="epl-cnum">{% if packing_list.total_pallets %}{{ num(packing_list.total_pallets, 0) }} <span class="epl-unit-sm">PLTS</span>{% endif %}</td>
         <td class="epl-cnum">{{ num(packing_list.total_boxes, 0) }}</td>
         <td class="epl-cnum">{{ num(packing_list.total_quantity) }}</td>
         <td class="epl-num">{{ num(packing_list.total_net_weight) }}</td>

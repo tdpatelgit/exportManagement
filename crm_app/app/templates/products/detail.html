@@ -56,6 +56,9 @@
     <div><div class="text-sm text-soft">Net weight / box</div><div>{{ (product.net_weight_kg ~ ' KG') if product.net_weight_kg is not none else '—' }}</div></div>
     <div><div class="text-sm text-soft">Gross weight / box</div><div>{{ (product.gross_weight_kg ~ ' KG') if product.gross_weight_kg is not none else '—' }}</div></div>
     <div><div class="text-sm text-soft">Job quantity (total)</div><div>{{ total_job_quantity | int if total_job_quantity == (total_job_quantity | int) else total_job_quantity }}</div></div>
+    {% if product.is_job_work_product %}
+    <div><div class="text-sm text-soft">Job Work Product</div><div>Yes — Master product: {{ master_product.product_name if master_product else '—' }}</div></div>
+    {% endif %}
   </div>
 </div>
 {% endif %}

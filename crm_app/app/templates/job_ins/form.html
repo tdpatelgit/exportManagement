@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit job in' if job_in else 'New job in' }}{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Sales documents</div>
+    <h1>{{ 'Edit ' + job_in.stock_inward_no if job_in else 'New job in' }}</h1>
+    <div class="text-sm text-soft">Jobwork inward challan / return — saving this adds the received designs to stock.</div>
+  </div>
+</div>
+
+<form method="POST" id="job-in-form">
+  {% set data = form_data if form_data else job_in %}
+
+  <div class="card">
+    <div class="card-header"><h3>Received against</h3></div>
+    <div class="field">
+      <label for="job_out_select">Job out (delivery challan)<span class="required-mark">*</span></label>
+      <select id="job_out_select">
+        <option value="">— Select a job out —</option>
+        {% for jo in job_outs %}
+          <option value="{{ jo.id }}" {{ 'selected' if data and data.job_out_id | string == jo.id | string }}>
+            {{ jo.delivery_challan_no }} — {{ jo.seller_name }} ({{ jo.delivery_challan_date }})
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <p class="hint">Choosing a job out reloads this page and fills in the jobbed product with one row per design at the quantity expected back — correct those to what actually arrived. The sender, our own challan number and the purchase invoice reference are all read off it when the sheet prints.</p>
+    <input type="hidden" name="job_out_id" id="job_out_id" value="{{ data.job_out_id | default('', true) }}">
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Stock inward</h3></div>
+    <div class="form-row">
+      <div class="field">
+        <label for="stock_inward_no">Stock inward no.<span class="required-mark">*</span></label>
+        <input type="text" id="stock_inward_no" name="stock_inward_no" required
+               placeholder="e.g. STINW2627001" value="{{ data.stock_inward_no | default('', true) }}">
+      </div>
+      <div class="field">
+        <label for="stock_inward_date">Stock inward date<span class="required-mark">*</span></label>
+        <input type="date" id="stock_inward_date" name="stock_inward_date" required
+               value="{{ data.stock_inward_date | default(today, true) }}">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="field">
+        <label for="jw_delivery_challan_no">JW delivery challan no.</label>
+        <input type="text" id="jw_delivery_challan_no" name="jw_delivery_challan_no"
+               value="{{ data.jw_delivery_challan_no | default('', true) }}">
+      </div>
+      <div class="field">
+        <label for="jw_delivery_challan_date">JW delivery challan date</label>
+        <input type="date" id="jw_delivery_challan_date" name="jw_delivery_challan_date"
+               value="{{ data.jw_delivery_challan_date | default('', true) }}">
+      </div>
+    </div>
+    <p class="hint">The JW challan is the job manufacturer's own paperwork for the return leg — separate from our delivery challan, which comes from the job out above.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Transport details</h3></div>
+    <div class="form-row">
+      <div class="field">
+        <label for="transporter_name">Transport name</label>
+        <input type="text" id="transporter_name" name="transporter_name" list="transporter_names"
+               value="{{ data.transporter_name | default('', true) }}">
+        <datalist id="transporter_names">
+          {% for t in transporters %}<option value="{{ t.name }}">{{ t.gstin_transporter_no or '' }}</option>{% endfor %}
+        </datalist>
+      </div>
+      <div class="field">
+        <label for="transport_gstin">Transport GSTIN</label>
+        <input type="text" id="transport_gstin" name="transport_gstin" list="transporter_gstins"
+               value="{{ data.transport_gstin | default('', true) }}">
+        <datalist id="transporter_gstins">
+          {% for t in transporters %}
+            {% if t.gstin_transporter_no %}<option value="{{ t.gstin_transporter_no }}">{{ t.name }}</option>{% endif %}
+          {% endfor %}
+        </datalist>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="field">
+        <label for="lr_no">LR no.</label>
+        <input type="text" id="lr_no" name="lr_no" value="{{ data.lr_no | default('', true) }}">
+      </div>
+      <div class="field">
+        <label for="vehicle_no">Vehicle no.</label>
+        <input type="text" id="vehicle_no" name="vehicle_no" value="{{ data.vehicle_no | default('', true) }}">
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Goods received</h3></div>
+    {% if jobbed_products %}
+    <div class="form-row" style="align-items:flex-end;">
+      <div class="field">
+        <label for="add_product">Product</label>
+        <select id="add_product">
+          {% for p in jobbed_products %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="add_design">Design</label>
+        <select id="add_design"></select>
+      </div>
+      <div class="field" style="max-width:150px;">
+        <button type="button" class="btn btn-ghost" id="add_design_btn">+ Add design</button>
+      </div>
+    </div>
+    {% else %}
+    <p class="hint">Pick a job out above first — its jobbed products are what this table draws from.</p>
+    {% endif %}
+
+    <div class="table-wrap">
+      <table class="ledger" id="lines">
+        <thead>
+          <tr>
+            <th>Sr</th><th>Product</th><th>Design</th><th>HSN</th>
+            <th class="num">Qty</th><th class="num">Alt Qty</th><th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="hint">Qty is what actually came back. Alt Qty is calculated from the product's alternate quantity and recalculated on save. A row whose design isn't in the catalog still prints but won't move stock.</p>
+
+    <div class="field" style="margin-top:.75rem;">
+      <label for="remarks">Remarks</label>
+      <textarea id="remarks" name="remarks" rows="2">{{ data.remarks | default('', true) }}</textarea>
+    </div>
+  </div>
+
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary">{{ 'Save changes' if job_in else 'Create job in' }}</button>
+    <a href="{{ url_for('job_ins.view_job_in', job_in_id=job_in.id) if job_in else url_for('job_ins.list_job_ins') }}" class="btn btn-ghost">Cancel</a>
+  </div>
+</form>
+
+<script>
+(function () {
+  // The jobbed products this job out sends out, each with its full catalog
+  // design list - so "add design" offers every design of the product, not
+  // only the ones that were expected back.
+  var PRODUCTS = {{ jobbed_products | tojson }};
+  var byId = {};
+  PRODUCTS.forEach(function (p) { byId[String(p.id)] = p; });
+
+  var tbody = document.querySelector('#lines tbody');
+  var productSel = document.getElementById('add_product');
+  var designSel = document.getElementById('add_design');
+
+  function esc(s) { return String(s == null ? '' : s); }
+
+  function altQty(product, boxes) {
+    var alt = parseFloat(product && product.alt_qty);
+    var n = parseFloat(boxes);
+    if (!isFinite(alt) || !isFinite(n)) return '';
+    return (Math.round(n * alt * 100) / 100).toFixed(2);
+  }
+
+  function renumber() {
+    Array.prototype.forEach.call(tbody.rows, function (row, i) {
+      row.cells[0].textContent = i + 1;
+    });
+  }
+
+  function addRow(productId, productName, designId, designName, boxes) {
+    var product = byId[String(productId)] || {};
+    var row = tbody.insertRow();
+    row.innerHTML =
+      '<td></td>' +
+      '<td>' + esc(productName || product.name) +
+        '<input type="hidden" name="item_product_id[]" value="' + esc(productId) + '">' +
+        '<input type="hidden" name="item_product_name[]" value="' + esc(productName || product.name) + '">' +
+        '<input type="hidden" name="item_hsn_code[]" value="' + esc(product.hsn_code) + '"></td>' +
+      '<td>' + esc(designName) +
+        '<input type="hidden" name="item_design_id[]" value="' + esc(designId) + '">' +
+        '<input type="hidden" name="item_design_name[]" value="' + esc(designName) + '"></td>' +
+      '<td class="text-sm">' + esc(product.hsn_code) + '</td>' +
+      '<td class="num"><input type="number" step="any" min="0" class="js-boxes" style="max-width:110px;"' +
+        ' name="item_quantity_boxes[]" value="' + esc(boxes) + '"> ' + esc(product.qty_unit || 'BOX') + '</td>' +
+      '<td class="num js-alt">' + altQty(product, boxes) + ' ' + esc(product.unit || '') + '</td>' +
+      '<td><button type="button" class="btn btn-ghost btn-sm js-remove">Remove</button></td>';
+
+    var boxesInput = row.querySelector('.js-boxes');
+    boxesInput.addEventListener('input', function () {
+      row.querySelector('.js-alt').textContent = altQty(product, boxesInput.value) + ' ' + (product.unit || '');
+    });
+    row.querySelector('.js-remove').addEventListener('click', function () {
+      row.remove();
+      renumber();
+    });
+    renumber();
+  }
+
+  function fillDesigns() {
+    if (!productSel || !designSel) return;
+    var product = byId[productSel.value] || {};
+    designSel.innerHTML = '';
+    (product.designs || []).forEach(function (d) {
+      var opt = document.createElement('option');
+      opt.value = d.id;
+      opt.textContent = d.name;
+      designSel.appendChild(opt);
+    });
+  }
+
+  if (productSel) {
+    productSel.addEventListener('change', fillDesigns);
+    fillDesigns();
+  }
+  var addBtn = document.getElementById('add_design_btn');
+  if (addBtn) {
+    addBtn.addEventListener('click', function () {
+      if (!designSel || !designSel.value) return;
+      var product = byId[productSel.value] || {};
+      addRow(productSel.value, product.name,
+             designSel.value, designSel.options[designSel.selectedIndex].text, '');
+    });
+  }
+
+  // Seed with whatever is already on this job in (or came back from a
+  // rejected save, or was prefilled off the job out).
+  {% for row in form_items or [] %}
+  addRow({{ (row.product_id or '') | tojson }}, {{ (row.product_name or '') | tojson }},
+         {{ (row.design_id or '') | tojson }}, {{ (row.design_name or '') | tojson }},
+         {{ (row.quantity_boxes if row.quantity_boxes is not none else '') | tojson }});
+  {% endfor %}
+
+  // Changing the job out reloads the page so its products/designs can be fetched.
+  var jobOutSelect = document.getElementById('job_out_select');
+  if (jobOutSelect) {
+    jobOutSelect.addEventListener('change', function () {
+      var url = new URL(window.location.href);
+      url.searchParams.set('job_out_id', jobOutSelect.value);
+      window.location.href = url.toString();
+    });
+  }
+})();
+</script>
+
+{% endblock %}

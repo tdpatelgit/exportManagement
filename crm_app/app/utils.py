@@ -9,6 +9,7 @@ Kept separate from services.py because these are HTTP/session concerns,
 not business rules (Single Responsibility again).
 """
 
+import re
 from functools import wraps
 from flask import session, redirect, url_for, flash, g, abort
 from werkzeug.security import check_password_hash
@@ -74,6 +75,22 @@ def _three_digit_words(n: int) -> str:
     elif n > 0:
         parts.append(_ONES[n])
     return " ".join(parts)
+
+
+# GST state codes - the first two digits of any GSTIN. Used by the gst_state
+# template filter to print the STATE line on GST documents (the delivery
+# challan for jobwork, for one) without storing a state against every party.
+GST_STATE_NAMES = {
+    "01": "JAMMU AND KASHMIR", "02": "HIMACHAL PRADESH", "03": "PUNJAB", "04": "CHANDIGARH",
+    "05": "UTTARAKHAND", "06": "HARYANA", "07": "DELHI", "08": "RAJASTHAN", "09": "UTTAR PRADESH",
+    "10": "BIHAR", "11": "SIKKIM", "12": "ARUNACHAL PRADESH", "13": "NAGALAND", "14": "MANIPUR",
+    "15": "MIZORAM", "16": "TRIPURA", "17": "MEGHALAYA", "18": "ASSAM", "19": "WEST BENGAL",
+    "20": "JHARKHAND", "21": "ODISHA", "22": "CHHATTISGARH", "23": "MADHYA PRADESH", "24": "GUJARAT",
+    "26": "DADRA AND NAGAR HAVELI AND DAMAN AND DIU", "27": "MAHARASHTRA", "29": "KARNATAKA",
+    "30": "GOA", "31": "LAKSHADWEEP", "32": "KERALA", "33": "TAMIL NADU", "34": "PUDUCHERRY",
+    "35": "ANDAMAN AND NICOBAR ISLANDS", "36": "TELANGANA", "37": "ANDHRA PRADESH", "38": "LADAKH",
+    "97": "OTHER TERRITORY", "99": "CENTRE JURISDICTION",
+}
 
 
 def number_to_words(n: int) -> str:
@@ -245,6 +262,38 @@ def register_template_helpers(app):
         except ValueError:
             return str(value)
         return f"{parsed.day} {parsed.strftime('%B %Y')}"
+
+    @app.template_filter("inr_group")
+    def inr_group(value):
+        """2480000 -> '24,80,000.00' - the Indian lakh/crore digit grouping
+        (last three digits, then pairs) that a rupee figure is printed in on
+        a GST document. Python's own ',' format only does the western
+        thousands grouping, so this regroups it by hand."""
+        try:
+            amount = float(value or 0)
+        except (TypeError, ValueError):
+            return value
+        sign = "-" if amount < 0 else ""
+        whole, _, frac = f"{abs(amount):.2f}".partition(".")
+        if len(whole) > 3:
+            head, tail = whole[:-3], whole[-3:]
+            # Pairs from the right, e.g. '24' + '80' -> '24,80'
+            head = re.sub(r"(?<=\d)(?=(?:\d\d)+$)", ",", head)
+            whole = f"{head},{tail}"
+        return f"{sign}{whole}.{frac}"
+
+    @app.template_filter("gst_state")
+    def gst_state(gstin):
+        """'24AABFO8212B1ZV' -> 'GUJARAT (24)'. A GSTIN's first two digits
+        are its state code, which is how the STATE line on a GST document is
+        printed - so it's derived rather than stored separately anywhere.
+        An unrecognised or malformed GSTIN falls back to just the code, and
+        a blank one to an em dash."""
+        code = str(gstin or "")[:2]
+        if not code.isdigit():
+            return "—"
+        name = GST_STATE_NAMES.get(code)
+        return f"{name} ({code})" if name else code
 
     @app.template_filter("friendly_date")
     def friendly_date(value):

@@ -23,16 +23,17 @@ from app.repositories import (
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
     CategoryRepository, ProductRepository, ProductPalletTypeRepository, ProductFolderRepository, DesignRepository,
     QuotationRepository, ProformaInvoiceRepository, PurchaseOrderRepository, JobWorkRepository,
-    PurchaseInvoiceRepository,
+    PurchaseInvoiceRepository, JobOutRepository, JobInRepository,
     ExportInvoiceRepository, ExportPackingListRepository, ExportDesignsPackingListRepository,
-    PackingListRepository, DocumentVersionRepository, PermitRepository, BookingDetailRepository, MiscCurrencyRepository, MiscNatureOfContractRepository,
+    PackingListRepository, LoadingPlanningRepository, DocumentVersionRepository, PermitRepository, BookingDetailRepository, MiscCurrencyRepository, MiscNatureOfContractRepository,
     MiscPortOfLoadingRepository, MiscContainerTypeRepository, MiscHsnCodeRepository, MiscCountryRepository, MiscUnitRepository,
 )
 from app.services import (
     AuthService, LeadService, PartyService, SupplierService, TransporterService, CurrencyService,
     CommunicationService, StatsService, CompanyService, ReportService, ProductService,
     QuotationService, ProformaInvoiceService, PurchaseOrderService, JobWorkService, PurchaseInvoiceService,
-    ExportInvoiceService, ExportPackingListService, PackingListService, BackupService,
+    JobOutService, JobInService,
+    ExportInvoiceService, ExportPackingListService, PackingListService, LoadingPlanningService, BackupService,
     DocumentVersionService, ProformaFulfilmentService,
     InventoryService, PermitService, BookingDetailService, MiscListService,
 )
@@ -69,12 +70,15 @@ class ServiceContainer:
         self.purchase_order_repo = PurchaseOrderRepository(db)
         self.job_work_repo = JobWorkRepository(db)
         self.purchase_invoice_repo = PurchaseInvoiceRepository(db)
+        self.job_out_repo = JobOutRepository(db)
+        self.job_in_repo = JobInRepository(db)
         self.export_invoice_repo = ExportInvoiceRepository(db)
         self.export_packing_list_repo = ExportPackingListRepository(db, self.export_invoice_repo)
         self.export_designs_packing_list_repo = ExportDesignsPackingListRepository(
             db, self.export_invoice_repo, self.export_packing_list_repo
         )
         self.packing_list_repo = PackingListRepository(db)
+        self.loading_planning_repo = LoadingPlanningRepository(db)
         self.document_version_repo = DocumentVersionRepository(db)
         self.permit_repo = PermitRepository(db)
         self.booking_detail_repo = BookingDetailRepository(db)
@@ -125,6 +129,7 @@ class ServiceContainer:
         self.inventory_service = InventoryService(
             self.product_service, self.packing_list_repo, self.design_repo,
             self.purchase_order_repo, self.export_invoice_repo, self.purchase_invoice_repo,
+            self.job_in_repo,
         )
         self.permit_service = PermitService(
             self.permit_repo,
@@ -152,6 +157,7 @@ class ServiceContainer:
         # new PO/its packing list with just the outstanding amounts.
         self.proforma_fulfilment_service = ProformaFulfilmentService(
             self.proforma_invoice_repo, self.packing_list_repo, self.purchase_order_repo,
+            self.job_work_repo,
         )
         self.purchase_order_service = PurchaseOrderService(
             self.purchase_order_repo, self.product_repo, self.lead_repo, self.proforma_invoice_repo,
@@ -172,17 +178,44 @@ class ServiceContainer:
             self.quotation_repo, self.purchase_order_repo, self.proforma_fulfilment_service,
             self.purchase_invoice_repo, self.job_work_repo,
         )
+        # Loading Planning. Wired after packing_list_repo because its whole
+        # reason for existing is that hop: it traces a proforma invoice
+        # through its purchase orders to THOSE ORDERS' packing lists, which
+        # is the only place the design split lives (a PO orders 1268 boxes of
+        # a product; its packing list says those are four designs of 317).
+        self.loading_planning_service = LoadingPlanningService(
+            self.loading_planning_repo, self.proforma_invoice_repo, self.purchase_order_repo,
+            self.packing_list_repo, self.booking_detail_repo, self.product_repo,
+            self.product_pallet_type_repo,
+        )
         self.purchase_invoice_service = PurchaseInvoiceService(
             self.purchase_invoice_repo, self.product_repo, self.lead_repo, self.purchase_order_repo,
             self.document_version_service, self.party_repos, self.supplier_repo,
             Config.PURCHASE_INVOICE_UPLOAD_FOLDER, Config.ALLOWED_DOCUMENT_EXTENSIONS,
             self.misc_list_service, self.job_work_repo,
         )
+        # The delivery challan for jobwork. Wired after packing_list_repo and
+        # purchase_invoice_repo because it reads its whole printed body live
+        # off a purchase invoice (and that invoice's packing list) at render
+        # time rather than snapshotting any of it - see JobOutService.
+        self.job_out_service = JobOutService(
+            self.job_out_repo, self.purchase_invoice_repo, self.product_repo, self.company_repo,
+            self.packing_list_repo, self.purchase_order_repo, self.document_version_service,
+            self.job_work_repo, self.transporter_repo,
+        )
+        # The return leg. Wired after job_out_service because it reads its
+        # whole sheet (and its prefilled design lines) through it, and it is
+        # what puts the jobbed product back into stock.
+        self.job_in_service = JobInService(
+            self.job_in_repo, self.job_out_service, self.product_repo, self.design_repo,
+            self.company_repo, self.document_version_service,
+        )
         # The Export Packing List is generated by ExportInvoiceService on
         # every save of its invoice, so it is wired first and handed in.
         self.export_packing_list_service = ExportPackingListService(
             self.export_packing_list_repo, self.export_invoice_repo, self.product_repo, self.category_repo,
             self.design_repo, self.packing_list_repo, self.export_designs_packing_list_repo,
+            self.job_in_repo,
         )
         self.export_invoice_service = ExportInvoiceService(
             self.export_invoice_repo, self.product_repo, self.lead_repo, self.proforma_invoice_repo,
@@ -190,6 +223,7 @@ class ServiceContainer:
             self.document_version_service, self.party_repos,
             Config.EXPORT_INVOICE_UPLOAD_FOLDER, Config.ALLOWED_DOCUMENT_EXTENSIONS,
             self.export_packing_list_service, self.misc_list_service,
+            self.job_work_repo, self.job_out_repo, self.job_in_repo, self.job_out_service,
         )
         self.backup_service = BackupService(
             db, Config.DATABASE_PATH,
@@ -290,11 +324,14 @@ def create_app(config_class=Config) -> Flask:
     from app.routes.products import products_bp
     from app.routes.inventory import inventory_bp
     from app.routes.booking_details import booking_details_bp
+    from app.routes.loading_plannings import loading_plannings_bp
     from app.routes.quotations import quotations_bp
     from app.routes.proforma_invoices import proforma_invoices_bp
     from app.routes.purchase_orders import purchase_orders_bp
     from app.routes.job_works import job_works_bp
     from app.routes.purchase_invoices import purchase_invoices_bp
+    from app.routes.job_outs import job_outs_bp
+    from app.routes.job_ins import job_ins_bp
     from app.routes.export_invoices import export_invoices_bp
     from app.routes.export_packing_lists import export_packing_lists_bp
     from app.routes.export_annexures import export_annexures_bp
@@ -328,11 +365,14 @@ def create_app(config_class=Config) -> Flask:
     app.register_blueprint(products_bp)
     app.register_blueprint(inventory_bp)
     app.register_blueprint(booking_details_bp)
+    app.register_blueprint(loading_plannings_bp)
     app.register_blueprint(quotations_bp)
     app.register_blueprint(proforma_invoices_bp)
     app.register_blueprint(purchase_orders_bp)
     app.register_blueprint(job_works_bp)
     app.register_blueprint(purchase_invoices_bp)
+    app.register_blueprint(job_outs_bp)
+    app.register_blueprint(job_ins_bp)
     app.register_blueprint(export_invoices_bp)
     app.register_blueprint(export_packing_lists_bp)
     app.register_blueprint(export_annexures_bp)

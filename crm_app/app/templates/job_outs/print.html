@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ job_out.delivery_challan_no }} · Job Out</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    @media print {
+      @page { size: A4 portrait; margin: 6mm; }
+      body { background: #fff !important; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body class="quote-print-body">
+
+  {% if historical_version %}
+  <div class="quote-toolbar no-print" style="background:#fff4d6;">
+    <div>Viewing <strong>version {{ historical_version.version_number }}</strong> of {{ job_out.delivery_challan_no }} - saved {{ historical_version.created_at | friendly_date }} by {{ historical_version.changed_by_name }}. Read-only. Note the goods table below is always read off the purchase invoice as it stands now.</div>
+    <a href="{{ url_for('job_outs.view_job_out', job_out_id=job_out.id) }}" class="btn btn-ghost btn-sm">View current version →</a>
+  </div>
+  {% endif %}
+
+  <div class="quote-toolbar no-print">
+    <a href="{{ url_for('job_outs.list_job_outs') }}" class="btn btn-ghost btn-sm">← All job outs</a>
+    <div class="flex gap-8">
+      {% if not historical_version %}
+      {% if purchase_invoice %}
+      <a href="{{ url_for('purchase_invoices.view_purchase_invoice', purchase_invoice_id=purchase_invoice.id) }}" class="btn btn-ghost btn-sm">🧾 View purchase invoice</a>
+      {% endif %}
+      {% if job_ins | length == 1 %}
+      <a href="{{ url_for('job_ins.view_job_in', job_in_id=job_ins[0].id) }}" class="btn btn-ghost btn-sm">📥 View job in</a>
+      {% elif job_ins %}
+      <details class="toolbar-menu">
+        <summary class="btn btn-ghost btn-sm">📥 Job ins ({{ job_ins | length }}) ▾</summary>
+        <div class="toolbar-menu-panel">
+          {% for ji in job_ins %}
+          <a href="{{ url_for('job_ins.view_job_in', job_in_id=ji.id) }}" class="toolbar-menu-item">
+            <span class="mono">{{ ji.stock_inward_no }}</span>
+            <span class="meta">{{ ji.stock_inward_date }}</span>
+          </a>
+          {% endfor %}
+          <a href="{{ url_for('job_ins.new_job_in', job_out_id=job_out.id) }}" class="toolbar-menu-item">
+            <span class="mono">+ New job in</span>
+          </a>
+        </div>
+      </details>
+      {% else %}
+      <a href="{{ url_for('job_ins.new_job_in', job_out_id=job_out.id) }}" class="btn btn-ghost btn-sm">📥 Create job in</a>
+      {% endif %}
+      <a href="{{ url_for('job_outs.edit_job_out', job_out_id=job_out.id) }}" class="btn btn-ghost btn-sm">Edit</a>
+      {% if current_user.is_admin %}
+      <a href="{{ url_for('job_outs.job_out_versions', job_out_id=job_out.id) }}" class="btn btn-ghost btn-sm">Version history</a>
+      {% endif %}
+      <form method="POST" action="{{ url_for('job_outs.delete_job_out', job_out_id=job_out.id) }}" onsubmit="return confirmDeleteWithPassword(this, 'Delete this job out?');">
+        <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+      </form>
+      {% endif %}
+      <button type="button" class="btn btn-primary btn-sm" onclick="window.print()">🖨 Generate job out</button>
+    </div>
+  </div>
+
+  {# This page doesn't extend base.html, so it renders its own flashes -
+     creating/updating a job out redirects straight back here. #}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="sheet-note no-print flash-stack">
+      {% for category, message in messages %}
+      <div class="flash flash-{{ category }}">{{ message }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endwith %}
+
+  {% include 'job_outs/_sheet.html' %}
+  {% include '_page_filler.html' %}
+
+  <script>
+    function confirmDeleteWithPassword(form, message) {
+      if (!window.confirm(message)) return false;
+      var password = window.prompt('Enter your password to confirm deletion:');
+      if (!password) return false;
+      var input = form.querySelector('input[name="delete_password"]');
+      if (!input) {
+        input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'delete_password';
+        form.appendChild(input);
+      }
+      input.value = password;
+      return true;
+    }
+  </script>
+</body>
+</html>

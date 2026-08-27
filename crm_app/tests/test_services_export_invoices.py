@@ -489,6 +489,165 @@ class TestExportChainImport:
 
 
 # ==========================================================================
+# Import Job In details + jobbed products through the PI -> job work ->
+# job-work purchase invoice -> job out -> job in chain
+# ==========================================================================
+class TestExportJobInImport:
+    def _chain(self, container, seed):
+        make_company(container, seed)
+        product = container.product_service.create_product(
+            current_user=seed.admin, product_name="Tiles", description="", hsn_code="69072100",
+            igst_percent="18", quantity="", alternate_quantity="1.44",
+            quantity_unit="BOX", alternate_quantity_unit="SQM")
+        design = container.product_service.create_design(
+            current_user=seed.admin, product_id=product.id, folder_id=None,
+            design_name="ATLANTA LIGHT GREY", description="", price_usd="",
+            alt_text="", photo_file=None, dimension_photo_file=None)
+        pi = make_proforma(container, seed, product=product)
+
+        # The job work raised off the proforma invoice - the design/Job
+        # Quantity chain isn't exercised here, so plant the row directly (the
+        # same "plant a real parent row" style test_services_inventory uses).
+        job_work_id = container.db.execute(
+            "INSERT INTO job_works (company_id, job_work_number, job_work_date, seller_name, "
+            "created_by, proforma_invoice_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (seed.company_id, "PO20260110001", "2026-01-10", "Alive Granito", seed.admin.id, pi.id))
+
+        # The job-work purchase invoice: what was actually bought for the job,
+        # linked to the job work via purchase_invoice_job_work_links.
+        jw_pinv = container.purchase_invoice_service.create(
+            seed.admin,
+            {"seller_name": "Alive Granito", "invoice_number": "JW/PINV/1", "invoice_date": "2026-01-15",
+             "seller_gstin": "24ABVFA1170D1ZO", "currency_code": "INR"},
+            [{"product_name": product.product_name, "product_id": str(product.id), "quantity_value": "144",
+              "price_inr": "400", "price_per": "BOX", "quantity_boxes": "100"}], [])
+        container.db.execute(
+            "INSERT INTO purchase_invoice_job_work_links (purchase_invoice_id, job_work_id) VALUES (?, ?)",
+            (jw_pinv.id, job_work_id))
+
+        job_out = container.job_out_service.create(current_user=seed.admin, fields={
+            "purchase_invoice_id": str(jw_pinv.id),
+            "delivery_challan_no": "DC/OUT/1", "delivery_challan_date": "2026-01-20"})
+
+        def receive(inward_no, boxes):
+            return container.job_in_service.create(current_user=seed.admin, fields={
+                "job_out_id": str(job_out.id),
+                "stock_inward_no": inward_no, "stock_inward_date": "2026-01-30",
+                "jw_delivery_challan_no": "JWDC/1", "jw_delivery_challan_date": "2026-01-29",
+            }, raw_items=[{
+                "product_id": str(product.id), "product_name": product.product_name,
+                "design_id": str(design.id), "design_name": design.design_name,
+                "quantity_boxes": str(boxes),
+            }])
+
+        return pi, product, job_out, receive
+
+    def test_job_in_details_row_is_imported(self, container, seed):
+        pi, product, job_out, receive = self._chain(container, seed)
+        receive("STINW/1", 30)
+        built = container.export_invoice_service.build_prefill_from_proformas([pi.id], seed.company_id)
+        assert len(built["job_ins"]) == 1
+        row = built["job_ins"][0]
+        assert row["stock_inward_no"] == "STINW/1"
+        assert row["jw_challan_no"] == "JWDC/1"
+        assert row["job_out_challan_no"] == "DC/OUT/1"
+
+    def test_jobbed_product_merges_into_one_line_priced_at_the_pi_rate(self, container, seed):
+        pi, product, job_out, receive = self._chain(container, seed)
+        # Two return lots of the same jobbed product/design.
+        receive("STINW/1", 30)
+        receive("STINW/2", 20)
+        built = container.export_invoice_service.build_prefill_from_proformas([pi.id], seed.company_id)
+        assert len(built["job_ins"]) == 2
+        assert len(built["items"]) == 1
+        item = built["items"][0]
+        assert item["product_id"] == product.id
+        assert item["quantity_boxes"] == 50            # 30 + 20, summed across lots
+        assert item["price_usd"] == 5.92               # the PI's own quoted USD rate
+
+    def test_job_ins_round_trip(self, container, seed):
+        inv = make_export(container, seed, job_ins=[{
+            "manufacturer_name": "Alive Granito", "manufacturer_gstin": "24ABVFA1170D1ZO",
+            "job_out_challan_no": "DC/OUT/1", "jw_challan_no": "JWDC/1",
+            "jw_challan_date": "2026-01-29", "stock_inward_no": "STINW/1",
+            "stock_inward_date": "2026-01-30",
+        }])
+        got = container.export_invoice_service.get(inv.id, seed.company_id)
+        assert len(got.job_ins) == 1
+        assert got.job_ins[0]["stock_inward_no"] == "STINW/1"
+        assert got.job_ins[0]["jw_challan_no"] == "JWDC/1"
+
+
+# ==========================================================================
+# Designs Packing List offers designs that only came in via a Job In
+# (the jobbed product never touches a purchase invoice, so the purchase-
+# side design_totals_for_product can't see it - reference_designs merges
+# JobInRepository.returned_design_totals_for_product on top, scoped to the
+# job works behind this invoice's linked proformas)
+# ==========================================================================
+class TestExportDesignsPackingListJobIn(TestExportJobInImport):
+    def _export_with_split(self, container, seed, boxes):
+        """The full chain plus an export invoice built off the proforma with
+        one `boxes`-box line of the jobbed product, so its Export Packing
+        List has a container line to allocate designs against."""
+        pi, product, job_out, receive = self._chain(container, seed)
+        design = container.product_service.list_designs_for_product(product.id, seed.company_id)[0]
+        inv = make_export(
+            container, seed, proforma_ids=[pi.id],
+            items=[{"product_name": product.product_name, "product_id": str(product.id),
+                    "quantity_value": "144", "quantity_boxes": str(boxes),
+                    "unit": "SQM", "price_usd": "5.92"}],
+        )
+        pl = container.export_packing_list_service.get_for_invoice(inv.id, seed.company_id)
+        return inv, product, design, pl, receive
+
+    def test_job_in_design_is_offered_for_its_container_line(self, container, seed):
+        inv, product, design, pl, receive = self._export_with_split(container, seed, 30)
+        receive("STINW/1", 30)
+
+        ref = container.export_packing_list_service.reference_designs(seed.company_id, pl)
+        line = pl.items[0]
+        rows = ref[(line.invoice_item_sr_no, line.container_sr_no)]
+        assert [(r["design_id"], r["boxes"], r["remaining"]) for r in rows] == [(design.id, 30, 30)]
+
+    def test_nothing_offered_until_the_goods_are_actually_received(self, container, seed):
+        inv, product, design, pl, receive = self._export_with_split(container, seed, 30)
+        # No receive() call - the job out exists but nothing has come back.
+        ref = container.export_packing_list_service.reference_designs(seed.company_id, pl)
+        assert ref[(pl.items[0].invoice_item_sr_no, pl.items[0].container_sr_no)] == []
+
+    def test_save_allocation_accepts_up_to_the_received_boxes_and_rejects_beyond(self, container, seed):
+        inv, product, design, pl, receive = self._export_with_split(container, seed, 30)
+        receive("STINW/1", 30)
+        line = pl.items[0]
+
+        container.export_packing_list_service.save_design_allocation(
+            seed.company_id, pl.id, line.invoice_item_sr_no, line.container_sr_no,
+            [{"design_id": str(design.id), "quantity_boxes": "30"}],
+        )
+        saved = container.export_packing_list_service.get(pl.id, seed.company_id).items[0]
+        assert [(d.design_id, d.quantity_boxes) for d in saved.designs] == [(design.id, 30)]
+
+    def test_save_allocation_rejects_more_than_was_received(self, container, seed):
+        inv, product, design, pl, receive = self._export_with_split(container, seed, 40)
+        receive("STINW/1", 30)
+        line = pl.items[0]
+        with pytest.raises(ValidationError):
+            container.export_packing_list_service.save_design_allocation(
+                seed.company_id, pl.id, line.invoice_item_sr_no, line.container_sr_no,
+                [{"design_id": str(design.id), "quantity_boxes": "40"}],
+            )
+
+    def test_two_return_lots_of_one_design_sum(self, container, seed):
+        inv, product, design, pl, receive = self._export_with_split(container, seed, 50)
+        receive("STINW/1", 30)
+        receive("STINW/2", 20)
+        ref = container.export_packing_list_service.reference_designs(seed.company_id, pl)
+        rows = ref[(pl.items[0].invoice_item_sr_no, pl.items[0].container_sr_no)]
+        assert [(r["design_id"], r["boxes"]) for r in rows] == [(design.id, 50)]
+
+
+# ==========================================================================
 # Per-product tax
 # ==========================================================================
 class TestExportTax:

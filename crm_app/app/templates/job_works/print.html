@@ -34,7 +34,20 @@
       {% else %}
       <a href="{{ url_for('packing_lists.new_packing_list', job_work_id=job_work.id) }}" class="btn btn-ghost btn-sm">📦 Create packing list</a>
       {% endif %}
-      <a href="{{ url_for('purchase_invoices.new_purchase_invoice') }}" class="btn btn-ghost btn-sm">🧾 Create purchase invoice</a>
+      {% if purchase_invoices %}
+      <details class="toolbar-menu">
+        <summary class="btn btn-ghost btn-sm">🧾 Purchase invoices ({{ purchase_invoices | length }}) ▾</summary>
+        <div class="toolbar-menu-panel">
+          {% for pinv in purchase_invoices %}
+          <a href="{{ url_for('purchase_invoices.view_purchase_invoice', purchase_invoice_id=pinv.id) }}" class="toolbar-menu-item">
+            <span class="mono">{{ pinv.purchase_invoice_number }}</span>
+            <span class="meta">{{ pinv.seller_name }} · {{ pinv.invoice_date }}</span>
+          </a>
+          {% endfor %}
+        </div>
+      </details>
+      {% endif %}
+      <a href="{{ url_for('purchase_invoices.new_purchase_invoice', job_work_ids=job_work.id) }}" class="btn btn-ghost btn-sm">🧾 Create purchase invoice</a>
       <a href="{{ url_for('job_works.edit_job_work', job_work_id=job_work.id) }}" class="btn btn-ghost btn-sm">Edit</a>
       {% if current_user.is_admin %}
       <a href="{{ url_for('job_works.job_work_versions', job_work_id=job_work.id) }}" class="btn btn-ghost btn-sm">Version history</a>

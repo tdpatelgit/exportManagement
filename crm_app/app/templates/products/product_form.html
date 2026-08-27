@@ -116,6 +116,11 @@
     </div>
     <div class="hint">IGST is set automatically from the chosen HSN code's GST slab. SGST and CGST are calculated automatically as half of IGST.</div>
 
+    <div class="field" style="max-width:280px;">
+      <label for="price_usd">Price</label>
+      <input type="number" step="0.01" min="0" id="price_usd" name="price_usd" value="{{ data.price_usd | default('', true) }}">
+    </div>
+
     <div class="form-row">
       {% set chosen_unit = data.quantity_unit | default('PCS', true) %}
       {{ searchable_select('quantity_unit', 'quantity_unit', chosen_unit, unit_options, label='Unit',
@@ -145,6 +150,7 @@
           <thead>
             <tr>
               <th style="min-width:160px;">Packing Type</th>
+              <th style="max-width:120px;">Level</th>
               <th style="max-width:120px;">Weight</th>
               <th style="max-width:140px;">Unit Per Packing</th>
               <th>Alt Qty per Packing</th>
@@ -155,6 +161,7 @@
             <tr>
               <td class="text-soft">Loose (built-in)</td>
               <td class="text-soft">—</td>
+              <td class="text-soft">—</td>
               <td class="text-soft">1</td>
               <td class="text-soft">Goods sold unpalletised — zero pallets</td>
               <td></td>
@@ -162,6 +169,12 @@
             {% for row in pallet_rows %}
             <tr class="pallet-type-row">
               <td><input type="text" name="pallet_type_name[]" class="js-pallet-name" value="{{ row.name }}"></td>
+              <td>
+                <select name="pallet_type_unit_kind[]" class="js-pallet-kind">
+                  <option value="pallet" {{ 'selected' if (row.unit_kind or 'pallet') == 'pallet' }}>Pallet</option>
+                  <option value="carton" {{ 'selected' if row.unit_kind == 'carton' }}>Carton</option>
+                </select>
+              </td>
               <td><input type="number" step="0.01" min="0" name="pallet_type_weight[]" class="js-pallet-weight" value="{{ row.weight_kg | default('', true) }}"></td>
               <td><input type="number" step="0.01" min="0" name="pallet_type_boxes[]" class="js-pallet-boxes" value="{{ row.boxes_per_pallet }}"></td>
               <td class="js-pallet-alt text-sm text-soft">—</td>
@@ -182,6 +195,24 @@
       </div>
     </div>
 
+    {% set chosen_master_product_id = data.master_product_id | default('', true) %}
+    <div class="field">
+      <label for="is_job_work_product">
+        <input type="checkbox" id="is_job_work_product" name="is_job_work_product" value="1" {{ 'checked' if data.is_job_work_product }}>
+        Job Work Product
+      </label>
+    </div>
+    <div class="field" id="master-product-field" style="max-width:320px;" {{ 'hidden' if not data.is_job_work_product }}>
+      <label for="master_product_id">Select Master Product</label>
+      <select id="master_product_id" name="master_product_id">
+        <option value="">— none —</option>
+        {% for mp in master_product_options %}
+        <option value="{{ mp.id }}" {{ 'selected' if chosen_master_product_id | string == mp.id | string }}>{{ mp.product_name }}</option>
+        {% endfor %}
+      </select>
+      <div class="hint">The product this one is job-worked from.</div>
+    </div>
+
     <button type="submit" class="btn btn-primary">{{ 'Save' if product else 'Add product' }}</button>
     <a href="{{ url_for('products.view_product', product_id=product.id) if product else url_for('products.list_products') }}" class="btn btn-ghost">Cancel</a>
   </form>
@@ -200,6 +231,15 @@
   }
   igst.addEventListener('input', recalc);
   recalc();
+
+  // ---- "Job Work Product" checkbox reveals the master product picker -----
+  const jobWorkCheckbox = document.getElementById('is_job_work_product');
+  const masterProductField = document.getElementById('master-product-field');
+  function toggleMasterProductField() {
+    masterProductField.hidden = !jobWorkCheckbox.checked;
+  }
+  jobWorkCheckbox.addEventListener('change', toggleMasterProductField);
+  toggleMasterProductField();
 
   // ---- HSN code dropdown (searchable) -------------------------------------
   // A custom dropdown, because the search box has to sit INSIDE the open
@@ -307,6 +347,7 @@
     tr.className = 'pallet-type-row';
     tr.innerHTML = `
       <td><input type="text" name="pallet_type_name[]" class="js-pallet-name" placeholder="e.g. pine pallet"></td>
+      <td><select name="pallet_type_unit_kind[]" class="js-pallet-kind"><option value="pallet">Pallet</option><option value="carton">Carton</option></select></td>
       <td><input type="number" step="0.01" min="0" name="pallet_type_weight[]" class="js-pallet-weight"></td>
       <td><input type="number" step="0.01" min="0" name="pallet_type_boxes[]" class="js-pallet-boxes"></td>
       <td class="js-pallet-alt text-sm text-soft">—</td>

@@ -219,12 +219,15 @@ def view_proforma_invoice(proforma_invoice_id):
     # PO placed against it and which of its packing-list designs are still
     # unplaced, rather than linking to a single "the" purchase order.
     purchase_orders = container.purchase_order_service.list_for_proforma(proforma_invoice_id, g.user.company_id)
-    purchase_invoices = container.purchase_invoice_service.list_for_proforma(purchase_orders, g.user.company_id)
-    design_status = container.proforma_fulfilment_service.design_status(g.user.company_id, proforma_invoice_id)
-    export_invoices = container.export_invoice_service.list_for_proforma(proforma_invoice_id, g.user.company_id)
     # An invoice's goods can be sent out to be worked on more than once, so
     # job works are a list on this page too, same as its purchase orders.
     job_works = container.job_work_service.list_for_proforma(proforma_invoice_id, g.user.company_id)
+    # A purchase invoice can be raised against either a purchase order or a
+    # job work under this proforma, so both are passed in here - otherwise
+    # one raised against a job work never shows up on this page.
+    purchase_invoices = container.purchase_invoice_service.list_for_proforma(purchase_orders, g.user.company_id, job_works)
+    design_status = container.proforma_fulfilment_service.design_status(g.user.company_id, proforma_invoice_id)
+    export_invoices = container.export_invoice_service.list_for_proforma(proforma_invoice_id, g.user.company_id)
     return render_template("proforma_invoices/print.html", invoice=invoice, company=company,
                            packing_lists=packing_lists, purchase_orders=purchase_orders,
                            purchase_invoices=purchase_invoices, job_works=job_works,

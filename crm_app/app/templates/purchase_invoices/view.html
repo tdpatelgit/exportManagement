@@ -67,6 +67,26 @@
     {% else %}
     <a href="{{ url_for('packing_lists.new_packing_list', purchase_invoice_id=purchase_invoice.id) }}" class="btn btn-ghost btn-sm">📦 Create packing list</a>
     {% endif %}
+    {% if job_outs | length == 1 %}
+    <a href="{{ url_for('job_outs.view_job_out', job_out_id=job_outs[0].id) }}" class="btn btn-ghost btn-sm">🚚 View job out</a>
+    {% elif job_outs %}
+    <details class="toolbar-menu">
+      <summary class="btn btn-ghost btn-sm">🚚 Job outs ({{ job_outs | length }}) ▾</summary>
+      <div class="toolbar-menu-panel">
+        {% for jo in job_outs %}
+        <a href="{{ url_for('job_outs.view_job_out', job_out_id=jo.id) }}" class="toolbar-menu-item">
+          <span class="mono">{{ jo.delivery_challan_no }}</span>
+          <span class="meta">{{ jo.delivery_challan_date }}</span>
+        </a>
+        {% endfor %}
+        <a href="{{ url_for('job_outs.new_job_out', purchase_invoice_id=purchase_invoice.id) }}" class="toolbar-menu-item">
+          <span class="mono">+ New job out</span>
+        </a>
+      </div>
+    </details>
+    {% else %}
+    <a href="{{ url_for('job_outs.new_job_out', purchase_invoice_id=purchase_invoice.id) }}" class="btn btn-ghost btn-sm">🚚 Create job out</a>
+    {% endif %}
     <a href="{{ url_for('purchase_invoices.edit_purchase_invoice', purchase_invoice_id=purchase_invoice.id) }}" class="btn btn-ghost btn-sm">Edit</a>
     {% if current_user.is_admin %}
     <a href="{{ url_for('purchase_invoices.purchase_invoice_versions', purchase_invoice_id=purchase_invoice.id) }}" class="btn btn-ghost btn-sm">Version history</a>

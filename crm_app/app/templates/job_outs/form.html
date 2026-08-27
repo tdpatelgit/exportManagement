@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit job out' if job_out else 'New job out' }}{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Sales documents</div>
+    <h1>{{ 'Edit ' + job_out.delivery_challan_no if job_out else 'New job out' }}</h1>
+    <div class="text-sm text-soft">Delivery challan for jobwork.</div>
+  </div>
+</div>
+
+{# Everything below the four cards on this form is read live off the chosen
+   purchase invoice when the sheet prints - the receiver, the goods lines
+   (master product dispatched -> jobbed product expected back), HSN, qty,
+   rate, taxable value, the packing-list design breakdown and the tax
+   footer. Nothing of that is typed here or snapshotted on save; see
+   JobOutService.build_sheet. #}
+<form method="POST" id="job-out-form">
+  {% set data = form_data if form_data else job_out %}
+
+  <div class="card">
+    <div class="card-header"><h3>Purchase invoice</h3></div>
+    <div class="field">
+      <label for="purchase_invoice_id">Raise this challan against<span class="required-mark">*</span></label>
+      <select id="purchase_invoice_id" name="purchase_invoice_id" required>
+        <option value="">— Select a purchase invoice —</option>
+        {% for pinv in purchase_invoices %}
+          <option value="{{ pinv.id }}" {{ 'selected' if data and data.purchase_invoice_id | string == pinv.id | string }}>
+            {{ pinv.purchase_invoice_number }} — {{ pinv.seller_name }} ({{ pinv.invoice_date }})
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <p class="hint">The challan's goods lines, receiver party, HSN, quantities, rates and tax footer all come from this invoice every time the sheet is printed — so correcting the invoice corrects the challan. Only the fields below are typed here.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Delivery challan</h3></div>
+    <div class="form-row">
+      <div class="field">
+        <label for="delivery_challan_no">Delivery challan no.<span class="required-mark">*</span></label>
+        <input type="text" id="delivery_challan_no" name="delivery_challan_no" required
+               placeholder="e.g. DC2627001" value="{{ data.delivery_challan_no | default('', true) }}">
+      </div>
+      <div class="field">
+        <label for="delivery_challan_date">Delivery challan date<span class="required-mark">*</span></label>
+        <input type="date" id="delivery_challan_date" name="delivery_challan_date" required
+               value="{{ data.delivery_challan_date | default(today, true) }}">
+      </div>
+    </div>
+    <p class="hint">Unlike every other document here, this number is typed rather than generated — it is the reference the goods physically travel under. It must be unique.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Dispatch from</h3></div>
+    <div class="field">
+      <label class="checkline">
+        <input type="checkbox" id="dispatch_from_company" name="dispatch_from_company" value="1"
+               {{ 'checked' if data and data.dispatch_from_company }}>
+        Dispatched from our own company / warehouse
+      </label>
+    </div>
+    <p class="hint">Left unticked, the sheet's <strong>Dispatch From</strong> block prints the purchase invoice's own seller. Ticked, it prints our own company's name, address and GSTIN instead. The letterhead at the top of the sheet stays ours either way.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Transport details</h3></div>
+    <div class="form-row">
+      <div class="field">
+        <label for="transporter_name">Transport name</label>
+        <input type="text" id="transporter_name" name="transporter_name" list="transporter_names"
+               value="{{ data.transporter_name | default('', true) }}">
+        <datalist id="transporter_names">
+          {% for t in transporters %}<option value="{{ t.name }}">{{ t.gstin_transporter_no or '' }}</option>{% endfor %}
+        </datalist>
+      </div>
+      <div class="field">
+        <label for="transport_gstin">Transport GSTIN</label>
+        <input type="text" id="transport_gstin" name="transport_gstin" list="transporter_gstins"
+               value="{{ data.transport_gstin | default('', true) }}">
+        <datalist id="transporter_gstins">
+          {% for t in transporters %}
+            {% if t.gstin_transporter_no %}<option value="{{ t.gstin_transporter_no }}">{{ t.name }}</option>{% endif %}
+          {% endfor %}
+        </datalist>
+      </div>
+    </div>
+    <p class="hint">Leave Transport name blank and the challan falls back to whichever transporter holds the GSTIN above, then to the purchase invoice's own transporter.</p>
+    <div class="form-row">
+      <div class="field">
+        <label for="lr_no">LR no.</label>
+        <input type="text" id="lr_no" name="lr_no" value="{{ data.lr_no | default('', true) }}">
+      </div>
+      <div class="field">
+        <label for="vehicle_no">Vehicle no.</label>
+        <input type="text" id="vehicle_no" name="vehicle_no" value="{{ data.vehicle_no | default('', true) }}">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="field">
+        <label for="eway_bill_no">E-way bill no.</label>
+        <input type="text" id="eway_bill_no" name="eway_bill_no" value="{{ data.eway_bill_no | default('', true) }}">
+      </div>
+      <div class="field">
+        <label for="eway_bill_date">E-way bill date</label>
+        <input type="date" id="eway_bill_date" name="eway_bill_date" value="{{ data.eway_bill_date | default('', true) }}">
+      </div>
+    </div>
+    <div class="field">
+      <label for="remarks">Remarks</label>
+      <textarea id="remarks" name="remarks" rows="2">{{ data.remarks | default('', true) }}</textarea>
+    </div>
+  </div>
+
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary">{{ 'Save changes' if job_out else 'Create job out' }}</button>
+    <a href="{{ url_for('job_outs.view_job_out', job_out_id=job_out.id) if job_out else url_for('job_outs.list_job_outs') }}" class="btn btn-ghost">Cancel</a>
+  </div>
+</form>
+
+{% endblock %}

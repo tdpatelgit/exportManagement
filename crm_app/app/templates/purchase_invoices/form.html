@@ -190,7 +190,7 @@
             <td>
               <select name="item_price_per[]" class="js-price-per">
                 <option value="BOX" {{ 'selected' if (row.price_per or 'BOX') == 'BOX' }}>BOX</option>
-                <option value="UNIT" {{ 'selected' if row.price_per and row.price_per != 'BOX' }}>Unit</option>
+                <option value="UNIT" {{ 'selected' if row.price_per and row.price_per != 'BOX' }}>{{ row.unit or PRODUCT_UNITS[0] }}</option>
               </select>
             </td>
             <td class="num js-total">0.00</td>
@@ -272,6 +272,15 @@
   const itemsBody = document.getElementById('items-body');
   const addRowBtn = document.getElementById('add-row-btn');
 
+  // The PER dropdown prices a row per BOX or per its quantity unit - so its
+  // "per unit" choice always reads as the row's own unit (SQM, LM, PCS ...),
+  // kept in step with the Unit dropdown next to it.
+  function syncPerLabel(tr) {
+    const unitSel = tr.querySelector('.js-unit');
+    const perUnitOpt = tr.querySelector('.js-price-per option[value="UNIT"]');
+    if (unitSel && perUnitOpt) perUnitOpt.textContent = unitSel.value || 'unit';
+  }
+
   const rowTemplate = () => {
     const tr = document.createElement('tr');
     tr.className = 'item-row';
@@ -298,7 +307,7 @@
       <td>
         <select name="item_price_per[]" class="js-price-per">
           <option value="BOX">BOX</option>
-          <option value="UNIT">Unit</option>
+          <option value="UNIT">{{ PRODUCT_UNITS[0] }}</option>
         </select>
       </td>
       <td class="num js-total">0.00</td>
@@ -401,7 +410,9 @@
   document.getElementById('seller_gstin').addEventListener('input', applyPurchaseType);
 
   addRowBtn.addEventListener('click', () => {
-    itemsBody.appendChild(rowTemplate());
+    const tr = rowTemplate();
+    itemsBody.appendChild(tr);
+    syncPerLabel(tr);
     renumber();
     recalcTotals();
   });
@@ -420,7 +431,10 @@
     if (e.target.classList.contains('js-boxes')) recalcRowQty(e.target.closest('tr'));
     recalcTotals();
   });
-  itemsBody.addEventListener('change', recalcTotals);
+  itemsBody.addEventListener('change', (e) => {
+    if (e.target.classList.contains('js-unit')) syncPerLabel(e.target.closest('tr'));
+    recalcTotals();
+  });
   ['discount_amount', 'insurance_other', 'freight', 'igst_amount', 'cgst_amount', 'sgst_amount', 'round_off']
     .forEach((id) => document.getElementById(id).addEventListener('input', recalcTotals));
 
@@ -577,6 +591,7 @@
     }
   });
 
+  itemsBody.querySelectorAll('.item-row').forEach(syncPerLabel);
   renumber();
   recalcTotals();
 })();

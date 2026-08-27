@@ -158,6 +158,27 @@ def parse_container_details_excel():
     return jsonify({"rows": rows})
 
 
+@booking_details_bp.route("/api/<int:booking_detail_id>/containers")
+@login_required
+def booking_containers(booking_detail_id):
+    """This booking's container rows, for whoever wants to fill their own
+    Container details table from it - the Export Invoice's section 11B and
+    Loading Planning both do.
+
+    The caller COPIES what comes back rather than linking to it: the two
+    tables already share every meaningful column, and a snapshot is what
+    stops a later edit of the booking from rewriting an already-issued
+    invoice. Read-only, so login is enough - unlike the write routes here."""
+    try:
+        return jsonify(
+            current_app.container.loading_planning_service.booking_snapshot(
+                booking_detail_id, g.user.company_id
+            )
+        )
+    except NotFoundError:
+        return jsonify({"error": "Booking not found."}), 404
+
+
 @booking_details_bp.route("/")
 @login_required
 def list_booking_details():

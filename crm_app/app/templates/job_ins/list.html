@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Job Ins{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Sales documents</div>
+    <h1>Job Ins</h1>
+    <div class="text-sm text-soft">Jobwork inward challans / returns.</div>
+  </div>
+  <div class="topbar-actions">
+    <a href="{{ url_for('job_ins.new_job_in') }}" class="btn btn-primary">+ New job in</a>
+  </div>
+</div>
+
+<div class="card">
+  {% if job_ins %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th>Stock inward no.</th>
+          <th>Date</th>
+          <th>Against challan</th>
+          <th>JW challan no.</th>
+          <th>Vehicle</th>
+          <th>Created by</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ji in job_ins %}
+        <tr>
+          <td class="mono">{{ ji.stock_inward_no }}</td>
+          <td class="text-sm">{{ ji.stock_inward_date }}</td>
+          <td class="text-sm">{{ ji.delivery_challan_no or '—' }}</td>
+          <td class="text-sm">{{ ji.jw_delivery_challan_no or '—' }}</td>
+          <td class="text-sm">{{ ji.vehicle_no or '—' }}</td>
+          <td class="text-sm">{{ ji.created_by_name }}</td>
+          <td><a href="{{ url_for('job_ins.view_job_in', job_in_id=ji.id) }}" class="text-sm">Open →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No job ins yet. A job in is normally started from a job out's own preview.</div>
+  {% endif %}
+</div>
+
+{% endblock %}

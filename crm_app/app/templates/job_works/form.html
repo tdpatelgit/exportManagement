@@ -31,13 +31,6 @@
   }) %}
 {% endfor %}
 
-{# Plain {id, name, unit} triples for the "To Product" picker - the WHOLE
-   catalog, since job work's target size is rarely on the invoice at all. #}
-{% set to_products = [] %}
-{% for p in products %}
-  {% set _ = to_products.append({'id': p.id, 'name': p.product_name, 'unit': p.quantity_unit or 'PCS'}) %}
-{% endfor %}
-
 <form method="POST" id="job-work-form">
   {% set data = form_data if form_data else job_work %}
   <div class="card">
@@ -130,38 +123,35 @@
     <hr class="divider">
     <h4>Products &amp; designs to send out</h4>
     <div class="form-row">
-      {# Picked FIRST: the whole catalog. Its own QTY unit is what every
-         quantity on the row is counted in, and - once it matches one of the
-         invoice's own products - it's what the Design column below and
-         Jobed Qty are both driven from (see designsForToProduct() /
-         chainOf() in this page's own script). #}
+      {# Picked FIRST: only the invoice's own products still not fully
+         placed on a purchase order (see JobWorksRoutes._invoice_context).
+         Its own QTY unit is what every quantity on the row is counted in,
+         and it's what the Design column below and Jobed Qty are both
+         driven from (see designsForToProduct() / chainOf() in this page's
+         own script). #}
       <div class="field">
         <label for="mfr_to_product_select">Jobbed Product</label>
         <select id="mfr_to_product_select">
           <option value="">— Select a product to convert into —</option>
           {% for p in to_products %}
-            <option value="{{ p.id }}" data-name="{{ p.name }}" data-unit="{{ p.unit }}">{{ p.name }}</option>
+            <option value="{{ p.id }}" data-name="{{ p.name }}" data-unit="{{ p.unit }}"
+                    data-master-id="{{ p.master_product_id }}" data-master-name="{{ p.master_product_name }}"
+                    data-master-hsn="{{ p.master_hsn_code }}" data-master-alt-qty="{{ p.master_alt_qty }}"
+                    data-master-unit="{{ p.master_unit }}" data-master-igst="{{ p.master_igst }}">{{ p.name }}</option>
           {% endfor %}
         </select>
-        <div class="text-sm text-soft">Design list and Jobed Qty come from the proforma invoice's packing list under whichever of its own products this matches — empty if To Product isn't one of them.</div>
+        <div class="text-sm text-soft">Only this proforma invoice's products still not fully covered by a purchase order are listed. Design list and Jobed Qty come from the proforma invoice's packing list under whichever of its own products this matches.</div>
       </div>
-      {% if invoice_products %}
-      {# Picked SECOND: only the invoice's own products - tags each line's
+      {# No longer a picker: the Job Product is simply the Jobbed Product's
+         own master product (Product.master_product_id) - tags each line's
          product_id/product_name for the Products card's Boxes total below
-         (see plBoxesForProduct() in this page's own script); no longer
-         drives Jobed Qty, that's To Product's job now. #}
+         (see plBoxesForProduct() in this page's own script) the same way a
+         manually-picked Job Product used to. #}
       <div class="field">
-        <label for="mfr_product_select">Job Product</label>
-        <select id="mfr_product_select">
-          <option value="">— Select a product from the proforma invoice —</option>
-          {% for p in invoice_products %}
-            {% set meta = invoice_product_meta_map.get(p.product_id | int, {}) if p.product_id else {} %}
-            <option value="{{ p.product_id or '' }}" data-name="{{ p.product_name }}" data-hsn="{{ p.hsn_code or '' }}" data-alt-qty="{{ meta.get('alt_qty', '') }}" data-unit="{{ meta.get('unit', '') }}">{{ p.product_name }}</option>
-          {% endfor %}
-        </select>
-        <div class="text-sm text-soft">Tags each design line's Product, which the Products card's Boxes total below uses — not shown on the printed sheet.</div>
+        <label>Job Product</label>
+        <div class="text-sm" id="mfr_product_label" style="padding-top:8px;">—</div>
+        <div class="text-sm text-soft">The Jobbed Product's own master product, shown once one is picked above — not shown on the printed sheet.</div>
       </div>
-      {% endif %}
     </div>
 
     {% if invoice_products %}
@@ -186,14 +176,14 @@
       </div>
       <button type="button" class="btn btn-ghost btn-sm" id="add-design-btn" style="margin-top:10px;">+ Add design</button>
       <button type="button" class="btn btn-primary btn-sm" id="add-to-job-work" style="margin-top:10px;">+ Add to Job Work</button>
-      <p class="hint">Jobed Qty is fetched from the proforma invoice's packing list for whichever design was picked under To Product and can't be typed. Converted Qty = Jobed Qty ÷ Conversion Value; Extra Qty = Converted Qty × Extra Qty %; Job Quantity = Converted Qty + Extra Qty, rounded up to the next whole number.</p>
+      <p class="hint">Picking a Jobbed Product fills in one row per design on its packing list automatically - "+ Add design" is only for one not already listed there. Jobed Qty is fetched from the proforma invoice's packing list for whichever design is picked and can't be typed. Converted Qty = Jobed Qty ÷ Conversion Value; Extra Qty = Converted Qty × Extra Qty %; Job Quantity = Converted Qty + Extra Qty, rounded up to the next whole number.</p>
     </div>
     {% else %}
     <div class="empty-state">
       {% if data and data.proforma_invoice_id %}
         This proforma invoice has no product lines yet.
       {% else %}
-        Pick a proforma invoice above first — its products are what the Product picker (and Jobed Qty) draws from.
+        Pick a proforma invoice above first — its products are what the Jobbed Product picker (and Jobed Qty) draws from.
       {% endif %}
     </div>
     {% endif %}
@@ -201,9 +191,10 @@
 
   <!-- ============ PRODUCTS (a copy of the Purchase Order form's own
        Products card) — one row per product, prefilled from the Job
-       Manufacturer -> "Product" picker (the invoice's own products), NOT
-       "To Product" (the design lines' conversion target). Costing/reference
-       only: never printed, never feeds the design lines' Job Quantity. ============ -->
+       Manufacturer's Job Product label (the Jobbed Product's own master
+       product), NOT "To Product"/Jobbed Product itself (the design lines'
+       conversion target). Costing/reference only: never printed, never
+       feeds the design lines' Job Quantity. ============ -->
   {% set chosen_currency = data.currency_code | default('INR', true) %}
   <div class="card">
     <div class="card-header"><h3>Products</h3></div>
@@ -432,9 +423,28 @@
 
   // ---- Job Manufacturer: design lines for the chosen To Product --------------------------------------------------
   const toProductSelect = document.getElementById('mfr_to_product_select');
-  const productSelect = document.getElementById('mfr_product_select');
+  const productLabel = document.getElementById('mfr_product_label');
   const mfrWrap = document.getElementById('mfr-designs-wrap');
   const mfrBody = document.getElementById('mfr-designs-body');
+
+  // Job Product is no longer picked - it's the currently selected Jobbed
+  // Product's own master product (Product.master_product_id), carried on
+  // its <option> as data-master-* attributes (see _invoice_context in
+  // app/routes/job_works.py).
+  function currentMasterInfo() {
+    const opt = toProductSelect.selectedOptions[0];
+    if (!opt || !opt.value) return { id: '', name: '', hsn: '', altQty: '', unit: '', igst: '' };
+    return {
+      id: opt.dataset.masterId || '', name: opt.dataset.masterName || '',
+      hsn: opt.dataset.masterHsn || '', altQty: opt.dataset.masterAltQty || '',
+      unit: opt.dataset.masterUnit || '', igst: opt.dataset.masterIgst || '',
+    };
+  }
+
+  function renderProductLabel() {
+    const info = currentMasterInfo();
+    productLabel.textContent = info.name || (toProductSelect.value ? 'No master product set for this product.' : '—');
+  }
 
   function toProductSelectedName() {
     return (toProductSelect.selectedOptions[0] || {}).text || '';
@@ -464,8 +474,8 @@
     const tr = document.createElement('tr');
     tr.className = 'js-mfr-design';
     tr.dataset.designName = designName || '';
-    tr.dataset.productId = productId !== undefined ? (productId || '') : (productSelect ? productSelect.value : '');
-    tr.dataset.productName = productName !== undefined ? (productName || '') : productSelectName();
+    tr.dataset.productId = productId !== undefined ? (productId || '') : currentMasterInfo().id;
+    tr.dataset.productName = productName !== undefined ? (productName || '') : currentMasterInfo().name;
     tr.innerHTML = `
       <td class="js-sr"></td>
       <td><select class="js-design-pick">${designOptions(availableDesigns, designName || '')}</select></td>
@@ -480,10 +490,6 @@
     updateDesignRow(tr);
     renumberDesignRows();
     return tr;
-  }
-
-  function productSelectName() {
-    return productSelect && productSelect.selectedOptions[0] ? (productSelect.selectedOptions[0].dataset.name || '') : '';
   }
 
   function rowLine(tr) {
@@ -519,6 +525,7 @@
 
   function renderDesignsForToProduct() {
     mfrBody.innerHTML = '';
+    renderProductLabel();
     const toProductId = toProductSelect.value;
     if (!toProductId) {
       mfrWrap.hidden = true;
@@ -527,39 +534,23 @@
     mfrWrap.hidden = false;
     const available = designsForToProduct(toProductId, toProductSelectedName());
     const already = lines.filter((l) => String(l.to_product_id) === String(toProductId));
-    if (already.length) {
-      // The "Product" dropdown itself is also set back to match, when the
-      // whole batch agrees on one - same treatment "To Product" got in the
-      // previous layout - so a freshly-added row alongside these (via
-      // "+ Add design") picks up the same source by default too.
-      if (productSelect) {
-        const sources = new Set(already.map((l) => String(l.product_id || '')));
-        if (sources.size === 1) {
-          const only = [...sources][0];
-          if (Array.from(productSelect.options).some((o) => o.value === only)) productSelect.value = only;
-        }
-      }
-      already.forEach((l) => addDesignRow(available, l.design_id, l.design_name, l.conversion_value, l.extra_percent,
-                                            l.product_id, l.product_name));
-    } else {
+    already.forEach((l) => addDesignRow(available, l.design_id, l.design_name, l.conversion_value, l.extra_percent,
+                                          l.product_id, l.product_name));
+    // Every design still on the proforma invoice's own packing list under
+    // this product, not already committed to the job work, gets its own
+    // pre-filled row automatically - picking a Jobbed Product fills in its
+    // whole design list rather than making the user add each row by hand.
+    // Conversion Value is still typed per design.
+    const committedKeys = new Set(already.map((l) => normalizeName(l.design_name)));
+    const remaining = available.filter((d) => !committedKeys.has(normalizeName(d.name)));
+    if (remaining.length) {
+      remaining.forEach((d) => addDesignRow(available, undefined, d.name));
+    } else if (!already.length) {
       addDesignRow(available);
     }
   }
 
   toProductSelect.addEventListener('change', renderDesignsForToProduct);
-  if (productSelect) {
-    // Picking a Product is a deliberate "resolve every visible row against
-    // THIS source" action, so it overwrites each row's own remembered
-    // product rather than only the ones that had none.
-    productSelect.addEventListener('change', () => {
-      const name = productSelectName();
-      mfrBody.querySelectorAll('.js-mfr-design').forEach((tr) => {
-        tr.dataset.productId = productSelect.value;
-        tr.dataset.productName = name;
-        updateDesignRow(tr);
-      });
-    });
-  }
 
   const addDesignBtn = document.getElementById('add-design-btn');
   if (addDesignBtn) {
@@ -624,7 +615,16 @@
         alert('Pick at least one design and its Conversion Value first.');
         return;
       }
-      lines = lines.filter((l) => String(l.to_product_id) !== String(toProductId)).concat(kept);
+      // Upsert by (To Product, Design) instead of wiping the whole product's
+      // group and replacing it with only what's currently staged - a line
+      // committed on an earlier click must survive later clicks even if the
+      // staging row that produced it was since reused for a different
+      // design, so only designs actually present in `kept` are touched.
+      kept.forEach((newLine) => {
+        const key = normalizeName(newLine.design_name);
+        const idx = lines.findIndex((l) => String(l.to_product_id) === String(toProductId) && normalizeName(l.design_name) === key);
+        if (idx >= 0) lines[idx] = newLine; else lines.push(newLine);
+      });
       render();
       plAddProductFromManufacturerPick();
     });
@@ -855,16 +855,17 @@
     plOverlay.hidden = true;
   }
 
-  // ---- auto-add a product line from the Job Manufacturer card's "Product"
-  // picker (NOT "To Product") whenever "+ Add to Job Work" is used - see the
-  // card's own markup comment. A no-op when no Product is picked, or that
-  // product already has a line. --------------------------------------------------
+  // ---- auto-add a product line from the Job Manufacturer card's Job
+  // Product (the Jobbed Product's own master product) whenever "+ Add to
+  // Job Work" is used - see the card's own markup comment. A no-op when
+  // the Jobbed Product has no master product, or that product already has
+  // a line. --------------------------------------------------
   function plAddProductFromManufacturerPick() {
-    if (!productSelect || !productSelect.value) return;
-    const id = productSelect.value;
-    const opt = productSelect.selectedOptions[0];
-    const name = opt ? (opt.dataset.name || opt.textContent || '') : '';
-    const hsn = opt ? (opt.dataset.hsn || '') : '';
+    const info = currentMasterInfo();
+    if (!info.id) return;
+    const id = info.id;
+    const name = info.name;
+    const hsn = info.hsn;
     const already = Array.from(plItemsBody.querySelectorAll('.pl-item-row')).some(
       (tr) => tr.querySelector('.js-pl-product-id').value === id
     );
@@ -874,8 +875,9 @@
       tr.querySelector('.js-pl-product-id').value = id;
       tr.querySelector('.js-pl-product-name').value = name;
       tr.querySelector('.js-pl-hsn').value = hsn;
-      tr.dataset.altQty = (opt && opt.dataset.altQty) || '';
-      if (opt && opt.dataset.unit) plSetUnitValue(tr.querySelector('.js-pl-unit'), opt.dataset.unit);
+      tr.dataset.altQty = info.altQty || '';
+      tr.dataset.igst = info.igst || '';
+      if (info.unit) plSetUnitValue(tr.querySelector('.js-pl-unit'), info.unit);
       plRenumber();
     }
     plSyncBoxesFromLines();

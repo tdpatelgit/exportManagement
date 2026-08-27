@@ -36,7 +36,7 @@ _HEADER_FIELDS = [
     "fob_pricing",
     "bank_name", "bank_account_number", "bank_ifsc_code", "bank_swift_code", "bank_branch", "bank_address",
     "authorised_person_name", "authorised_person_designation", "self_sealing_declaration",
-    "examination_date", "location_code_08b", "booking_no", "vessel_name", "voyage_no",
+    "examination_date", "location_code_08b", "booking_no", "booking_detail_id", "vessel_name", "voyage_no",
     "issuing_authority", "issuing_authority_address",
     "permission_no", "permission_date", "permission_expiry", "permission_is_one_time", "manufacturer_name", "manufacturer_address",
     "stuffing_location", "remarks",
@@ -55,6 +55,7 @@ def _extract_fields(form) -> dict:
     fields["container_details_list"] = _extract_container_details(form)
     fields["purchase_details"] = _extract_purchase_details(form)
     fields["product_sources"] = _extract_product_sources(form)
+    fields["job_ins"] = _extract_job_ins(form)
     fields["packing_allocations"] = _extract_packing_allocations(form)
     return fields
 
@@ -167,6 +168,34 @@ def _extract_product_sources(form) -> list:
             "product_name": names[i] if i < len(names) else "",
             "po_number": po_numbers[i] if i < len(po_numbers) else "",
             "quantity_boxes": boxes[i] if i < len(boxes) else "",
+        })
+    return rows
+
+
+def _extract_job_ins(form) -> list:
+    """The read-only "Job In details" breakdown - which job in(s) the
+    returned/jobbed goods on the Products card were imported from - round-
+    tripped as hidden fields so it survives a save/reopen, mirrors
+    _extract_product_sources. Display only, never printed."""
+    names = form.getlist("ji_manufacturer_name[]")
+    gstins = form.getlist("ji_manufacturer_gstin[]")
+    job_out_challans = form.getlist("ji_job_out_challan_no[]")
+    jw_challans = form.getlist("ji_jw_challan_no[]")
+    jw_challan_dates = form.getlist("ji_jw_challan_date[]")
+    inward_nos = form.getlist("ji_stock_inward_no[]")
+    inward_dates = form.getlist("ji_stock_inward_date[]")
+    n = max(len(names), len(gstins), len(job_out_challans), len(jw_challans),
+            len(jw_challan_dates), len(inward_nos), len(inward_dates))
+    rows = []
+    for i in range(n):
+        rows.append({
+            "manufacturer_name": names[i] if i < len(names) else "",
+            "manufacturer_gstin": gstins[i] if i < len(gstins) else "",
+            "job_out_challan_no": job_out_challans[i] if i < len(job_out_challans) else "",
+            "jw_challan_no": jw_challans[i] if i < len(jw_challans) else "",
+            "jw_challan_date": jw_challan_dates[i] if i < len(jw_challan_dates) else "",
+            "stock_inward_no": inward_nos[i] if i < len(inward_nos) else "",
+            "stock_inward_date": inward_dates[i] if i < len(inward_dates) else "",
         })
     return rows
 
@@ -297,7 +326,7 @@ def _form_context():
 
 def _render_form(invoice, form_data, form_items, containers=None,
                  container_details=None, purchase_details=None, product_sources=None,
-                 allocations=None, status_code=200):
+                 job_ins=None, allocations=None, status_code=200):
     leads, proforma_invoices, buyers, company, permits, bookings = _form_context()
     rows = form_items if form_items is not None else (invoice.items if invoice else [])
     pallet_types_map, product_meta_map = _product_maps(rows)
@@ -307,7 +336,7 @@ def _render_form(invoice, form_data, form_items, containers=None,
         form_data=form_data, form_items=form_items,
         form_containers=containers,
         form_container_details=container_details, form_purchase_details=purchase_details,
-        form_product_sources=product_sources,
+        form_product_sources=product_sources, form_job_ins=job_ins,
         form_allocations=_allocation_rows(invoice, allocations),
         pallet_types_map=pallet_types_map, product_meta_map=product_meta_map,
         today=date.today().isoformat(),
@@ -341,7 +370,7 @@ def new_export_invoice():
                 None, request.form, _extract_items(request.form),
                 containers=fields["containers"],
                 container_details=fields["container_details_list"], purchase_details=fields["purchase_details"],
-                product_sources=fields["product_sources"],
+                product_sources=fields["product_sources"], job_ins=fields["job_ins"],
                 allocations=fields["packing_allocations"],
                 status_code=400,
             )
@@ -349,7 +378,7 @@ def new_export_invoice():
     # GET: optionally prefill from one or more proforma invoices.
     prefill = None
     form_items = None
-    containers = container_details = purchase_details = product_sources = None
+    containers = container_details = purchase_details = product_sources = job_ins = None
     raw_ids = request.args.get("proforma_invoice_ids") or request.args.get("proforma_invoice_id")
     proforma_ids = [p for p in (raw_ids.split(",") if raw_ids else []) if p.strip()]
     if proforma_ids:
@@ -359,9 +388,10 @@ def new_export_invoice():
         form_items = built["items"]
         purchase_details = built["purchase_details"]
         product_sources = built["product_sources"]
+        job_ins = built["job_ins"]
     return _render_form(None, prefill, form_items, containers=containers,
                         container_details=container_details, purchase_details=purchase_details,
-                        product_sources=product_sources)
+                        product_sources=product_sources, job_ins=job_ins)
 
 
 @export_invoices_bp.route("/api/prefill")
@@ -405,8 +435,15 @@ def export_invoice_prefill():
     for key in ("buyer_order_date", "epcg_date"):
         fields[key] = iso(fields.get(key))
     fields = {k: ("" if v is None else v) for k, v in fields.items()}
+
+    job_ins = [
+        {**{k: ("" if v is None else v) for k, v in ji.items()},
+         "jw_challan_date": iso(ji.get("jw_challan_date")),
+         "stock_inward_date": iso(ji.get("stock_inward_date"))}
+        for ji in built["job_ins"]
+    ]
     return jsonify({"fields": fields, "items": items, "purchase_details": built["purchase_details"],
-                    "product_sources": built["product_sources"]})
+                    "product_sources": built["product_sources"], "job_ins": job_ins})
 
 
 @export_invoices_bp.route("/<int:export_invoice_id>")
@@ -447,7 +484,7 @@ def edit_export_invoice(export_invoice_id):
                 invoice, request.form, _extract_items(request.form),
                 containers=fields["containers"],
                 container_details=fields["container_details_list"], purchase_details=fields["purchase_details"],
-                product_sources=fields["product_sources"],
+                product_sources=fields["product_sources"], job_ins=fields["job_ins"],
                 allocations=fields["packing_allocations"],
                 status_code=400,
             )
@@ -456,7 +493,7 @@ def edit_export_invoice(export_invoice_id):
         invoice, None, None,
         containers=invoice.containers,
         container_details=invoice.container_details, purchase_details=invoice.purchase_details,
-        product_sources=invoice.product_sources,
+        product_sources=invoice.product_sources, job_ins=invoice.job_ins,
     )
 
 

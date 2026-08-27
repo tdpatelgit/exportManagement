@@ -147,7 +147,7 @@
             <td>
               <select name="item_price_per[]" class="js-price-per">
                 <option value="BOX" {{ 'selected' if (row.price_per or 'BOX') == 'BOX' }}>BOX</option>
-                <option value="UNIT" {{ 'selected' if row.price_per and row.price_per != 'BOX' }}>Unit</option>
+                <option value="UNIT" {{ 'selected' if row.price_per and row.price_per != 'BOX' }}>{{ row.unit or PRODUCT_UNITS[0] }}</option>
               </select>
             </td>
             <td class="num js-total">0.00</td>
@@ -234,6 +234,15 @@
     sel.value = u;
   }
 
+  // The PER dropdown prices a row per BOX or per its quantity unit - so its
+  // "per unit" choice always reads as the row's own unit (SQM, LM, PCS ...),
+  // kept in step with the Unit dropdown next to it.
+  function syncPerLabel(tr) {
+    const unitSel = tr.querySelector('.js-unit');
+    const perUnitOpt = tr.querySelector('.js-price-per option[value="UNIT"]');
+    if (unitSel && perUnitOpt) perUnitOpt.textContent = unitSel.value || 'unit';
+  }
+
   const itemsBody = document.getElementById('items-body');
   const addRowBtn = document.getElementById('add-row-btn');
 
@@ -259,7 +268,7 @@
       <td>
         <select name="item_price_per[]" class="js-price-per">
           <option value="BOX">BOX</option>
-          <option value="UNIT">Unit</option>
+          <option value="UNIT">{{ PRODUCT_UNITS[0] }}</option>
         </select>
       </td>
       <td class="num js-total">0.00</td>
@@ -365,7 +374,9 @@
   }
 
   addRowBtn.addEventListener('click', () => {
-    itemsBody.appendChild(rowTemplate());
+    const tr = rowTemplate();
+    itemsBody.appendChild(tr);
+    syncPerLabel(tr);
     renumber();
   });
 
@@ -389,6 +400,10 @@
   });
   itemsBody.addEventListener('change', (e) => {
     if (e.target.classList.contains('js-price-per')) recalcTotals();
+    if (e.target.classList.contains('js-unit')) {
+      syncPerLabel(e.target.closest('tr'));
+      recalcTotals();
+    }
   });
   // Both of these move the tax rates, so they move the order value too.
   document.getElementById('purchase_type').addEventListener('change', recalcTotals);
@@ -521,6 +536,7 @@
     activeRow.querySelector('.js-product-name').value = p.name;
     activeRow.querySelector('.js-hsn').value = p.hsn_code || '';
     setUnitValue(activeRow.querySelector('.js-unit'), p.alt_quantity_unit);
+    syncPerLabel(activeRow);
     activeRow.dataset.altQty = parseFloat(p.alternate_quantity) || '';
     // Carried on the row so a Full Tax Purchase can read its rate back out.
     activeRow.dataset.igst = parseFloat(p.igst_percent) || '';
@@ -529,6 +545,7 @@
     overlay.hidden = true;
   }
 
+  itemsBody.querySelectorAll('.item-row').forEach(syncPerLabel);
   renumber();
   recalcTotals();
 })();

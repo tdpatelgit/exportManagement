@@ -98,7 +98,7 @@
     <button type="button" class="btn btn-ghost btn-sm" id="sync-cd-btn">↻ Match rows to container count</button>
     <span id="cd-excel-status" class="text-sm text-soft"></span>
     <p class="hint">Rows are generated from the container count above — use the button to add/remove rows so they always match; there's no manual blank-row add.
-      To fill rows from a spreadsheet instead, use the "Upload from Excel" button next to a container type above — its header row must use these same field names: Container no., Max permitted weight, Tare weight, Vehicle no., LR no., Line seal no., RFID seal no. (any order, extra columns ignored). The rows it reads are added to the table below, tagged with that container type; the Container type column only shows once more than one container type is listed above.</p>
+      To fill rows from a spreadsheet instead, use the "Upload from Excel" button next to a container type above — its header row must use these same field names: Container no., Max permitted weight, Tare weight, Vehicle no., LR no., Line seal no., RFID seal no. (any order, extra columns ignored). The rows it reads are added to the table below, tagged with that container type.</p>
   </div>
 
   <button type="submit" class="btn btn-primary">{{ 'Save changes' if booking else 'Add booking detail' }}</button>
@@ -130,19 +130,10 @@
     return div;
   }
 
-  // The 11B table's "Container type" column only earns its place once a
-  // booking actually mixes more than one container type - with a single
-  // type it would just repeat the same word down every row.
-  function updateTypeColumnVisibility() {
-    const multi = containerRowsWrap.querySelectorAll('.container-row').length > 1;
-    document.querySelectorAll('.cd-type-col').forEach((el) => { el.style.display = multi ? '' : 'none'; });
-  }
-
   document.getElementById('add-container-btn').addEventListener('click', () => {
     containerRowsWrap.appendChild(rowTemplate());
-    updateTypeColumnVisibility();
   });
-  bindRemove('container-rows', 'container-row', 'js-remove-container', updateTypeColumnVisibility);
+  bindRemove('container-rows', 'container-row', 'js-remove-container');
 
   // ---- 11B container-detail rows --------------------------------------------------
   const cdBody = document.getElementById('cd-body');
@@ -219,8 +210,6 @@
       .catch((err) => { cdExcelStatus.textContent = ''; alert(err.message || "Couldn't read that file."); })
       .finally(() => { input.value = ''; });
   });
-
-  updateTypeColumnVisibility();
 })();
 </script>
 

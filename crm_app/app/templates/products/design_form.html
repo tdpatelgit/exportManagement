@@ -17,16 +17,8 @@
       <label for="design_name">Design name<span class="required-mark">*</span></label>
       <input type="text" id="design_name" name="design_name" required value="{{ data.design_name | default('', true) }}">
     </div>
-    <div class="field">
-      <label for="description">Description</label>
-      <textarea id="description" name="description" rows="3">{{ data.description | default('', true) }}</textarea>
-    </div>
     <div class="hint">Packing, quantity and weight are set once on the product and shared by every design under it — edit them from the product's page.</div>
     <div class="form-row">
-      <div class="field" style="max-width:280px;">
-        <label for="price_usd">Price</label>
-        <input type="number" step="0.01" id="price_usd" name="price_usd" value="{{ data.price_usd | default('', true) }}">
-      </div>
       <div class="field" style="max-width:280px;">
         <label for="surface">Surface <span class="text-soft text-sm">(optional)</span></label>
         <input type="text" id="surface" name="surface" placeholder="e.g. GLOSSY / MATT / CHROME" value="{{ data.surface | default('', true) }}">

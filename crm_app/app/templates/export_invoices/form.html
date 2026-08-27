@@ -95,6 +95,54 @@
   </div>
 
   <div class="card">
+    <div class="card-header"><h3>Job In details <span class="text-soft text-sm">— job manufacturer, our challan no., the manufacturer's return challan no. &amp; date, stock inward no. &amp; date (imported from the job ins behind the selected PIs; display only, not printed)</span></h3></div>
+    <div id="job-in-rows">
+      {% set ji_rows = form_job_ins if form_job_ins is not none else (invoice.job_ins if invoice else []) %}
+      {% for ji in ji_rows %}
+      <div class="form-row job-in-row">
+        <div class="field">
+          <label>Job manufacturer</label>
+          <input type="hidden" name="ji_manufacturer_name[]" value="{{ ji.manufacturer_name or '' }}">
+          <div>{{ ji.manufacturer_name or '—' }}</div>
+        </div>
+        <div class="field">
+          <label>Manufacturer GSTIN</label>
+          <input type="hidden" name="ji_manufacturer_gstin[]" value="{{ ji.manufacturer_gstin or '' }}">
+          <div>{{ ji.manufacturer_gstin or '—' }}</div>
+        </div>
+        <div class="field">
+          <label>Job out challan no.</label>
+          <input type="hidden" name="ji_job_out_challan_no[]" value="{{ ji.job_out_challan_no or '' }}">
+          <div>{{ ji.job_out_challan_no or '—' }}</div>
+        </div>
+        <div class="field">
+          <label>JW return challan no.</label>
+          <input type="hidden" name="ji_jw_challan_no[]" value="{{ ji.jw_challan_no or '' }}">
+          <div>{{ ji.jw_challan_no or '—' }}</div>
+        </div>
+        <div class="field">
+          <label>JW return challan date</label>
+          <input type="hidden" name="ji_jw_challan_date[]" value="{{ ji.jw_challan_date or '' }}">
+          <div>{{ ji.jw_challan_date or '—' }}</div>
+        </div>
+        <div class="field">
+          <label>Stock inward no.</label>
+          <input type="hidden" name="ji_stock_inward_no[]" value="{{ ji.stock_inward_no or '' }}">
+          <div>{{ ji.stock_inward_no or '—' }}</div>
+        </div>
+        <div class="field">
+          <label>Stock inward date</label>
+          <input type="hidden" name="ji_stock_inward_date[]" value="{{ ji.stock_inward_date or '' }}">
+          <div>{{ ji.stock_inward_date or '—' }}</div>
+        </div>
+        <div class="field" style="max-width:90px;align-self:flex-end;"><button type="button" class="btn-link-danger js-remove-ji">Remove</button></div>
+      </div>
+      {% endfor %}
+    </div>
+    <button type="button" class="btn btn-ghost btn-sm" id="add-ji-btn">+ Add job-in row</button>
+  </div>
+
+  <div class="card">
     <div class="card-header"><h3>Container details</h3></div>
     <div class="form-row">
       <div class="field">
@@ -106,6 +154,7 @@
           {% endif %}
           {% for b in bookings if b.booking_no %}
           <option value="{{ b.booking_no }}" {{ 'selected' if b.booking_no == data.booking_no }}
+                  data-booking-id="{{ b.id }}"
                   data-buyer-id="{{ b.buyer_id }}"
                   data-vessel-name="{{ b.vessel_name or '' }}"
                   data-voyage-no="{{ b.voyage_no or '' }}"
@@ -116,6 +165,11 @@
           </option>
           {% endfor %}
         </select>
+        {# The number is what prints; this is the durable link back to the
+           Booking Detail row it came from, so the invoice can still say WHICH
+           booking it was built from after a booking is renumbered. The 11B
+           rows stay a snapshot either way. #}
+        <input type="hidden" id="booking_detail_id" name="booking_detail_id" value="{{ data.booking_detail_id | default('', true) }}">
       </div>
       <div class="field"><label for="vessel_name">Vessel Name/Flight name <span class="text-soft text-sm">(printed together with Voyage no. as "Vessel / Flight Name &amp; No" on the invoice and packing list; filled in from the booking picked above)</span></label><input type="text" id="vessel_name" name="vessel_name" placeholder="e.g. MSC ANNA" value="{{ data.vessel_name | default('', true) }}" readonly></div>
       <div class="field"><label for="voyage_no">Voyage No.</label><input type="text" id="voyage_no" name="voyage_no" placeholder="e.g. VOY 214W" value="{{ data.voyage_no | default('', true) }}" readonly></div>
@@ -1125,6 +1179,37 @@
       pdWrap.appendChild(div);
     });
 
+    const jiWrap = document.getElementById('job-in-rows');
+    jiWrap.innerHTML = '';
+    (data.job_ins || []).forEach((ji) => {
+      const div = document.createElement('div');
+      div.className = 'form-row job-in-row';
+      div.innerHTML = `
+        <div class="field"><label>Job manufacturer</label><input type="hidden" name="ji_manufacturer_name[]"><div class="js-ji-name-display">—</div></div>
+        <div class="field"><label>Manufacturer GSTIN</label><input type="hidden" name="ji_manufacturer_gstin[]"><div class="js-ji-gstin-display">—</div></div>
+        <div class="field"><label>Job out challan no.</label><input type="hidden" name="ji_job_out_challan_no[]"><div class="js-ji-jo-challan-display">—</div></div>
+        <div class="field"><label>JW return challan no.</label><input type="hidden" name="ji_jw_challan_no[]"><div class="js-ji-jw-challan-display">—</div></div>
+        <div class="field"><label>JW return challan date</label><input type="hidden" name="ji_jw_challan_date[]"><div class="js-ji-jw-date-display">—</div></div>
+        <div class="field"><label>Stock inward no.</label><input type="hidden" name="ji_stock_inward_no[]"><div class="js-ji-inward-no-display">—</div></div>
+        <div class="field"><label>Stock inward date</label><input type="hidden" name="ji_stock_inward_date[]"><div class="js-ji-inward-date-display">—</div></div>
+        <div class="field" style="max-width:90px;align-self:flex-end;"><button type="button" class="btn-link-danger js-remove-ji">Remove</button></div>`;
+      div.querySelector('[name="ji_manufacturer_name[]"]').value = ji.manufacturer_name || '';
+      div.querySelector('[name="ji_manufacturer_gstin[]"]').value = ji.manufacturer_gstin || '';
+      div.querySelector('[name="ji_job_out_challan_no[]"]').value = ji.job_out_challan_no || '';
+      div.querySelector('[name="ji_jw_challan_no[]"]').value = ji.jw_challan_no || '';
+      div.querySelector('[name="ji_jw_challan_date[]"]').value = ji.jw_challan_date || '';
+      div.querySelector('[name="ji_stock_inward_no[]"]').value = ji.stock_inward_no || '';
+      div.querySelector('[name="ji_stock_inward_date[]"]').value = ji.stock_inward_date || '';
+      div.querySelector('.js-ji-name-display').textContent = ji.manufacturer_name || '—';
+      div.querySelector('.js-ji-gstin-display').textContent = ji.manufacturer_gstin || '—';
+      div.querySelector('.js-ji-jo-challan-display').textContent = ji.job_out_challan_no || '—';
+      div.querySelector('.js-ji-jw-challan-display').textContent = ji.jw_challan_no || '—';
+      div.querySelector('.js-ji-jw-date-display').textContent = ji.jw_challan_date || '—';
+      div.querySelector('.js-ji-inward-no-display').textContent = ji.stock_inward_no || '—';
+      div.querySelector('.js-ji-inward-date-display').textContent = ji.stock_inward_date || '—';
+      jiWrap.appendChild(div);
+    });
+
     const psWrap = document.getElementById('product-source-rows');
     const psBody = document.getElementById('product-source-body');
     psBody.innerHTML = '';
@@ -1200,6 +1285,23 @@
   });
   bindRemove('purchase-detail-rows', 'purchase-detail-row', 'js-remove-pd');
 
+  document.getElementById('add-ji-btn').addEventListener('click', () => {
+    const wrap = document.getElementById('job-in-rows');
+    const div = document.createElement('div');
+    div.className = 'form-row job-in-row';
+    div.innerHTML = `
+      <div class="field"><label>Job manufacturer</label><input type="hidden" name="ji_manufacturer_name[]"><div>—</div></div>
+      <div class="field"><label>Manufacturer GSTIN</label><input type="hidden" name="ji_manufacturer_gstin[]"><div>—</div></div>
+      <div class="field"><label>Job out challan no.</label><input type="hidden" name="ji_job_out_challan_no[]"><div>—</div></div>
+      <div class="field"><label>JW return challan no.</label><input type="hidden" name="ji_jw_challan_no[]"><div>—</div></div>
+      <div class="field"><label>JW return challan date</label><input type="hidden" name="ji_jw_challan_date[]"><div>—</div></div>
+      <div class="field"><label>Stock inward no.</label><input type="hidden" name="ji_stock_inward_no[]"><div>—</div></div>
+      <div class="field"><label>Stock inward date</label><input type="hidden" name="ji_stock_inward_date[]"><div>—</div></div>
+      <div class="field" style="max-width:90px;align-self:flex-end;"><button type="button" class="btn-link-danger js-remove-ji">Remove</button></div>`;
+    wrap.appendChild(div);
+  });
+  bindRemove('job-in-rows', 'job-in-row', 'js-remove-ji');
+
   // ---- 11B container-detail rows --------------------------------------------------
   const cdBody = document.getElementById('cd-body');
   function cdRenumber() { cdBody.querySelectorAll('.cd-row').forEach((tr, i) => { tr.querySelector('.cd-sr').textContent = i + 1; }); }
@@ -1233,7 +1335,9 @@
   // trimming down to what this invoice actually carries.
   document.getElementById('booking_no').addEventListener('change', (e) => {
     const opt = e.target.selectedOptions[0];
-    if (!opt.value) return;
+    const bookingIdField = document.getElementById('booking_detail_id');
+    if (!opt.value) { if (bookingIdField) bookingIdField.value = ''; return; }
+    if (bookingIdField) bookingIdField.value = opt.dataset.bookingId || '';
     document.getElementById('vessel_name').value = opt.dataset.vesselName || '';
     document.getElementById('voyage_no').value = opt.dataset.voyageNo || '';
     document.getElementById('cd_transporter_name').value = opt.dataset.transporterName || '';

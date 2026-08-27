@@ -9,9 +9,10 @@ are going out and the JOB MANUFACTURER doing the work, both Suppliers), and
 DESIGN lines instead of product lines, entirely under the Job Manufacturer
 card:
 
-  * "To Product" (picked first) - the WHOLE catalog, not just the invoice's
-    own products; its own designs are what the Design picker offers, fetched
-    via /job-works/api/products/<id>/designs;
+  * "To Product" (picked first) - only the invoice's own products that still
+    have quantity not yet placed on a purchase order (see
+    ProformaFulfilmentService.product_status); its own designs are what the
+    Design picker offers, fetched via /job-works/api/products/<id>/designs;
   * "Product" (picked second) - the invoice's own products, kept only to look
     up each chosen design's source_quantity off the invoice's packing list
     (matched by design NAME, since the design lives under a different
@@ -141,31 +142,39 @@ def _product_meta_map(products) -> dict:
 
 
 def _form_context():
-    """(proforma invoices, suppliers, products) for the form's pickers: the
-    Start-from picker, the two party cards (both picked from the same
-    Suppliers list), and the Job Manufacturer card's "To Product" dropdown -
-    the WHOLE catalog, since job work converts a design into a different
-    size and the target product is rarely on the invoice at all."""
+    """(proforma invoices, suppliers) for the form's Start-from picker and
+    the two party cards (both picked from the same Suppliers list)."""
     container = current_app.container
     invoices = container.proforma_invoice_service.list_all(g.user.company_id)
     suppliers = container.supplier_service.list_all(g.user.company_id)
-    products = container.product_service.list_products(g.user.company_id)
-    return invoices, suppliers, products
+    return invoices, suppliers
 
 
 def _invoice_context(proforma_invoice_id) -> tuple:
-    """(invoice products, exact quantities, design-only fallback quantities)
-    for the form's "Product" dropdown and its source_quantity lookups - see
-    JobWorkService.invoice_products / invoice_quantities. Empty when no
-    invoice is chosen (or it isn't ours), which the form shows as "pick a
-    proforma invoice first"."""
+    """(invoice products, exact quantities, design-only fallback quantities,
+    to-product options) for the form's "Jobbed Product" dropdown and its
+    source_quantity lookups - see JobWorkService.invoice_products /
+    invoice_quantities. "Jobbed Product" (to_products) is restricted to the
+    invoice's own product lines that still have quantity not yet placed on
+    any purchase order - the same outstanding-remainder idea as
+    ProformaFulfilmentService.product_status, since a product already fully
+    ordered has nothing left to send out for conversion - AND are
+    themselves flagged in the catalog as a job work product
+    (Product.is_job_work_product), since not every product can be made via
+    job work. Each option also carries its master product's own id/name/
+    HSN/alt-qty/unit/IGST (Product.master_product_id) - there's no separate
+    "Job Product" picker any more, so once a Jobbed Product is chosen its
+    master product is simply displayed and tags the design lines the same
+    way a manually-picked Job Product used to. Empty when no invoice is
+    chosen (or it isn't ours), which the form shows as "pick a proforma
+    invoice first"."""
     if not proforma_invoice_id:
-        return [], {}, {}
+        return [], {}, {}, []
     container = current_app.container
     try:
         invoice = container.proforma_invoice_service.get(int(proforma_invoice_id), g.user.company_id)
     except (NotFoundError, ValueError, TypeError):
-        return [], {}, {}
+        return [], {}, {}, []
     products = container.job_work_service.invoice_products(invoice)
     by_product_and_design, by_design_only = container.job_work_service.invoice_quantities(
         g.user.company_id, invoice
@@ -173,19 +182,49 @@ def _invoice_context(proforma_invoice_id) -> tuple:
     # Dict keys can't be tuples in JSON - flattened to a "product_key||design"
     # string the form's own script splits back apart.
     quantities = {f"{key[0]}||{key[1]}": entry for key, entry in by_product_and_design.items()}
-    return products, quantities, by_design_only
+    pending = container.proforma_fulfilment_service.product_status(g.user.company_id, invoice)["pending"]
+    seen_ids = set()
+    to_products = []
+    for p in pending:
+        if not p["product_id"] or p["product_id"] in seen_ids:
+            continue
+        seen_ids.add(p["product_id"])
+        try:
+            catalog_product = container.product_service.get_product(p["product_id"], g.user.company_id)
+        except NotFoundError:
+            continue
+        if not catalog_product.is_job_work_product:
+            continue
+        master = None
+        if catalog_product.master_product_id:
+            try:
+                master = container.product_service.get_product(catalog_product.master_product_id, g.user.company_id)
+            except NotFoundError:
+                master = None
+        to_products.append({
+            "id": p["product_id"], "name": p["product_name"], "unit": p["unit"] or "PCS",
+            "master_product_id": master.id if master else "",
+            "master_product_name": master.product_name if master else "",
+            "master_hsn_code": (master.hsn_code or "") if master else "",
+            "master_alt_qty": (master.alternate_quantity or "") if master else "",
+            "master_unit": (master.alternate_quantity_unit or "") if master else "",
+            "master_igst": (master.igst_percent or "") if master else "",
+        })
+    return products, quantities, by_design_only, to_products
 
 
 def _render_form(job_work, form_data, form_items, status=200, form_products=None):
-    invoices, suppliers, products = _form_context()
+    invoices, suppliers = _form_context()
     source_invoice_id = (form_data or {}).get("proforma_invoice_id") if form_data else (
         job_work.proforma_invoice_id if job_work else None
     )
-    invoice_products, invoice_quantities, invoice_quantities_by_design = _invoice_context(source_invoice_id)
+    invoice_products, invoice_quantities, invoice_quantities_by_design, to_products = _invoice_context(
+        source_invoice_id
+    )
     pl_rows = form_products if form_products is not None else (job_work.products if job_work else [])
     return render_template(
         "job_works/form.html", job_work=job_work, invoices=invoices, suppliers=suppliers,
-        products=products, form_data=form_data, form_items=form_items,
+        to_products=to_products, form_data=form_data, form_items=form_items,
         invoice_products=invoice_products, invoice_quantities=invoice_quantities,
         invoice_quantities_by_design=invoice_quantities_by_design,
         invoice_product_meta_map=_product_meta_map(invoice_products),
@@ -261,8 +300,10 @@ def view_job_work(job_work_id):
         except NotFoundError:
             pass
     packing_lists = container.packing_list_service.list_for_job_work(job_work_id, g.user.company_id)
+    purchase_invoices = container.purchase_invoice_service.list_for_job_work(job_work_id, g.user.company_id)
     return render_template("job_works/print.html", job_work=job_work, company=company,
-                           proforma_invoice=invoice, packing_lists=packing_lists)
+                           proforma_invoice=invoice, packing_lists=packing_lists,
+                           purchase_invoices=purchase_invoices)
 
 
 @job_works_bp.route("/<int:job_work_id>/edit", methods=["GET", "POST"])

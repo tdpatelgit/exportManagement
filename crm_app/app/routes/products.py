@@ -39,11 +39,16 @@ def _pallet_type_rows(form) -> list:
     names = form.getlist("pallet_type_name[]")
     boxes = form.getlist("pallet_type_boxes[]")
     weights = form.getlist("pallet_type_weight[]")
+    # Which LEVEL of packing the row is - a carton goes on a pallet, a pallet
+    # goes in the container. Only Loading Planning reads it; a form that
+    # doesn't post it (the quick-create panels) leaves it to default.
+    kinds = form.getlist("pallet_type_unit_kind[]")
     return [
         {
             "name": names[i],
             "boxes_per_pallet": boxes[i] if i < len(boxes) else "",
             "weight_kg": weights[i] if i < len(weights) else "",
+            "unit_kind": kinds[i] if i < len(kinds) else "",
         }
         for i in range(len(names))
     ]
@@ -56,12 +61,15 @@ def _product_form_fields(form) -> dict:
         "description": form.get("description", ""),
         "hsn_code": form.get("hsn_code", ""),
         "igst_percent": form.get("igst_percent", ""),
+        "price_usd": form.get("price_usd", ""),
         "quantity_unit": form.get("quantity_unit", ""),
         "quantity": form.get("quantity", ""),
         "alternate_quantity_unit": form.get("alternate_quantity_unit", form.get("unit", "")),
         "alternate_quantity": form.get("alternate_quantity", ""),
         "net_weight_kg": form.get("net_weight_kg", ""),
         "gross_weight_kg": form.get("gross_weight_kg", ""),
+        "is_job_work_product": form.get("is_job_work_product", ""),
+        "master_product_id": form.get("master_product_id", ""),
         "pallet_types": _pallet_type_rows(form),
     }
 
@@ -174,6 +182,7 @@ def new_product():
     categories_tree = container.product_service.list_categories_tree(g.user.company_id)
     hsn_code_options = container.misc_list_service.list_hsn_codes(g.user.company_id)
     unit_options = container.misc_list_service.list_units(g.user.company_id)
+    master_product_options = container.product_service.list_products(g.user.company_id)
     preselected_category_id = _int_or_none(request.args.get("category_id"))
     if request.method == "POST":
         try:
@@ -185,11 +194,11 @@ def new_product():
             return render_template("products/product_form.html", product=None, form_data=request.form,
                                     pallet_rows=_pallet_type_rows(request.form),
                                     categories_tree=categories_tree, hsn_code_options=hsn_code_options,
-                                    unit_options=unit_options,
+                                    unit_options=unit_options, master_product_options=master_product_options,
                                     preselected_category_id=preselected_category_id), 400
     return render_template("products/product_form.html", product=None, form_data=None, pallet_rows=[],
                             categories_tree=categories_tree, hsn_code_options=hsn_code_options,
-                            unit_options=unit_options,
+                            unit_options=unit_options, master_product_options=master_product_options,
                             preselected_category_id=preselected_category_id)
 
 
@@ -211,10 +220,12 @@ def view_product(product_id, folder_id=None):
     breadcrumb = container.product_service.breadcrumb(g.user.company_id, folder_id)
     pallet_types = container.product_service.pallet_types_for_product(product_id)
     total_job_quantity = container.product_service.total_job_quantity_for_product(product_id)
+    master_product = container.product_service.get_product(product.master_product_id, g.user.company_id) \
+        if product.master_product_id else None
     return render_template(
         "products/detail.html", product=product, category=category, current_folder=current_folder,
         breadcrumb=breadcrumb, subfolders=subfolders, designs=designs, pallet_types=pallet_types,
-        total_job_quantity=total_job_quantity,
+        total_job_quantity=total_job_quantity, master_product=master_product,
     )
 
 
@@ -229,6 +240,9 @@ def edit_product(product_id):
     categories_tree = container.product_service.list_categories_tree(g.user.company_id)
     hsn_code_options = container.misc_list_service.list_hsn_codes(g.user.company_id)
     unit_options = container.misc_list_service.list_units(g.user.company_id)
+    master_product_options = [
+        p for p in container.product_service.list_products(g.user.company_id) if p.id != product_id
+    ]
 
     if request.method == "POST":
         try:
@@ -242,7 +256,7 @@ def edit_product(product_id):
             return render_template("products/product_form.html", product=product, form_data=request.form,
                                     pallet_rows=_pallet_type_rows(request.form),
                                     categories_tree=categories_tree, hsn_code_options=hsn_code_options,
-                                    unit_options=unit_options,
+                                    unit_options=unit_options, master_product_options=master_product_options,
                                     preselected_category_id=product.category_id), 400
 
     pallet_rows = [
@@ -251,7 +265,7 @@ def edit_product(product_id):
     ]
     return render_template("products/product_form.html", product=product, form_data=None, pallet_rows=pallet_rows,
                             categories_tree=categories_tree, hsn_code_options=hsn_code_options,
-                            unit_options=unit_options,
+                            unit_options=unit_options, master_product_options=master_product_options,
                             preselected_category_id=product.category_id)
 
 

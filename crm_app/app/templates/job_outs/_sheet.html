@@ -1,0 +1,259 @@
+{# The Job Out A4 sheet - "DELIVERY CHALLAN FOR JOBWORK", cut to the same
+   pattern as the job work's own sheet (templates/job_works/_sheet.html):
+   scoped .jo-* styles, fixed colgroup widths for print fidelity, and the
+   shared js-page-filler/js-page-sheet pair so a printed page doesn't cut off
+   mid-table.
+
+   Everything except the typed header (challan no/date, transport, e-way
+   bill) arrives already resolved from JobOutService.build_sheet, so this
+   template does no lookups of its own. Expects `job_out`, `company`,
+   `purchase_invoice`, `receiver`, `dispatch_from`, `goods`, `totals` and
+   `purchase_orders` in context.
+
+   The two Description columns are the point of the document: the LEFT one
+   names the master product physically going OUT for jobwork, the RIGHT one
+   names the jobbed product expected back. #}
+<style>
+  .jo-sheet {
+    background: #fff;
+    color: #000;
+    width: 205mm;
+    margin: 24px auto 48px;
+    padding: 6mm 6mm 8mm;
+    box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 10px;
+    line-height: 1.25;
+  }
+  .jo-letterhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+  .jo-letterhead-name { font-size: 16px; font-weight: bold; }
+  .jo-letterhead-logo img { max-height: 60px; max-width: 130px; width: auto; object-fit: contain; }
+  .jo-title {
+    text-align: center;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 3px 0 5px;
+  }
+  .jo-sheet table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: -1px; }
+  .jo-sheet td { border: 1px solid #000; padding: 3px 5px; vertical-align: middle; text-align: left; word-wrap: break-word; }
+  .jo-label { font-size: 9px; }
+  .jo-val { font-weight: bold; }
+  /* Multi-line paragraph cells (addresses, remarks) read from the top like a
+     letterhead rather than being centred in a tall cell. */
+  .jo-left { text-align: left; vertical-align: top; }
+  .jo-right { text-align: right; }
+  .jo-center { text-align: center; }
+  .jo-party-role { font-size: 9px; }
+  .jo-items thead td { text-align: center; vertical-align: middle; font-size: 9px; font-weight: bold; }
+  .jo-items tbody tr.jo-goods td, .jo-items tbody tr.jo-filler td { border-top: none; border-bottom: none; padding: 2px 5px; vertical-align: top; }
+  /* The packing list's per-design breakdown, printed as small print under
+     whichever goods line it belongs to. */
+  .jo-designs { font-size: 8px; font-weight: normal; padding-left: 6px; }
+  {# .jo-filler's height is measured in the browser - see templates/_page_filler.html #}
+  .jo-sign-cell { height: 82px; padding: 4px 6px; }
+  .jo-sign-flex { display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; height: 100%; }
+  @media print {
+    .jo-sheet { width: auto; margin: 0; padding: 0; box-shadow: none; }
+  }
+</style>
+
+{# Indian lakh/crore digit grouping - this is a rupee-denominated GST
+   document, so 248000 prints as 2,48,000.00 rather than 248,000.00. #}
+{% macro num(v) -%}
+  {%- if v is not none and v != '' and v != 0 %}{{ v | inr_group }}{% else %}-{% endif -%}
+{%- endmacro %}
+
+{# DD-MM-YYYY, the format a delivery challan is read in - the app's own
+   long_date filter spells the month out, which is too wide for these cells. #}
+{% macro dc_date(v) -%}
+  {%- if v %}{{ v[8:10] }}-{{ v[5:7] }}-{{ v[0:4] }}{% else %}{% endif -%}
+{%- endmacro %}
+
+{# Each Description column carries its own design breakdown, from a different
+   document: the dispatch side off the purchase invoice's packing list, the
+   output side off the linked job work's design lines. Same row shape, so one
+   macro renders both. #}
+{% macro design_lines(designs) -%}
+  {% for d in designs %}
+  <div class="jo-designs">{{ d.design_name }} — {{ num(d.quantity) }} {{ d.unit }}</div>
+  {% endfor %}
+{%- endmacro %}
+
+{% macro party(role, p) -%}
+  <div class="jo-party-role">{{ role }}</div>
+  <span class="jo-val">{{ (p.name or '')|upper }}</span><br>
+  <span class="jo-val">{{ (p.address or '')|upper|replace('\n', '<br>')|safe }}</span>
+  <br><span class="jo-val">GSTIN : {{ (p.gstin or 'UNREGISTRED')|upper }}</span>
+  {% if p.gstin %}<br><span class="jo-val">STATE : {{ p.gstin | gst_state }}</span>{% endif %}
+{%- endmacro %}
+
+{% set cur = purchase_invoice.currency_prefix if purchase_invoice else '₹' %}
+
+<div class="jo-sheet js-page-sheet">
+
+  <!-- Letterhead: always OUR company, whichever party the goods dispatch from -->
+  <div class="jo-letterhead">
+    <div>
+      <div class="jo-letterhead-name">{{ company.company_name|upper if company else '' }}</div>
+      <div class="jo-val">{{ (company.address or '')|upper|replace('\n', '<br>')|safe if company else '' }}</div>
+      {% if company and company.gstin %}
+      <div class="jo-val">GSTIN : {{ company.gstin }}</div>
+      <div class="jo-val">STATE : {{ company.gstin | gst_state }}</div>
+      {% endif %}
+    </div>
+    {% if company and company.logo_path %}
+    <div class="jo-letterhead-logo">
+      <img src="{{ url_for('static', filename=company.logo_path) }}" alt="{{ company.company_name }} logo">
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="jo-title">DELIVERY CHALLAN FOR JOBWORK</div>
+
+  <!-- Parties (left) against the challan's own references (right) -->
+  <table>
+    <colgroup><col style="width:47%"><col style="width:26%"><col></colgroup>
+    <tr>
+      <td class="jo-left" rowspan="6">{{ party('Job Manufacturer (Receiver)', receiver) }}</td>
+      <td class="jo-label">DELIVERY CHALLAN NO</td>
+      <td class="jo-val">{{ job_out.delivery_challan_no }}</td>
+    </tr>
+    <tr>
+      <td class="jo-label">DELIVERY CHALLAN DATE</td>
+      <td class="jo-val">{{ dc_date(job_out.delivery_challan_date) }}</td>
+    </tr>
+    {# A linked job work counts as the purchase order here - it numbers and
+       prints as one (PO{YYYYMMDD}{seq}), and an invoice raised against a job
+       work has no separate purchase order at all. #}
+    <tr>
+      <td class="jo-label">PURCHASE ORDER NO</td>
+      <td class="jo-val">{{ order_refs | map(attribute='number') | join(', ') }}</td>
+    </tr>
+    <tr>
+      <td class="jo-label">PURCHASE ORDER DATE</td>
+      <td class="jo-val">{% for ref in order_refs %}{{ dc_date(ref.date) }}{{ ', ' if not loop.last }}{% endfor %}</td>
+    </tr>
+    <tr>
+      <td class="jo-label">PURCHASE INVOICE NO</td>
+      <td class="jo-val">{{ purchase_invoice.invoice_number if purchase_invoice else '' }}</td>
+    </tr>
+    <tr>
+      <td class="jo-label">PURCHASE INVOICE DATE</td>
+      <td class="jo-val">{{ dc_date(purchase_invoice.invoice_date) if purchase_invoice else '' }}</td>
+    </tr>
+    <tr>
+      <td class="jo-left" rowspan="4">{{ party('DISPATCH FROM', dispatch_from) }}</td>
+      <td class="jo-label">TRANSPORT NAME</td>
+      <td class="jo-val">{{ (transporter_name or '')|upper }}</td>
+    </tr>
+    <tr>
+      <td class="jo-label">TRANSPORT GSTIN</td>
+      <td class="jo-val">{{ job_out.transport_gstin or '' }}</td>
+    </tr>
+    <tr>
+      <td class="jo-label">LR NO</td>
+      <td class="jo-val">{{ job_out.lr_no or '' }}</td>
+    </tr>
+    <tr>
+      <td class="jo-label">VEHICLE NO</td>
+      <td class="jo-val">{{ (job_out.vehicle_no or '')|upper }}</td>
+    </tr>
+  </table>
+
+  <!-- Goods: master product OUT (left) -> jobbed product expected BACK (right) -->
+  <table class="jo-items">
+    <colgroup>
+      <col style="width:26%"><col style="width:26%"><col style="width:11%">
+      <col style="width:12%"><col style="width:11%"><col>
+    </colgroup>
+    <thead>
+      <tr>
+        <td>Description Of Goods<br>Dispatch for Jobwork</td>
+        <td>Description Of Goods<br>Require OutPut After Jobwork</td>
+        <td>HSN</td>
+        <td>UNIT</td>
+        <td>Rate</td>
+        <td>Taxable /<br>Estemated Value</td>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in goods %}
+      <tr class="jo-goods">
+        <td class="jo-val">
+          {{ row.dispatch_name }}
+          {{ design_lines(row.dispatch_designs) }}
+        </td>
+        <td class="jo-val">
+          {{ row.output_name }}
+          {{ design_lines(row.output_designs) }}
+        </td>
+        <td class="jo-val jo-center">{{ row.hsn_code or '' }}</td>
+        <td class="jo-val jo-center">{{ num(row.boxes) }} {{ row.quantity_unit }}</td>
+        <td class="jo-val jo-right">{{ cur }} {{ num(row.rate) }}</td>
+        <td class="jo-val jo-right">{{ cur }} {{ num(row.taxable_value) }}</td>
+      </tr>
+      {% endfor %}
+      <tr class="jo-filler js-page-filler">
+        <td></td><td></td><td></td><td></td><td></td><td></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- E-way bill, against the taxable total -->
+  <table>
+    <colgroup>
+      <col style="width:16%"><col style="width:26%"><col style="width:24%">
+      <col style="width:20%"><col>
+    </colgroup>
+    <tr>
+      <td class="jo-val jo-center">Ewaybill No &amp; Date</td>
+      <td class="jo-val jo-center">{{ job_out.eway_bill_no or '' }}</td>
+      <td class="jo-val jo-center">{{ dc_date(job_out.eway_bill_date) }}</td>
+      <td class="jo-val jo-center">Total Taxable / Estemated Value</td>
+      <td class="jo-val jo-right">{{ cur }} {{ num(totals.taxable) }}</td>
+    </tr>
+  </table>
+
+  <!-- Value in words, against the tax footer -->
+  <table>
+    <colgroup>
+      <col style="width:66%"><col style="width:20%"><col>
+    </colgroup>
+    <tr>
+      <td class="jo-left" rowspan="4">
+        <span class="jo-val">Total Taxable / Estemated Value In Word</span><br>
+        <span class="jo-val">{{ totals.invoice_value | inr_in_words(purchase_invoice.currency_name if purchase_invoice else None) }}</span>
+      </td>
+      <td class="jo-val jo-right">IGST</td>
+      <td class="jo-val jo-right">{{ cur }} {{ num(totals.igst) }}</td>
+    </tr>
+    <tr>
+      <td class="jo-val jo-right">CGST</td>
+      <td class="jo-val jo-right">{{ cur }} {{ num(totals.cgst) }}</td>
+    </tr>
+    <tr>
+      <td class="jo-val jo-right">SGST</td>
+      <td class="jo-val jo-right">{{ cur }} {{ num(totals.sgst) }}</td>
+    </tr>
+    <tr>
+      <td class="jo-val jo-right">Invoice Value</td>
+      <td class="jo-val jo-right">{{ cur }} {{ num(totals.invoice_value) }}</td>
+    </tr>
+  </table>
+
+  <!-- Remarks + signature -->
+  <table>
+    <colgroup><col></colgroup>
+    <tr>
+      <td class="jo-left"><span class="jo-val">REMARKS:</span> {{ (job_out.remarks or '')|upper|replace('\n', '<br>')|safe }}</td>
+    </tr>
+    <tr>
+      <td class="jo-sign-cell">
+        <div class="jo-sign-flex">
+          <div class="jo-val">For {{ company.company_name|upper if company else '' }}</div>
+          <div class="jo-val">Authorised Signatury</div>
+        </div>
+      </td>
+    </tr>
+  </table>
+</div>

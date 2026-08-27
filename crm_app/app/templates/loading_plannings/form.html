@@ -1,0 +1,748 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit loading planning' if plan else 'New loading planning' }}{% endblock %}
+{% block content %}
+
+{% set data = form_data if form_data else plan %}
+{% set selected_str = selected_proforma_ids | map('string') | list %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Documents</div>
+    <h1>{{ 'Edit ' + plan.loading_planning_number if plan else 'New loading planning' }}</h1>
+  </div>
+  {% if plan %}
+  <div class="topbar-actions">
+    <a href="{{ url_for('loading_plannings.view_loading_planning', loading_planning_id=plan.id) }}" class="btn btn-ghost">Print</a>
+  </div>
+  {% endif %}
+</div>
+
+{% if warnings %}
+<div class="card" id="server-warnings">
+  <div class="card-header"><h3>Still to do <span class="text-soft text-sm">— saved anyway; a plan is normally built over several sittings</span></h3></div>
+  <ul style="margin:0;padding-left:20px;">
+    {% for w in warnings %}<li class="text-sm">{{ w }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<form method="POST" id="lp-form">
+
+  <div class="card">
+    <div class="card-header"><h3>Reference proforma invoices</h3></div>
+    <div class="field">
+      <label for="buyer_select">Buyer <span class="text-soft text-sm">(pick a buyer to narrow the proforma invoice list below to just theirs)</span></label>
+      <select id="buyer_select">
+        <option value="">— All buyers —</option>
+        {% for b in buyers %}
+        <option value="{{ b.id }}" data-company-key="{{ (b.company_name or '') | lower | trim }}">{{ b.company_name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>Proforma invoices under this loading planning <span class="text-soft text-sm">(tick one or more — one booking's containers can carry several PIs)</span></label>
+      <div id="proforma-picker" style="max-height:220px;overflow:auto;border:1px solid var(--color-line, #ddd);border-radius:6px;padding:6px 10px;">
+        {% for pi in proforma_invoices %}
+        <label class="js-pi-label" style="display:block;padding:4px 0;cursor:pointer;">
+          <input type="checkbox" class="js-pi-check" name="proforma_invoice_ids[]" value="{{ pi.id }}"
+                 data-company-key="{{ (pi.consignee_name or '') | lower | trim }}"
+                 {{ 'checked' if pi.id | string in selected_str }}>
+          <strong>{{ pi.invoice_number }}</strong> — {{ pi.consignee_name }}{% if pi.buyer_order_no %} · <span class="text-soft">Order {{ pi.buyer_order_no }}</span>{% endif %} ({{ pi.invoice_date }})
+        </label>
+        {% else %}
+        <div class="text-soft text-sm">No proforma invoices yet.</div>
+        {% endfor %}
+      </div>
+    </div>
+    <button type="button" class="btn btn-ghost btn-sm" id="load-from-pis-btn">↻ Load goods &amp; details from selected PIs</button>
+    <p class="hint">
+      Loading traces each selected PI through its purchase orders, and pulls in the goods lines actually bought
+      on those orders (priced at the PI's own USD rate). Lines come in at <strong>design</strong> level, taken
+      from each purchase order's own packing list &mdash; a PO orders 1268 boxes of a product, and only its
+      packing list knows those are four designs of 317. A purchase order with no packing list yet comes through
+      at product level instead. Only the goods lines are replaced &mdash; the booking, containers and any
+      packing you've already built are kept.
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Document</h3></div>
+    <div class="form-row">
+      <div class="field">
+        <label for="loading_planning_number">Loading planning no.</label>
+        <input type="text" id="loading_planning_number" name="loading_planning_number"
+               value="{{ data.loading_planning_number if data and data.loading_planning_number else suggested_number }}" readonly>
+      </div>
+      <div class="field">
+        <label for="loading_planning_date">Date <span class="required-mark">*</span></label>
+        <input type="date" id="loading_planning_date" name="loading_planning_date"
+               value="{{ data.loading_planning_date if data and data.loading_planning_date else today }}" required>
+      </div>
+    </div>
+    <div class="field">
+      <label for="remarks">Remarks</label>
+      <input type="text" id="remarks" name="remarks" value="{{ data.remarks | default('', true) }}">
+    </div>
+  </div>
+
+  {# ---- Booking + the containers copied off it -----------------------------
+     A COPY, not a live link: picking a booking snapshots its 11B rows here, so
+     editing that booking afterwards can't rewrite a finished plan. Same
+     treatment every other imported party detail gets. #}
+  <div class="card">
+    <div class="card-header"><h3>Container details <span class="text-soft text-sm">— from Booking Details under Master Data</span></h3></div>
+    <div class="form-row">
+      <div class="field">
+        <label for="booking_detail_id">Booking <span class="text-soft text-sm">(fills in vessel/voyage, transporter and every container row below)</span></label>
+        <select id="booking_detail_id" name="booking_detail_id">
+          <option value="">— Select a booking —</option>
+          {% for b in bookings if b.booking_no %}
+          <option value="{{ b.id }}" {{ 'selected' if data and data.booking_detail_id and b.id | string == data.booking_detail_id | string }}>
+            {{ b.booking_no }}{% if b.buyer_name %} — {{ b.buyer_name }}{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field"><label for="booking_no">Booking no.</label><input type="text" id="booking_no" name="booking_no" value="{{ data.booking_no | default('', true) }}" readonly></div>
+      <div class="field"><label for="vessel_name">Vessel name</label><input type="text" id="vessel_name" name="vessel_name" value="{{ data.vessel_name | default('', true) }}" readonly></div>
+      <div class="field"><label for="voyage_no">Voyage no.</label><input type="text" id="voyage_no" name="voyage_no" value="{{ data.voyage_no | default('', true) }}" readonly></div>
+      <div class="field"><label for="transporter_name">Transporter</label><input type="text" id="transporter_name" name="transporter_name" value="{{ data.transporter_name | default('', true) }}" readonly></div>
+    </div>
+
+    <div class="table-wrap" style="margin-top:12px;">
+      <table class="ledger" id="cd-table">
+        <thead>
+          <tr><th>Sr</th><th>Container type</th><th>Container no.</th><th>Max permitted weight</th><th>Tare weight</th><th>Vehicle no.</th><th>LR no.</th><th>Line seal no.</th><th>RFID seal no.</th><th></th></tr>
+        </thead>
+        <tbody id="cd-body">
+          {% set cd_rows = form_containers if form_containers is not none else (plan.containers if plan else []) %}
+          {% for cd in cd_rows %}
+          <tr class="cd-row">
+            <td class="cd-sr">{{ loop.index }}</td>
+            <td><input type="text" name="cd_container_type[]" value="{{ cd.container_type or '' }}" readonly></td>
+            <td><input type="text" name="cd_container_no[]" value="{{ cd.container_no or '' }}" readonly></td>
+            <td><input type="text" name="cd_max_permitted_weight[]" value="{{ cd.max_permitted_weight or '' }}"></td>
+            <td><input type="number" step="any" name="cd_tare_weight_kg[]" value="{{ cd.tare_weight_kg if cd.tare_weight_kg is not none else '' }}"></td>
+            <td><input type="text" name="cd_vehicle_no[]" value="{{ cd.vehicle_no or '' }}" readonly></td>
+            <td><input type="text" name="cd_lr_no[]" value="{{ cd.lr_no or '' }}" readonly></td>
+            <td><input type="text" name="cd_line_seal_no[]" value="{{ cd.line_seal_no or '' }}" readonly></td>
+            <td><input type="text" name="cd_rfid_seal_no[]" value="{{ cd.rfid_seal_no or '' }}" readonly></td>
+            <td><input type="hidden" name="cd_transporter_name[]" value="{{ cd.transporter_name or '' }}"><button type="button" class="btn-link-danger js-remove-cd">Remove</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="hint">Pick a booking above to fill this in. Max permitted weight and tare are editable, because they are what the VGM check below is measured against; use Remove to drop a container this plan doesn't load.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Goods <span class="text-soft text-sm">— one line per design, loaded from the PIs above</span></h3></div>
+    <div class="table-wrap">
+      <table class="ledger" id="items-table">
+        <thead>
+          <tr><th>Sr</th><th>PO no.</th><th>Product</th><th>Design</th><th>HSN</th><th class="num">Qty</th><th>Unit</th><th class="num">Alt qty</th><th class="num">Net kg / unit</th><th class="num">USD rate</th><th class="num">Total USD</th><th></th></tr>
+        </thead>
+        <tbody id="items-body"></tbody>
+        <tfoot>
+          <tr>
+            <th colspan="5" class="num">Totals</th>
+            <th class="num" id="items-total-qty">0</th><th></th><th class="num" id="items-total-altqty">0</th>
+            <th class="num" id="items-total-net">0</th><th></th><th class="num" id="items-total-usd">0</th><th></th>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    <p class="hint">Quantities and the per-unit net weight drive everything below, so they are read-only here &mdash; reload from the PIs to change them. The USD rate is the PI's own quoted price, matched by product; type one in if a product wasn't on the PI.</p>
+  </div>
+
+  {# ---- Packing: cartons and pallets, built by hand ------------------------
+     The reason this document exists. `packing_list_items.pallets` has always
+     been stored as boxes/box_per_pallet, a DECIMAL - and 9.91 pallets or 1.5
+     cartons is not a thing anyone can ship. Here they are real numbered
+     objects that hold any mix of designs and products, so 317 boxes at
+     32/pallet is nine full pallets plus one holding 29, and 45 + 45 PCS at
+     30/CTN can be two full cartons plus one mixed 15+15.
+
+     The carton level is optional: tiles sit straight on the pallet, hardware
+     goes through cartons first. One weight rule covers both -
+     pallet gross = contents net + carton tare + pallet tare. #}
+  <div class="card">
+    <div class="card-header">
+      <h3>Packing <span class="text-soft text-sm">— submit qty for pallet</span></h3>
+      <div class="flex gap-8">
+        <button type="button" class="btn btn-ghost btn-sm" id="auto-build-btn">↻ Auto-build</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="add-carton-btn">+ Add carton</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="add-pallet-btn">+ Add pallet</button>
+      </div>
+    </div>
+    <p class="hint">
+      <strong>Auto-build</strong> fills whole units to capacity and leaves one part-filled unit per goods line,
+      flagged in orange &mdash; it deliberately does <em>not</em> merge them, because that is the judgement call
+      this card exists for. A carton or pallet can hold <strong>any mix</strong> of designs and products.
+      Capacity and tare come from the product's packing types and can be overtyped on any unit.
+    </p>
+
+    <div id="balance-strip" class="table-wrap" style="margin-bottom:14px;"></div>
+    <div id="cartons-pane" style="margin-bottom:18px;"></div>
+    <div id="pallets-pane"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Container packing <span class="text-soft text-sm">— submit for container</span></h3></div>
+    <p class="hint">
+      Pallets are assigned <strong>whole</strong>. VGM is every pallet's gross plus the container's own tare;
+      it turns red past the max permitted weight, which is a <strong>warning only</strong> &mdash; the plan still saves.
+    </p>
+    <div id="container-summary" class="table-wrap"></div>
+  </div>
+
+  <input type="hidden" name="cartons_json" id="cartons_json" value="">
+  <input type="hidden" name="pallets_json" id="pallets_json" value="">
+
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary">{{ 'Save loading planning' if plan else 'Create loading planning' }}</button>
+    <a href="{{ url_for('loading_plannings.list_loading_plannings') }}" class="btn btn-ghost">Cancel</a>
+  </div>
+</form>
+
+<script type="application/json" id="lp-initial-items">{{ items_json | safe }}</script>
+<script type="application/json" id="lp-initial-cartons">{{ cartons_json | safe }}</script>
+<script type="application/json" id="lp-initial-pallets">{{ pallets_json | safe }}</script>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- state -------------------------------------------------------------
+  // One JS object owns the whole packing tree, and is serialised into the two
+  // hidden JSON fields on submit. Cartons and pallets are trees (a carton
+  // holds several goods lines; a pallet holds cartons AND loose boxes), and
+  // flattening a tree into foo[] arrays would need an index-matching
+  // convention that every drag would have to keep in sync. The server still
+  // cleans and revalidates every field, so nothing here is trusted.
+  var items = readJSON("lp-initial-items");
+  var cartons = readJSON("lp-initial-cartons");
+  var pallets = readJSON("lp-initial-pallets");
+  var packingTypes = {};   // product_id -> {carton: [...], pallet: [...]}
+
+  function readJSON(id) {
+    var el = document.getElementById(id);
+    if (!el) return [];
+    try { var v = JSON.parse(el.textContent || "[]"); return Array.isArray(v) ? v : []; }
+    catch (e) { return []; }
+  }
+
+  var num = function (v) { var n = parseFloat(v); return isFinite(n) ? n : 0; };
+  var fmt = function (n, dp) {
+    if (n === null || n === undefined || !isFinite(n)) return "—";
+    return n.toLocaleString(undefined, {minimumFractionDigits: dp || 0, maximumFractionDigits: dp || 0});
+  };
+  var esc = function (s) {
+    return String(s === null || s === undefined ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  };
+
+  function itemBySr(sr) {
+    for (var i = 0; i < items.length; i++) { if (num(items[i].sr_no) === num(sr)) return items[i]; }
+    return null;
+  }
+  function itemLabel(item) {
+    if (!item) return "?";
+    return item.design_name ? item.product_name + " — " + item.design_name : item.product_name;
+  }
+
+  // ---- goods table -------------------------------------------------------
+  function renderItems() {
+    var body = document.getElementById("items-body");
+    var html = "", tq = 0, ta = 0, tn = 0, tu = 0;
+    items.forEach(function (it, i) {
+      it.sr_no = i + 1;
+      var qty = num(it.quantity_boxes), net = num(it.net_weight_kg), usd = num(it.price_usd);
+      it.total_usd = Math.round(qty * usd * 100) / 100;
+      tq += qty; ta += num(it.quantity_value); tn += qty * net; tu += it.total_usd;
+      html += '<tr>' +
+        '<td>' + it.sr_no + hidden("item_proforma_invoice_id[]", it.proforma_invoice_id) +
+          hidden("item_purchase_order_id[]", it.purchase_order_id) + hidden("item_po_number[]", it.po_number) +
+          hidden("item_product_id[]", it.product_id) + hidden("item_product_name[]", it.product_name) +
+          hidden("item_design_id[]", it.design_id) + hidden("item_design_name[]", it.design_name) +
+          hidden("item_hsn_code[]", it.hsn_code) + hidden("item_quantity_boxes[]", qty) +
+          hidden("item_quantity_unit[]", it.quantity_unit) + hidden("item_quantity_value[]", it.quantity_value) +
+          hidden("item_unit[]", it.unit) + hidden("item_net_weight_kg[]", it.net_weight_kg) + '</td>' +
+        '<td class="mono text-sm">' + esc(it.po_number || "—") + '</td>' +
+        '<td class="text-sm">' + esc(it.product_name) + '</td>' +
+        '<td class="text-sm">' + esc(it.design_name || "—") + '</td>' +
+        '<td class="text-sm">' + esc(it.hsn_code || "—") + '</td>' +
+        '<td class="num">' + fmt(qty, 0) + '</td>' +
+        '<td class="text-sm">' + esc(it.quantity_unit || "") + '</td>' +
+        '<td class="num">' + fmt(num(it.quantity_value), 2) + '</td>' +
+        '<td class="num">' + (it.net_weight_kg === null || it.net_weight_kg === undefined ? "—" : fmt(net, 3)) + '</td>' +
+        '<td class="num"><input type="number" step="any" class="js-item-price" data-sr="' + it.sr_no +
+          '" name="item_price_usd[]" value="' + esc(usd) + '" style="max-width:90px;text-align:right;"></td>' +
+        '<td class="num">' + fmt(it.total_usd, 2) + '</td>' +
+        '<td><button type="button" class="btn-link-danger js-remove-item" data-sr="' + it.sr_no + '">Remove</button></td>' +
+        '</tr>';
+    });
+    body.innerHTML = html || '<tr><td colspan="12" class="text-soft text-sm">No goods yet — tick some proforma invoices above and load.</td></tr>';
+    document.getElementById("items-total-qty").textContent = fmt(tq, 0);
+    document.getElementById("items-total-altqty").textContent = fmt(ta, 2);
+    document.getElementById("items-total-net").textContent = fmt(tn, 3);
+    document.getElementById("items-total-usd").textContent = fmt(tu, 2);
+  }
+
+  function hidden(name, value) {
+    return '<input type="hidden" name="' + name + '" value="' +
+      esc(value === null || value === undefined ? "" : value) + '">';
+  }
+
+  // ---- weights: the one rule the whole document is built around ----------
+  //   pallet gross = contents net + carton tare + pallet tare
+  // The carton level is optional, which is what lets tiles (boxes straight on
+  // the pallet) and hardware (pieces -> carton -> pallet) share it.
+  function contentsNet(contents) {
+    var total = 0;
+    (contents || []).forEach(function (row) {
+      var item = itemBySr(row.item_sr_no);
+      if (item) total += num(item.net_weight_kg) * num(row.quantity_boxes);
+    });
+    return total;
+  }
+  function contentsBoxes(contents) {
+    var total = 0;
+    (contents || []).forEach(function (row) { total += num(row.quantity_boxes); });
+    return total;
+  }
+  function cartonsOn(palletNo) {
+    return cartons.filter(function (c) { return num(c.pallet_no) === num(palletNo); });
+  }
+  function palletNet(p) {
+    var total = contentsNet(p.contents);
+    cartonsOn(p.pallet_no).forEach(function (c) { total += contentsNet(c.contents); });
+    return total;
+  }
+  function palletCartonTare(p) {
+    var total = 0;
+    cartonsOn(p.pallet_no).forEach(function (c) { total += num(c.tare_weight_kg); });
+    return total;
+  }
+  function palletBoxes(p) {
+    var total = contentsBoxes(p.contents);
+    cartonsOn(p.pallet_no).forEach(function (c) { total += contentsBoxes(c.contents); });
+    return total;
+  }
+  function palletGross(p) { return palletNet(p) + palletCartonTare(p) + num(p.tare_weight_kg); }
+
+  // ---- balance strip -----------------------------------------------------
+  // Counts a line's quantity wherever it sits - in a carton or straight on a
+  // pallet - so "left" is the honest remainder.
+  function renderBalance() {
+    var packed = {};
+    items.forEach(function (it) { packed[it.sr_no] = 0; });
+    cartons.concat(pallets).forEach(function (unit) {
+      (unit.contents || []).forEach(function (row) {
+        if (packed[row.item_sr_no] !== undefined) packed[row.item_sr_no] += num(row.quantity_boxes);
+      });
+    });
+    var html = '<table class="ledger"><thead><tr><th>Goods line</th><th class="num">Planned</th>' +
+               '<th class="num">Packed</th><th class="num">Left</th></tr></thead><tbody>';
+    items.forEach(function (it) {
+      var left = Math.round((num(it.quantity_boxes) - packed[it.sr_no]) * 1000) / 1000;
+      html += '<tr' + (Math.abs(left) > 0.001 ? ' style="background:#fff6e5;"' : '') + '>' +
+        '<td class="text-sm">' + esc(itemLabel(it)) + '</td>' +
+        '<td class="num">' + fmt(num(it.quantity_boxes), 0) + ' <span class="text-soft text-sm">' + esc(it.quantity_unit || "") + '</span></td>' +
+        '<td class="num">' + fmt(packed[it.sr_no], 0) + '</td>' +
+        '<td class="num"' + (Math.abs(left) > 0.001 ? ' style="color:#b45309;font-weight:600;"' : '') + '>' + fmt(left, 0) + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    document.getElementById("balance-strip").innerHTML = items.length ? html : "";
+  }
+
+  // ---- cartons & pallets -------------------------------------------------
+  function itemOptions(selected) {
+    var html = '<option value="">— pick a goods line —</option>';
+    items.forEach(function (it) {
+      html += '<option value="' + it.sr_no + '"' + (num(selected) === num(it.sr_no) ? " selected" : "") +
+              '>' + esc(itemLabel(it)) + '</option>';
+    });
+    return html;
+  }
+
+  function contentRows(kind, unitNo, contents) {
+    var html = "";
+    (contents || []).forEach(function (row, idx) {
+      html += '<div class="form-row" style="align-items:flex-end;gap:8px;margin:0 0 6px 0;">' +
+        '<div class="field" style="flex:2;"><select class="js-content-item" data-kind="' + kind +
+          '" data-unit="' + unitNo + '" data-idx="' + idx + '">' + itemOptions(row.item_sr_no) + '</select></div>' +
+        '<div class="field" style="max-width:110px;"><input type="number" step="any" class="js-content-qty" data-kind="' + kind +
+          '" data-unit="' + unitNo + '" data-idx="' + idx + '" value="' + esc(row.quantity_boxes) + '"></div>' +
+        '<div class="field" style="max-width:80px;"><button type="button" class="btn-link-danger js-content-remove" data-kind="' +
+          kind + '" data-unit="' + unitNo + '" data-idx="' + idx + '">Remove</button></div>' +
+        '</div>';
+    });
+    return html;
+  }
+
+  function typeOptions(kind, unit) {
+    // Every packing type of that kind across the plan's products - a unit may
+    // legitimately mix products, so the list isn't narrowed to one of them.
+    var seen = {}, html = '<option value="">— type —</option>';
+    Object.keys(packingTypes).forEach(function (pid) {
+      (packingTypes[pid][kind] || []).forEach(function (t) {
+        if (seen[t.id]) return;
+        seen[t.id] = true;
+        var sel = num(unit[kind === "carton" ? "carton_type_id" : "pallet_type_id"]) === num(t.id);
+        html += '<option value="' + t.id + '" data-cap="' + esc(t.boxes_per_pallet) + '" data-tare="' +
+                esc(t.weight_kg === null ? "" : t.weight_kg) + '"' + (sel ? " selected" : "") + '>' + esc(t.name) + '</option>';
+      });
+    });
+    return html;
+  }
+
+  function renderCartons() {
+    var html = "";
+    if (cartons.length) {
+      html += '<h4>Cartons <span class="text-soft text-sm">— the inner level; drop one on a pallet below</span></h4>';
+      cartons.forEach(function (c) {
+        var packed = contentsBoxes(c.contents), cap = num(c.capacity_boxes);
+        var part = cap > 0 && packed < cap;
+        html += '<div class="card" style="margin:8px 0;padding:10px;' + (part ? 'border-left:4px solid #f59e0b;' : '') + '">' +
+          '<div class="form-row" style="align-items:flex-end;gap:10px;">' +
+            '<div class="field" style="max-width:90px;"><label>Carton</label><input type="text" value="#' + c.carton_no + '" readonly></div>' +
+            '<div class="field" style="max-width:170px;"><label>Type</label><select class="js-unit-type" data-kind="carton" data-unit="' + c.carton_no + '">' + typeOptions("carton", c) + '</select></div>' +
+            '<div class="field" style="max-width:110px;"><label>Capacity</label><input type="number" step="any" class="js-unit-cap" data-kind="carton" data-unit="' + c.carton_no + '" value="' + esc(c.capacity_boxes === null ? "" : c.capacity_boxes) + '"></div>' +
+            '<div class="field" style="max-width:110px;"><label>Tare kg</label><input type="number" step="any" class="js-unit-tare" data-kind="carton" data-unit="' + c.carton_no + '" value="' + esc(c.tare_weight_kg === null ? "" : c.tare_weight_kg) + '"></div>' +
+            '<div class="field" style="max-width:150px;"><label>On pallet</label><select class="js-carton-pallet" data-unit="' + c.carton_no + '">' + palletOptions(c.pallet_no) + '</select></div>' +
+            '<div class="field"><label>&nbsp;</label><div class="text-sm">' +
+              '<strong' + (part ? ' style="color:#b45309;"' : '') + '>' + fmt(packed, 0) + (cap ? " / " + fmt(cap, 0) : "") + '</strong>' +
+              ' · net ' + fmt(contentsNet(c.contents), 3) + ' kg' + (part ? ' · part-filled' : '') +
+            '</div></div>' +
+            '<div class="field" style="max-width:80px;"><label>&nbsp;</label><button type="button" class="btn-link-danger js-unit-remove" data-kind="carton" data-unit="' + c.carton_no + '">Delete</button></div>' +
+          '</div>' +
+          contentRows("carton", c.carton_no, c.contents) +
+          '<button type="button" class="btn btn-ghost btn-sm js-content-add" data-kind="carton" data-unit="' + c.carton_no + '">+ Add line to carton</button>' +
+        '</div>';
+      });
+    }
+    document.getElementById("cartons-pane").innerHTML = html;
+  }
+
+  function palletOptions(selected) {
+    var html = '<option value="">— none —</option>';
+    pallets.forEach(function (p) {
+      html += '<option value="' + p.pallet_no + '"' + (num(selected) === num(p.pallet_no) ? " selected" : "") +
+              '>Pallet #' + p.pallet_no + '</option>';
+    });
+    return html;
+  }
+
+  function containerOptions(selected) {
+    var html = '<option value="">— unassigned —</option>';
+    containerRows().forEach(function (c) {
+      html += '<option value="' + c.sr_no + '"' + (num(selected) === num(c.sr_no) ? " selected" : "") +
+              '>' + esc(c.container_no || ("Container " + c.sr_no)) + '</option>';
+    });
+    return html;
+  }
+
+  function renderPallets() {
+    var html = '<h4>Pallets <span class="text-soft text-sm">— what goes into a container</span></h4>';
+    if (!pallets.length) html += '<p class="text-soft text-sm">No pallets yet — use Auto-build or + Add pallet.</p>';
+    pallets.forEach(function (p) {
+      var direct = contentsBoxes(p.contents), cap = num(p.capacity_boxes);
+      var part = cap > 0 && direct < cap;
+      var myCartons = cartonsOn(p.pallet_no);
+      html += '<div class="card" style="margin:8px 0;padding:10px;' + (part ? 'border-left:4px solid #f59e0b;' : '') + '">' +
+        '<div class="form-row" style="align-items:flex-end;gap:10px;">' +
+          '<div class="field" style="max-width:90px;"><label>Pallet</label><input type="text" value="#' + p.pallet_no + '" readonly></div>' +
+          '<div class="field" style="max-width:170px;"><label>Type</label><select class="js-unit-type" data-kind="pallet" data-unit="' + p.pallet_no + '">' + typeOptions("pallet", p) + '</select></div>' +
+          '<div class="field" style="max-width:110px;"><label>Capacity</label><input type="number" step="any" class="js-unit-cap" data-kind="pallet" data-unit="' + p.pallet_no + '" value="' + esc(p.capacity_boxes === null ? "" : p.capacity_boxes) + '"></div>' +
+          '<div class="field" style="max-width:110px;"><label>Tare kg</label><input type="number" step="any" class="js-unit-tare" data-kind="pallet" data-unit="' + p.pallet_no + '" value="' + esc(p.tare_weight_kg === null ? "" : p.tare_weight_kg) + '"></div>' +
+          '<div class="field" style="max-width:170px;"><label>Container</label><select class="js-pallet-container" data-unit="' + p.pallet_no + '">' + containerOptions(p.container_sr_no) + '</select></div>' +
+          '<div class="field" style="max-width:80px;"><label>&nbsp;</label><button type="button" class="btn-link-danger js-unit-remove" data-kind="pallet" data-unit="' + p.pallet_no + '">Delete</button></div>' +
+        '</div>' +
+        '<div class="text-sm" style="margin:4px 0 8px 0;">' +
+          (myCartons.length ? myCartons.length + ' carton(s) · ' : "") +
+          '<strong' + (part ? ' style="color:#b45309;"' : '') + '>' + fmt(palletBoxes(p), 0) + (cap ? " / " + fmt(cap, 0) : "") + '</strong> on pallet · ' +
+          'net ' + fmt(palletNet(p), 3) + ' + carton tare ' + fmt(palletCartonTare(p), 2) +
+          ' + pallet tare ' + fmt(num(p.tare_weight_kg), 2) + ' = <strong>gross ' + fmt(palletGross(p), 3) + ' kg</strong>' +
+          (part ? ' · part-filled' : '') +
+        '</div>' +
+        contentRows("pallet", p.pallet_no, p.contents) +
+        '<button type="button" class="btn btn-ghost btn-sm js-content-add" data-kind="pallet" data-unit="' + p.pallet_no + '">+ Add line directly to pallet</button>' +
+      '</div>';
+    });
+    document.getElementById("pallets-pane").innerHTML = html;
+  }
+
+  // ---- containers --------------------------------------------------------
+  function containerRows() {
+    var rows = [];
+    document.querySelectorAll("#cd-body .cd-row").forEach(function (tr, i) {
+      var get = function (n) { var el = tr.querySelector('[name="' + n + '[]"]'); return el ? el.value : ""; };
+      rows.push({
+        sr_no: i + 1, container_no: get("cd_container_no"), container_type: get("cd_container_type"),
+        max_permitted_weight: num(get("cd_max_permitted_weight")), tare_weight_kg: num(get("cd_tare_weight_kg")),
+      });
+    });
+    return rows;
+  }
+
+  function renderContainers() {
+    var rows = containerRows();
+    var html = '<table class="ledger"><thead><tr><th>Container</th><th>Type</th><th class="num">Pallets</th>' +
+      '<th class="num">Qty</th><th class="num">Net kg</th><th class="num">Ctn tare</th><th class="num">Pal tare</th>' +
+      '<th class="num">Cargo</th><th class="num">Cont. tare</th><th class="num">VGM</th><th class="num">Max</th><th class="num">Head</th></tr></thead><tbody>';
+
+    var groups = rows.map(function (c) { return {c: c, list: pallets.filter(function (p) { return num(p.container_sr_no) === c.sr_no; })}; });
+    var loose = pallets.filter(function (p) { return !p.container_sr_no; });
+
+    groups.forEach(function (g) {
+      var net = 0, ct = 0, pt = 0, boxes = 0, cargo = 0;
+      g.list.forEach(function (p) {
+        net += palletNet(p); ct += palletCartonTare(p); pt += num(p.tare_weight_kg);
+        boxes += palletBoxes(p); cargo += palletGross(p);
+      });
+      var vgm = cargo + g.c.tare_weight_kg;
+      var over = g.c.max_permitted_weight > 0 && vgm > g.c.max_permitted_weight;
+      html += '<tr' + (over ? ' style="background:#fee2e2;"' : '') + '>' +
+        '<td class="mono text-sm">' + esc(g.c.container_no || ("Container " + g.c.sr_no)) + '</td>' +
+        '<td class="text-sm">' + esc(g.c.container_type || "—") + '</td>' +
+        '<td class="num">' + g.list.length + '</td><td class="num">' + fmt(boxes, 0) + '</td>' +
+        '<td class="num">' + fmt(net, 0) + '</td><td class="num">' + fmt(ct, 1) + '</td><td class="num">' + fmt(pt, 0) + '</td>' +
+        '<td class="num">' + fmt(cargo, 0) + '</td><td class="num">' + fmt(g.c.tare_weight_kg, 0) + '</td>' +
+        '<td class="num"' + (over ? ' style="color:#b91c1c;font-weight:700;"' : '') + '>' + fmt(vgm, 0) + '</td>' +
+        '<td class="num">' + (g.c.max_permitted_weight ? fmt(g.c.max_permitted_weight, 0) : "—") + '</td>' +
+        '<td class="num">' + (g.c.max_permitted_weight ? fmt(g.c.max_permitted_weight - vgm, 0) + (over ? " ✕" : " ✓") : "—") + '</td></tr>';
+    });
+
+    if (loose.length) {
+      var lnet = 0, lcargo = 0, lboxes = 0;
+      loose.forEach(function (p) { lnet += palletNet(p); lcargo += palletGross(p); lboxes += palletBoxes(p); });
+      html += '<tr style="background:#fff6e5;"><td class="text-sm"><em>Unassigned</em></td><td>—</td>' +
+        '<td class="num">' + loose.length + '</td><td class="num">' + fmt(lboxes, 0) + '</td>' +
+        '<td class="num">' + fmt(lnet, 0) + '</td><td>—</td><td>—</td><td class="num">' + fmt(lcargo, 0) +
+        '</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>';
+    }
+    html += '</tbody></table>';
+    document.getElementById("container-summary").innerHTML = rows.length || loose.length ? html :
+      '<p class="text-soft text-sm">Pick a booking above to get containers.</p>';
+  }
+
+  function renderAll() {
+    renderItems(); renderBalance(); renderCartons(); renderPallets(); renderContainers(); sync();
+  }
+  function sync() {
+    document.getElementById("cartons_json").value = JSON.stringify(cartons);
+    document.getElementById("pallets_json").value = JSON.stringify(pallets);
+  }
+
+  function findUnit(kind, no) {
+    var list = kind === "carton" ? cartons : pallets;
+    for (var i = 0; i < list.length; i++) {
+      if (num(kind === "carton" ? list[i].carton_no : list[i].pallet_no) === num(no)) return list[i];
+    }
+    return null;
+  }
+  function nextNo(list, key) {
+    var max = 0;
+    list.forEach(function (u) { max = Math.max(max, num(u[key])); });
+    return max + 1;
+  }
+
+  // ---- events ------------------------------------------------------------
+  document.addEventListener("change", function (e) {
+    var t = e.target;
+    if (t.classList.contains("js-content-item") || t.classList.contains("js-content-qty")) {
+      var unit = findUnit(t.dataset.kind, t.dataset.unit);
+      if (!unit) return;
+      var row = (unit.contents || [])[num(t.dataset.idx)];
+      if (!row) return;
+      if (t.classList.contains("js-content-item")) row.item_sr_no = num(t.value) || null;
+      else row.quantity_boxes = num(t.value);
+      renderAll();
+    } else if (t.classList.contains("js-unit-type")) {
+      var u = findUnit(t.dataset.kind, t.dataset.unit);
+      if (!u) return;
+      var opt = t.options[t.selectedIndex];
+      var isC = t.dataset.kind === "carton";
+      u[isC ? "carton_type_id" : "pallet_type_id"] = num(t.value) || null;
+      u[isC ? "carton_type_name" : "pallet_type_name"] = t.value ? opt.textContent.trim() : null;
+      // Capacity/tare are SEEDED from the type and stay editable, so a
+      // one-off pallet can carry a different tare without touching the master.
+      if (t.value) {
+        u.capacity_boxes = opt.dataset.cap ? num(opt.dataset.cap) : null;
+        u.tare_weight_kg = opt.dataset.tare !== "" ? num(opt.dataset.tare) : null;
+      }
+      renderAll();
+    } else if (t.classList.contains("js-unit-cap")) {
+      var uc = findUnit(t.dataset.kind, t.dataset.unit);
+      if (uc) { uc.capacity_boxes = t.value === "" ? null : num(t.value); renderAll(); }
+    } else if (t.classList.contains("js-unit-tare")) {
+      var ut = findUnit(t.dataset.kind, t.dataset.unit);
+      if (ut) { ut.tare_weight_kg = t.value === "" ? null : num(t.value); renderAll(); }
+    } else if (t.classList.contains("js-carton-pallet")) {
+      var c = findUnit("carton", t.dataset.unit);
+      if (c) { c.pallet_no = num(t.value) || null; renderAll(); }
+    } else if (t.classList.contains("js-pallet-container")) {
+      var p = findUnit("pallet", t.dataset.unit);
+      if (p) { p.container_sr_no = num(t.value) || null; renderAll(); }
+    } else if (t.classList.contains("js-item-price")) {
+      var it = itemBySr(t.dataset.sr);
+      if (it) { it.price_usd = num(t.value); renderItems(); }
+    } else if (t.id === "booking_detail_id") {
+      loadBooking(t.value);
+    } else if (t.name === "cd_max_permitted_weight[]" || t.name === "cd_tare_weight_kg[]") {
+      renderContainers();
+    }
+  });
+
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (t.classList.contains("js-content-add")) {
+      var unit = findUnit(t.dataset.kind, t.dataset.unit);
+      if (unit) { (unit.contents = unit.contents || []).push({item_sr_no: null, quantity_boxes: 0}); renderAll(); }
+    } else if (t.classList.contains("js-content-remove")) {
+      var u = findUnit(t.dataset.kind, t.dataset.unit);
+      if (u) { u.contents.splice(num(t.dataset.idx), 1); renderAll(); }
+    } else if (t.classList.contains("js-unit-remove")) {
+      if (t.dataset.kind === "carton") {
+        cartons = cartons.filter(function (c) { return num(c.carton_no) !== num(t.dataset.unit); });
+      } else {
+        // Cartons riding on a deleted pallet are set loose, not destroyed -
+        // the goods in them are still packed, just not yet placed.
+        cartons.forEach(function (c) { if (num(c.pallet_no) === num(t.dataset.unit)) c.pallet_no = null; });
+        pallets = pallets.filter(function (p) { return num(p.pallet_no) !== num(t.dataset.unit); });
+      }
+      renderAll();
+    } else if (t.classList.contains("js-remove-item")) {
+      items = items.filter(function (it) { return num(it.sr_no) !== num(t.dataset.sr); });
+      renderAll();
+    } else if (t.classList.contains("js-remove-cd")) {
+      t.closest("tr").remove();
+      renumberContainers();
+      renderAll();
+    } else if (t.id === "add-carton-btn") {
+      cartons.push({carton_no: nextNo(cartons, "carton_no"), carton_type_id: null, carton_type_name: null,
+                    capacity_boxes: null, tare_weight_kg: null, pallet_no: null, contents: []});
+      renderAll();
+    } else if (t.id === "add-pallet-btn") {
+      pallets.push({pallet_no: nextNo(pallets, "pallet_no"), pallet_type_id: null, pallet_type_name: null,
+                    capacity_boxes: null, tare_weight_kg: null, container_sr_no: null, contents: []});
+      renderAll();
+    } else if (t.id === "auto-build-btn") {
+      autoBuild();
+    } else if (t.id === "load-from-pis-btn") {
+      loadFromPis();
+    }
+  });
+
+  function renumberContainers() {
+    document.querySelectorAll("#cd-body .cd-row").forEach(function (tr, i) {
+      var sr = tr.querySelector(".cd-sr");
+      if (sr) sr.textContent = i + 1;
+    });
+    // A removed container leaves its pallets unassigned rather than silently
+    // moving them into whichever container took over that row number.
+    var valid = containerRows().length;
+    pallets.forEach(function (p) { if (num(p.container_sr_no) > valid) p.container_sr_no = null; });
+  }
+
+  // ---- server calls ------------------------------------------------------
+  function loadFromPis() {
+    var ids = Array.prototype.filter.call(document.querySelectorAll(".js-pi-check"), function (cb) { return cb.checked; })
+      .map(function (cb) { return cb.value; });
+    if (!ids.length) { alert("Tick at least one proforma invoice first."); return; }
+    if (items.length && !confirm("Replace the goods lines with what the selected PIs trace to? Your packing is kept.")) return;
+    fetch("{{ url_for('loading_plannings.loading_planning_prefill') }}?proforma_invoice_ids=" + encodeURIComponent(ids.join(",")))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        items = data.items || [];
+        packingTypes = data.packing_types || {};
+        renderAll();
+      })
+      .catch(function () { alert("Couldn't load from those proforma invoices."); });
+  }
+
+  function autoBuild() {
+    if (!items.length) { alert("Load some goods first."); return; }
+    if ((cartons.length || pallets.length) && !confirm("Replace the packing you've built with a fresh auto-build?")) return;
+    fetch("{{ url_for('loading_plannings.loading_planning_auto_build') }}", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({items: items}),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.error) { alert(data.error); return; }
+        cartons = data.cartons || [];
+        pallets = data.pallets || [];
+        renderAll();
+      })
+      .catch(function () { alert("Auto-build failed."); });
+  }
+
+  function loadBooking(bookingId) {
+    if (!bookingId) return;
+    fetch("/booking-details/api/" + encodeURIComponent(bookingId) + "/containers")
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.error) { alert(d.error); return; }
+        setValue("booking_no", d.booking_no);
+        setValue("vessel_name", d.vessel_name);
+        setValue("voyage_no", d.voyage_no);
+        setValue("transporter_name", d.transporter_name);
+        var body = document.getElementById("cd-body");
+        body.innerHTML = "";
+        (d.containers || []).forEach(function (c, i) { body.insertAdjacentHTML("beforeend", cdRow(c, i + 1)); });
+        renderAll();
+      })
+      .catch(function () { alert("Couldn't read that booking."); });
+  }
+
+  function setValue(id, v) { var el = document.getElementById(id); if (el) el.value = v || ""; }
+
+  function cdRow(c, sr) {
+    var cell = function (name, value, ro) {
+      return '<td><input type="text" name="' + name + '[]" value="' + esc(value || "") + '"' + (ro ? " readonly" : "") + '></td>';
+    };
+    return '<tr class="cd-row"><td class="cd-sr">' + sr + '</td>' +
+      cell("cd_container_type", c.container_type, true) + cell("cd_container_no", c.container_no, true) +
+      cell("cd_max_permitted_weight", c.max_permitted_weight, false) +
+      '<td><input type="number" step="any" name="cd_tare_weight_kg[]" value="' + esc(c.tare_weight_kg === null ? "" : c.tare_weight_kg) + '"></td>' +
+      cell("cd_vehicle_no", c.vehicle_no, true) + cell("cd_lr_no", c.lr_no, true) +
+      cell("cd_line_seal_no", c.line_seal_no, true) + cell("cd_rfid_seal_no", c.rfid_seal_no, true) +
+      '<td><input type="hidden" name="cd_transporter_name[]" value="' + esc(c.transporter_name || "") + '">' +
+      '<button type="button" class="btn-link-danger js-remove-cd">Remove</button></td></tr>';
+  }
+
+  // Buyer filter over the PI list - purely client-side narrowing, matching
+  // the export invoice's own card.
+  var buyerSelect = document.getElementById("buyer_select");
+  if (buyerSelect) {
+    buyerSelect.addEventListener("change", function () {
+      var opt = this.options[this.selectedIndex];
+      var key = opt ? (opt.dataset.companyKey || "") : "";
+      document.querySelectorAll(".js-pi-label").forEach(function (label) {
+        var cb = label.querySelector(".js-pi-check");
+        label.style.display = (!key || (cb && cb.dataset.companyKey === key)) ? "" : "none";
+      });
+    });
+  }
+
+  document.getElementById("lp-form").addEventListener("submit", sync);
+
+  // On an existing plan the packing types aren't in the page yet - fetch them
+  // so the type dropdowns show the right options without a reload.
+  if (items.length) {
+    var pids = items.map(function (i) { return i.proforma_invoice_id; }).filter(Boolean);
+    if (pids.length) {
+      fetch("{{ url_for('loading_plannings.loading_planning_prefill') }}?proforma_invoice_ids=" +
+            encodeURIComponent(Array.from(new Set(pids)).join(",")))
+        .then(function (r) { return r.json(); })
+        .then(function (d) { packingTypes = d.packing_types || {}; renderAll(); })
+        .catch(function () { renderAll(); });
+    } else { renderAll(); }
+  } else { renderAll(); }
+})();
+</script>
+
+{% endblock %}

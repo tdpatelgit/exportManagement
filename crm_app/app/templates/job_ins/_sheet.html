@@ -1,0 +1,185 @@
+{# The Job In A4 sheet - "JOBWORK INWARD CHALLAN / RETURN", cut to the same
+   pattern as the job out's own sheet (templates/job_outs/_sheet.html):
+   scoped .ji-* styles, fixed colgroup widths, and the shared
+   js-page-filler/js-page-sheet pair.
+
+   Unlike the job out, the goods table reads this document's OWN stored line
+   items (what actually came back, typed at the door) rather than deriving
+   them - see models.JobIn. Everything around them arrives resolved from
+   JobInService.build_sheet.
+
+   Expects `job_in`, `company`, `job_out`, `sender` and `purchase_invoice`.
+   Note the two challan numbers are different documents: DELIVERY CHALLAN NO
+   is OURS (the job out the goods went out on), JW DELIVERY CHALLAN NO is the
+   job manufacturer's own paperwork for the return leg. #}
+<style>
+  .ji-sheet {
+    background: #fff;
+    color: #000;
+    width: 205mm;
+    margin: 24px auto 48px;
+    padding: 6mm 6mm 8mm;
+    box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 10px;
+    line-height: 1.25;
+  }
+  .ji-title { text-align: center; font-size: 14px; font-weight: bold; padding: 3px 0 5px; }
+  .ji-sheet table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: -1px; }
+  .ji-sheet td { border: 1px solid #000; padding: 3px 5px; vertical-align: middle; text-align: left; word-wrap: break-word; }
+  .ji-label { font-size: 9px; }
+  .ji-val { font-weight: bold; }
+  .ji-left { text-align: left; vertical-align: top; }
+  .ji-right { text-align: right; }
+  .ji-center { text-align: center; }
+  .ji-party-role { font-size: 9px; }
+  .ji-items thead td { text-align: center; vertical-align: middle; font-size: 9px; font-weight: bold; }
+  .ji-items tbody tr.ji-goods td, .ji-items tbody tr.ji-filler td { border-top: none; border-bottom: none; padding: 2px 5px; vertical-align: top; }
+  .ji-designs { font-size: 8px; font-weight: normal; padding-left: 6px; }
+  {# .ji-filler's height is measured in the browser - see templates/_page_filler.html #}
+  .ji-remarks-cell { height: 46px; }
+  @media print {
+    .ji-sheet { width: auto; margin: 0; padding: 0; box-shadow: none; }
+  }
+</style>
+
+{% macro num(v) -%}
+  {%- if v is not none and v != '' and v != 0 %}{{ v | inr_group }}{% else %}-{% endif -%}
+{%- endmacro %}
+
+{% macro ji_date(v) -%}
+  {%- if v %}{{ v[8:10] }}-{{ v[5:7] }}-{{ v[0:4] }}{% else %}{% endif -%}
+{%- endmacro %}
+
+{% macro party(role, name, address, gstin) -%}
+  <div class="ji-party-role">{{ role }}</div>
+  <span class="ji-val">{{ (name or '')|upper }}</span><br>
+  <span class="ji-val">{{ (address or '')|upper|replace('\n', '<br>')|safe }}</span>
+  <br><span class="ji-val">GSTIN : {{ (gstin or 'UNREGISTRED')|upper }}</span>
+  {% if gstin %}<br><span class="ji-val">STATE : {{ gstin | gst_state }}</span>{% endif %}
+{%- endmacro %}
+
+<div class="ji-sheet js-page-sheet">
+
+  <div class="ji-title">JOBWORK INWARD CHALLAN / RETURN</div>
+
+  <!-- Receiver (us) and sender (the job manufacturer) against the references -->
+  <table>
+    <colgroup><col style="width:47%"><col style="width:26%"><col></colgroup>
+    <tr>
+      {# The goods are coming back to us, so the receiver is our own company. #}
+      <td class="ji-left" rowspan="6">
+        {{ party('RECEIVER', company.company_name if company else '',
+                 company.address if company else '', company.gstin if company else '') }}
+      </td>
+      <td class="ji-label">STOCK INWARD NO</td>
+      <td class="ji-val">{{ job_in.stock_inward_no }}</td>
+    </tr>
+    <tr>
+      <td class="ji-label">STOCK INWARD DATE</td>
+      <td class="ji-val">{{ ji_date(job_in.stock_inward_date) }}</td>
+    </tr>
+    <tr>
+      <td class="ji-label">JW DELIVERY CHALLAN NO</td>
+      <td class="ji-val">{{ job_in.jw_delivery_challan_no or '' }}</td>
+    </tr>
+    <tr>
+      <td class="ji-label">JW DELIVERY CHALLAN DATE</td>
+      <td class="ji-val">{{ ji_date(job_in.jw_delivery_challan_date) }}</td>
+    </tr>
+    {# Ours, off the job out these goods went out on. #}
+    <tr>
+      <td class="ji-label">DELIVERY CHALLAN NO</td>
+      <td class="ji-val">{{ job_out.delivery_challan_no if job_out else '' }}</td>
+    </tr>
+    <tr>
+      <td class="ji-label">DELIVERY CHALLAN DATE</td>
+      <td class="ji-val">{{ ji_date(job_out.delivery_challan_date) if job_out else '' }}</td>
+    </tr>
+    <tr>
+      <td class="ji-left" rowspan="6">
+        {{ party('Job Manufacturer (Sender)', sender.name, sender.address, sender.gstin) }}
+      </td>
+      <td class="ji-label">TRANSPORT NAME</td>
+      <td class="ji-val">{{ (job_in.transporter_name or '')|upper }}</td>
+    </tr>
+    <tr>
+      <td class="ji-label">TRANSPORT GSTIN</td>
+      <td class="ji-val">{{ job_in.transport_gstin or '' }}</td>
+    </tr>
+    <tr>
+      <td class="ji-label">LR NO</td>
+      <td class="ji-val">{{ job_in.lr_no or '' }}</td>
+    </tr>
+    <tr>
+      <td class="ji-label">VEHICLE NO</td>
+      <td class="ji-val">{{ (job_in.vehicle_no or '')|upper }}</td>
+    </tr>
+    <tr>
+      <td class="ji-label">PURCHASE INVOICE NO</td>
+      <td class="ji-val">{{ purchase_invoice.invoice_number if purchase_invoice else '' }}</td>
+    </tr>
+    <tr>
+      <td class="ji-label">PURCHASE INVOICE DATE</td>
+      <td class="ji-val">{{ ji_date(purchase_invoice.invoice_date) if purchase_invoice else '' }}</td>
+    </tr>
+  </table>
+
+  <!-- What came back: one line per product, its designs listed beneath -->
+  {% set ns = namespace(boxes=0, qty=0) %}
+  {% for item in job_in.items %}
+    {% set ns.boxes = ns.boxes + (item.quantity_boxes or 0) %}
+    {% set ns.qty = ns.qty + (item.quantity_value or 0) %}
+  {% endfor %}
+
+  <table class="ji-items">
+    <colgroup>
+      <col style="width:7%"><col style="width:55%"><col style="width:12%">
+      <col style="width:12%"><col>
+    </colgroup>
+    <thead>
+      <tr>
+        <td>Sr No</td>
+        <td>Description Of Goods<br>Received OutPut After Jobwork</td>
+        <td>HSN</td>
+        <td>UNIT</td>
+        <td>Alt Qty</td>
+      </tr>
+    </thead>
+    <tbody>
+      {# Rows of the same product collapse under one Description, with each
+         design listed beneath it - the same shape the job out's goods table
+         uses for its own design breakdown. #}
+      {% set seen = namespace(product='') %}
+      {% for item in job_in.items %}
+      <tr class="ji-goods">
+        <td class="ji-center ji-val">{{ loop.index }}</td>
+        <td class="ji-val">
+          {% if item.product_name != seen.product %}{{ item.product_name }}{% set seen.product = item.product_name %}{% endif %}
+          {% if item.design_name %}<div class="ji-designs">{{ item.design_name }}</div>{% endif %}
+        </td>
+        <td class="ji-val ji-center">{{ item.hsn_code or '' }}</td>
+        <td class="ji-val ji-center">{{ num(item.quantity_boxes) }} {{ item.quantity_unit }}</td>
+        <td class="ji-val ji-right">{{ num(item.quantity_value) }} {{ item.unit }}</td>
+      </tr>
+      {% endfor %}
+      <tr class="ji-filler js-page-filler">
+        <td></td><td></td><td></td><td></td><td></td>
+      </tr>
+      <tr>
+        <td></td>
+        <td class="ji-val ji-center">TOTAL</td>
+        <td></td>
+        <td class="ji-val ji-center">{{ num(ns.boxes) }}</td>
+        <td class="ji-val ji-right">{{ num(ns.qty) }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <table>
+    <colgroup><col></colgroup>
+    <tr>
+      <td class="ji-left ji-remarks-cell"><span class="ji-val">REMARKS:</span> {{ (job_in.remarks or '')|upper|replace('\n', '<br>')|safe }}</td>
+    </tr>
+  </table>
+</div>

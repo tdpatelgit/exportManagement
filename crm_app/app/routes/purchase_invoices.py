@@ -275,9 +275,10 @@ def view_purchase_invoice(purchase_invoice_id):
             )
         except NotFoundError:
             pass
+    job_outs = container.job_out_service.list_for_purchase_invoice(purchase_invoice_id, g.user.company_id)
     return render_template("purchase_invoices/view.html", purchase_invoice=purchase_invoice,
                            packing_lists=packing_lists, purchase_orders=purchase_orders, job_works=job_works,
-                           proforma_invoices=proforma_invoices)
+                           proforma_invoices=proforma_invoices, job_outs=job_outs)
 
 
 @purchase_invoices_bp.route("/<int:purchase_invoice_id>/edit", methods=["GET", "POST"])
@@ -381,5 +382,5 @@ def view_purchase_invoice_version(purchase_invoice_id, version_number):
         abort(404)
     return render_template(
         "purchase_invoices/view.html", purchase_invoice=historical_purchase_invoice, historical_version=version,
-        purchase_orders=[], job_works=[], proforma_invoices=[],
+        purchase_orders=[], job_works=[], proforma_invoices=[], job_outs=[],
     )

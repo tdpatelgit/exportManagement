@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ plan.loading_planning_number }} · Loading Planning</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    @media print {
+      @page { size: A4 portrait; margin: 6mm; }
+      body { background: #fff !important; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body class="quote-print-body">
+
+  <div class="quote-toolbar no-print">
+    <div class="flex gap-8" style="align-items:center;">
+      <a href="{{ url_for('loading_plannings.list_loading_plannings') }}" class="btn btn-ghost btn-sm">← All loading plannings</a>
+    </div>
+    <div class="flex gap-8">
+      {% if current_user.is_admin %}
+      <a href="{{ url_for('loading_plannings.edit_loading_planning', loading_planning_id=plan.id) }}" class="btn btn-ghost btn-sm">Edit</a>
+      {% endif %}
+      <button type="button" class="btn btn-primary btn-sm" onclick="window.print()">🖨 Print</button>
+    </div>
+  </div>
+
+  {% if not plan.is_fully_packed %}
+  <div class="sheet-note no-print">
+    This plan is not fully packed yet &mdash; some goods have no carton or pallet.
+    That is a normal intermediate state; the sheet prints what has been decided so far.
+  </div>
+  {% endif %}
+
+  {% include "loading_plannings/_sheet.html" %}
+
+</body>
+</html>
