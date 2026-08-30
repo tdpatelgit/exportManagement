@@ -32,9 +32,8 @@ from app.services import (
     AuthService, LeadService, PartyService, SupplierService, TransporterService, CurrencyService,
     CommunicationService, StatsService, CompanyService, ReportService, ProductService,
     QuotationService, ProformaInvoiceService, PurchaseOrderService, JobWorkService, PurchaseInvoiceService,
-    JobOutService, JobInService,
-    ExportInvoiceService, ExportPackingListService, PackingListService, LoadingPlanningService, BackupService,
-    DocumentVersionService, ProformaFulfilmentService,
+    JobOutService, JobInService, ExportInvoiceService, ExportPackingListService, PackingListService,
+    LoadingPlanningService, BackupService, DocumentVersionService, ProformaFulfilmentService,
     InventoryService, PermitService, BookingDetailService, MiscListService,
 )
 from app.utils import register_template_helpers
