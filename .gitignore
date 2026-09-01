@@ -9,3 +9,4 @@ crm_app/tests_venv/
 crm_app/app/static/uploads/
 logs/
 crm_app/discord bot/
+scripts/
