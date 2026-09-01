@@ -13,6 +13,7 @@ just "how do I represent myself", not "how do I persist myself".
 """
 
 import json
+import math
 from dataclasses import dataclass, field, replace
 from typing import Optional, List
 
@@ -167,6 +168,12 @@ PRODUCT_UNITS = ["SQM", "LM", "PCS", "KG", "SET"]
 #   exemption - the concessional rate for supplies meant for export (0.1% total)
 PURCHASE_TYPES = {"full_tax": "Full Tax Purchase", "exemption": "Exemption"}
 DEFAULT_PURCHASE_TYPE = "full_tax"
+
+# How far along a purchase order line is on the supplier's floor. Set by
+# hand on the preview page's Production Status card - never derived from the
+# batch quantities recorded alongside it (see PurchaseOrderItemProduction).
+PRODUCTION_STATUSES = {"pending": "Pending", "in_production": "In production", "ready": "Ready"}
+DEFAULT_PRODUCTION_STATUS = "pending"
 # The whole-order rate under Exemption: 0.1% inter-state, split into
 # 0.05% + 0.05% when it's an intra-state purchase (same halving rule the
 # catalog products follow for their own rates).
@@ -1244,6 +1251,71 @@ class PurchaseOrderItem:
             total_inr=row["total_inr"],
             design_id=row["design_id"] if "design_id" in row.keys() else None,
             design_name=row["design_name"] if "design_name" in row.keys() else None,
+        )
+
+
+@dataclass
+class PurchaseOrderItemBatch:
+    """One batch a purchase order line was actually produced in. A design's
+    ordered quantity is routinely fired in several batches, so a line has any
+    number of these. quantity_boxes is in the line's own quantity_unit."""
+    id: Optional[int]
+    purchase_order_item_id: Optional[int]
+    sr_no: int
+    design_id: Optional[int] = None
+    design_name: Optional[str] = None
+    batch_number: Optional[str] = None
+    production_date: Optional[str] = None
+    quantity_boxes: float = 0
+    remarks: Optional[str] = None
+
+    @staticmethod
+    def from_row(row) -> "PurchaseOrderItemBatch":
+        return PurchaseOrderItemBatch(
+            id=row["id"],
+            purchase_order_item_id=row["purchase_order_item_id"],
+            sr_no=row["sr_no"],
+            design_id=row["design_id"],
+            design_name=row["design_name"],
+            batch_number=row["batch_number"],
+            production_date=row["production_date"],
+            quantity_boxes=row["quantity_boxes"] or 0,
+            remarks=row["remarks"],
+        )
+
+
+@dataclass
+class PurchaseOrderItemProduction:
+    """What the supplier has made against one design of one purchase order
+    line - a PO orders by product, and the design split comes from the linked
+    proforma invoice's packing list, so the key is the pair. `status`
+    is set by hand - it is a statement about the supplier's floor, not
+    something derived from the batches, which may legitimately lag behind it
+    (Ready before every batch is keyed in) or run ahead of it (a trial batch
+    on a line still Pending). produced_boxes is derived, never stored."""
+    purchase_order_item_id: int
+    design_id: Optional[int] = None
+    design_name: Optional[str] = None
+    status: str = "pending"
+    updated_by: Optional[int] = None
+    updated_by_name: Optional[str] = None  # populated by joined queries only
+    updated_at: Optional[str] = None
+    batches: List[PurchaseOrderItemBatch] = field(default_factory=list)
+
+    @property
+    def produced_boxes(self) -> float:
+        return sum(b.quantity_boxes or 0 for b in self.batches)
+
+    @staticmethod
+    def from_row(row) -> "PurchaseOrderItemProduction":
+        return PurchaseOrderItemProduction(
+            purchase_order_item_id=row["purchase_order_item_id"],
+            design_id=row["design_id"],
+            design_name=row["design_name"],
+            status=row["status"] or "pending",
+            updated_by=row["updated_by"],
+            updated_by_name=row["updated_by_name"] if "updated_by_name" in row.keys() else None,
+            updated_at=row["updated_at"],
         )
 
 
@@ -3722,6 +3794,411 @@ class LoadingPlanning:
             created_by_name=row["created_by_name"] if "created_by_name" in keys else None,
             item_count=row["item_count"] if "item_count" in keys else None,
             pallet_count=row["pallet_count"] if "pallet_count" in keys else None,
+        )
+
+
+@dataclass
+class PackingPlanningItem:
+    """One produced BATCH on a Packing Planning, and how it packs.
+
+    A batch, not a design: a design is routinely fired in several batches on
+    different days - ATLANTA LIGHT GREY came off as 200 on the 27th under
+    batch 102 and 117 on the 28th under 103 - and a pallet is packed out of
+    one of them, so the batch number and its manufacturing date have to ride
+    on the line that gets packed.
+
+    Everything the sheet's right-hand columns show is derived here rather
+    than stored: `boxes_per_unit` (32 for a pallet of tiles, 30 for a carton
+    of hardware) is the only input, and it comes off product_pallet_types."""
+    id: Optional[int]
+    packing_planning_id: Optional[int]
+    sr_no: int
+    product_name: str
+    proforma_invoice_id: Optional[int] = None
+    purchase_order_id: Optional[int] = None
+    po_number: Optional[str] = None
+    purchase_order_item_id: Optional[int] = None
+    product_id: Optional[int] = None
+    design_id: Optional[int] = None
+    design_name: Optional[str] = None
+    batch_number: Optional[str] = None
+    production_date: Optional[str] = None
+    ready_quantity: float = 0
+    quantity_unit: str = "BOX"
+    packing_type_id: Optional[int] = None
+    packing_type_name: Optional[str] = None
+    packing_unit_label: str = "PLT"
+    boxes_per_unit: Optional[float] = None
+    actual_packing: int = 0
+    packing_no_start: Optional[int] = None
+
+    @property
+    def label(self) -> str:
+        """How the line names itself in the manual-packing picker."""
+        base = f"{self.product_name} - {self.design_name}" if self.design_name else self.product_name
+        return f"{base} [{self.batch_number}]" if self.batch_number else base
+
+    @property
+    def as_per_pl_packing(self) -> float:
+        """AS PER PL PACKING: the decimal number of units the ready quantity
+        makes - 317 boxes at 32/pallet is 9.91 PLT. This is the figure
+        packing_list_items.pallets has always carried, and the reason this
+        document exists: 9.91 pallets is not a thing anyone can ship.
+
+        Rounded HALF UP, not with round()'s banker's rounding, because this
+        column is read against a spreadsheet that rounds the other way: 100
+        boxes at 32 is 3.125, which the floor prints as 3.13, and a display
+        figure that disagrees with the paper it is checked against is worse
+        than useless. Nothing is computed from it - the packed quantity comes
+        off actual_packing - so the rounding is presentational only."""
+        if not self.boxes_per_unit:
+            return 0.0
+        exact = (self.ready_quantity or 0) / self.boxes_per_unit
+        return math.floor(exact * 100 + 0.5) / 100 if exact >= 0 else -(math.floor(-exact * 100 + 0.5) / 100)
+
+    @property
+    def packed_quantity(self) -> float:
+        """QTY: what the whole units actually hold - 9 x 32 = 288."""
+        return round((self.actual_packing or 0) * (self.boxes_per_unit or 0), 3)
+
+    @property
+    def remain_quantity(self) -> float:
+        """What is left for the manual table. 0 when the batch divides
+        exactly (160 at 32 is five pallets and nothing over), in which case
+        the line never appears down there at all."""
+        return round((self.ready_quantity or 0) - self.packed_quantity, 3)
+
+    @property
+    def over_packed(self) -> bool:
+        """Packing more than was produced - warned about, never blocked."""
+        return self.remain_quantity < -0.001
+
+    @staticmethod
+    def from_row(row) -> "PackingPlanningItem":
+        return PackingPlanningItem(
+            id=row["id"],
+            packing_planning_id=row["packing_planning_id"],
+            sr_no=row["sr_no"],
+            product_name=row["product_name"],
+            proforma_invoice_id=row["proforma_invoice_id"],
+            purchase_order_id=row["purchase_order_id"],
+            po_number=row["po_number"],
+            purchase_order_item_id=row["purchase_order_item_id"],
+            product_id=row["product_id"],
+            design_id=row["design_id"],
+            design_name=row["design_name"],
+            batch_number=row["batch_number"],
+            production_date=row["production_date"],
+            ready_quantity=row["ready_quantity"] or 0,
+            quantity_unit=row["quantity_unit"] or "BOX",
+            packing_type_id=row["packing_type_id"],
+            packing_type_name=row["packing_type_name"],
+            packing_unit_label=row["packing_unit_label"] or "PLT",
+            boxes_per_unit=row["boxes_per_unit"],
+            actual_packing=row["actual_packing"] or 0,
+            packing_no_start=row["packing_no_start"],
+        )
+
+
+@dataclass
+class PackingPlanningManualUnit:
+    """One pallet or carton packed by hand out of the leftovers.
+
+    The auto rows each pack a single batch, because a full pallet of one
+    design is what a machine's output naturally makes. What is left over
+    does not divide that way - ARKOSE leaves 29 boxes and ATLANTA leaves 8,
+    and whether those two share a pallet is exactly the judgement call no
+    rule can make - so a manual unit holds any mix, which is why `contents`
+    is a list.
+
+    Its `unit_no` carries on the same sequence the batch rows use, so a
+    pallet number is unique across the document however it was packed."""
+    id: Optional[int]
+    packing_planning_id: Optional[int]
+    unit_no: int
+    packing_type_id: Optional[int] = None
+    packing_type_name: Optional[str] = None
+    packing_unit_label: str = "PLT"
+    capacity_boxes: Optional[float] = None
+    remarks: Optional[str] = None
+    contents: List[dict] = field(default_factory=list)  # [{item_sr_no, quantity_boxes}]
+
+    @property
+    def packed_boxes(self) -> float:
+        return round(sum((c.get("quantity_boxes") or 0) for c in self.contents), 3)
+
+    @property
+    def over_capacity(self) -> bool:
+        return bool(self.capacity_boxes) and self.packed_boxes > self.capacity_boxes
+
+    @staticmethod
+    def from_row(row) -> "PackingPlanningManualUnit":
+        return PackingPlanningManualUnit(
+            id=row["id"],
+            packing_planning_id=row["packing_planning_id"],
+            unit_no=row["unit_no"],
+            packing_type_id=row["packing_type_id"],
+            packing_type_name=row["packing_type_name"],
+            packing_unit_label=row["packing_unit_label"] or "PLT",
+            capacity_boxes=row["capacity_boxes"],
+            remarks=row["remarks"],
+        )
+
+
+@dataclass
+class PackingPlanning:
+    """The PACKING PLANNING document: how what has actually been produced
+    breaks into numbered pallets and cartons, and what is left over.
+
+    The step before Loading Planning. A loading plan says which goods go in
+    which container; this says what there is to load in the first place -
+    the purchase order's Production Status card knows the batches, and
+    product_pallet_types knows a pallet takes 32 boxes, but nothing put the
+    two together and said "317 ready is nine full pallets and 29 boxes
+    somebody has to pack by hand".
+
+    Only the batch rows are stored. The PACKING REMAIN BY MANUAL table is
+    derived from them (`remain_rows`) rather than kept alongside, because
+    two stored halves would drift apart the first time an actual packing
+    figure was edited."""
+    id: Optional[int]
+    company_id: int
+    created_by: int
+    packing_planning_number: str
+    packing_planning_date: str
+    remarks: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    created_by_name: Optional[str] = None  # populated by joined queries only
+    item_count: Optional[int] = None  # list-view only
+    unit_count: Optional[int] = None  # list-view only
+    proforma_invoice_ids: List[int] = field(default_factory=list)
+    proforma_invoice_numbers: List[str] = field(default_factory=list)
+    items: List[PackingPlanningItem] = field(default_factory=list)
+    manual_units: List[PackingPlanningManualUnit] = field(default_factory=list)
+
+    @property
+    def items_by_sr(self) -> dict:
+        return {i.sr_no: i for i in self.items}
+
+    @property
+    def packing_numbers(self) -> dict:
+        """sr_no -> (start, end) for the PACKING NO START FROM / END NUMBER
+        columns: a running counter down the document, so row 1's nine
+        pallets are 1-9 and row 2's six are 10-15.
+
+        A row with `packing_no_start` set PINS itself there and the counter
+        carries on from ITS end, which is how a plan survives someone
+        renumbering a pallet mid-sheet. The spreadsheet this replaces had no
+        such rule, which is why its rows 8-10 silently reused 41-46 - numbers
+        rows 6 and 7 had already taken.
+
+        A row that packs nothing gets (None, None): it has no pallets to
+        number, and must not consume one either."""
+        out = {}
+        counter = 1
+        for item in self.items:
+            if item.packing_no_start:
+                counter = item.packing_no_start
+            count = item.actual_packing or 0
+            if count <= 0:
+                out[item.sr_no] = (None, None)
+                continue
+            out[item.sr_no] = (counter, counter + count - 1)
+            counter += count
+        return out
+
+    @property
+    def next_packing_no(self) -> int:
+        """The first free number: what a new manual unit takes. Counted off
+        both halves of the document, since they share one sequence."""
+        used = [end for _, end in self.packing_numbers.values() if end]
+        used += [u.unit_no for u in self.manual_units if u.unit_no]
+        return (max(used) + 1) if used else 1
+
+    @property
+    def duplicate_packing_numbers(self) -> List[int]:
+        """Numbers used twice across the whole document - pinning a start
+        number by hand can collide with a range already handed out."""
+        seen, dupes = set(), set()
+        for start, end in self.packing_numbers.values():
+            if not start:
+                continue
+            for n in range(start, end + 1):
+                (dupes if n in seen else seen).add(n)
+        for unit in self.manual_units:
+            (dupes if unit.unit_no in seen else seen).add(unit.unit_no)
+        return sorted(dupes)
+
+    @property
+    def allocated_by_sr(self) -> dict:
+        """sr_no -> how much of that batch's leftover the manual units hold."""
+        out = {i.sr_no: 0.0 for i in self.items}
+        for unit in self.manual_units:
+            for row in unit.contents:
+                sr = row.get("item_sr_no")
+                if sr in out:
+                    out[sr] += row.get("quantity_boxes") or 0
+        return {sr: round(v, 3) for sr, v in out.items()}
+
+    @property
+    def remain_rows(self) -> List[dict]:
+        """The PACKING REMAIN BY MANUAL table: every batch with something
+        left after its whole units were taken out, renumbered 1..n in its
+        own right. A batch that divided exactly is simply absent - which is
+        why the source sheet's twelve auto rows produce eleven manual ones,
+        batch 107's 160 boxes being exactly five pallets."""
+        allocated = self.allocated_by_sr
+        rows = []
+        for item in self.items:
+            remain = item.remain_quantity
+            if remain <= 0.001:
+                continue
+            done = allocated.get(item.sr_no, 0.0)
+            rows.append({
+                "sr_no": len(rows) + 1,
+                "item_sr_no": item.sr_no,
+                "product_name": item.product_name,
+                "design_name": item.design_name,
+                "batch_number": item.batch_number,
+                "production_date": item.production_date,
+                "quantity": remain,
+                "quantity_unit": item.quantity_unit,
+                "allocated": done,
+                "left": round(remain - done, 3),
+                "unit_nos": sorted({u.unit_no for u in self.manual_units
+                                    for c in u.contents if c.get("item_sr_no") == item.sr_no}),
+            })
+        return rows
+
+    @property
+    def pallet_rows(self) -> List[dict]:
+        """The PALLET PACKING PLANNING sheet, as one continuous list: an
+        AUTO row is a single batch with a packing-number RANGE ("1 TO 9"),
+        a MANUAL row is one hand-packed unit built from several batches'
+        leftovers with a single packing number ("54") and one line per
+        batch it holds. Both halves share one SR NO sequence and one
+        packing-number sequence, because that is how the sheet is read on
+        the floor - a pallet number is unique however it was packed.
+
+        A row with nothing packed prints nothing: there is no pallet to
+        list. `lines` is always non-empty for a row that IS printed - an
+        auto row has exactly one, a manual row one per batch it draws from."""
+        numbers = self.packing_numbers
+        by_sr = self.items_by_sr
+        rows: List[dict] = []
+
+        for item in self.items:
+            start, end = numbers.get(item.sr_no) or (None, None)
+            if not start:
+                continue
+            rows.append({
+                "sr_no": len(rows) + 1,
+                "actual_packing": item.actual_packing,
+                "packing_unit_label": item.packing_unit_label,
+                "packing_no": f"{start} TO {end}" if end > start else str(start),
+                "lines": [{
+                    "product_name": item.product_name, "design_name": item.design_name,
+                    "batch_number": item.batch_number, "production_date": item.production_date,
+                    "quantity": item.packed_quantity, "quantity_unit": item.quantity_unit,
+                }],
+            })
+
+        for unit in self.manual_units:
+            lines = []
+            for content in unit.contents:
+                src = by_sr.get(content.get("item_sr_no"))
+                lines.append({
+                    "product_name": src.product_name if src else None,
+                    "design_name": src.design_name if src else None,
+                    "batch_number": src.batch_number if src else None,
+                    "production_date": src.production_date if src else None,
+                    "quantity": content.get("quantity_boxes") or 0,
+                    "quantity_unit": src.quantity_unit if src else "BOX",
+                })
+            rows.append({
+                "sr_no": len(rows) + 1,
+                "actual_packing": 1,
+                "packing_unit_label": unit.packing_unit_label,
+                "packing_no": str(unit.unit_no),
+                "lines": lines or [{"product_name": "(empty)", "design_name": None,
+                                     "batch_number": None, "production_date": None,
+                                     "quantity": 0, "quantity_unit": ""}],
+            })
+        return rows
+
+    @property
+    def total_units_by_label(self) -> dict:
+        """packing_unit_label -> how many numbered pallets/cartons print
+        under it, across both halves - what the sheet's footer totals. Kept
+        apart from `total_units` (a flat count, used by the warnings check)
+        because a document mixing PLT and CTN can't sum those into one
+        number and still mean anything printed."""
+        out: dict = {}
+        for item in self.items:
+            if item.actual_packing:
+                out[item.packing_unit_label] = out.get(item.packing_unit_label, 0) + item.actual_packing
+        for unit in self.manual_units:
+            out[unit.packing_unit_label] = out.get(unit.packing_unit_label, 0) + 1
+        return out
+
+    @property
+    def total_quantity_by_unit(self) -> dict:
+        """quantity_unit -> total boxes/pieces actually printed on
+        `pallet_rows` - the auto rows' packed_quantity plus what the manual
+        units hold, split by unit for the same reason total_units_by_label
+        is."""
+        out: dict = {}
+        for item in self.items:
+            if item.actual_packing:
+                out[item.quantity_unit] = round(out.get(item.quantity_unit, 0) + item.packed_quantity, 3)
+        by_sr = self.items_by_sr
+        for unit in self.manual_units:
+            for content in unit.contents:
+                src = by_sr.get(content.get("item_sr_no"))
+                key = src.quantity_unit if src else "BOX"
+                out[key] = round(out.get(key, 0) + (content.get("quantity_boxes") or 0), 3)
+        return out
+
+    @property
+    def total_ready(self) -> float:
+        return round(sum((i.ready_quantity or 0) for i in self.items), 3)
+
+    @property
+    def total_packed(self) -> float:
+        return round(sum(i.packed_quantity for i in self.items), 3)
+
+    @property
+    def total_remain(self) -> float:
+        return round(sum(max(i.remain_quantity, 0) for i in self.items), 3)
+
+    @property
+    def total_units(self) -> int:
+        """Every numbered pallet/carton the document plans, both halves."""
+        return sum((i.actual_packing or 0) for i in self.items) + len(self.manual_units)
+
+    @property
+    def is_fully_packed(self) -> bool:
+        """Every leftover accounted for by a manual unit. A false here is a
+        warning on save, never a refusal - the document is worked on across
+        sittings, the same call LoadingPlanning makes about its own."""
+        return bool(self.items) and all(abs(r["left"]) < 0.001 for r in self.remain_rows)
+
+    @staticmethod
+    def from_row(row) -> "PackingPlanning":
+        keys = row.keys()
+        return PackingPlanning(
+            id=row["id"],
+            company_id=row["company_id"],
+            created_by=row["created_by"],
+            packing_planning_number=row["packing_planning_number"],
+            packing_planning_date=row["packing_planning_date"],
+            remarks=row["remarks"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            created_by_name=row["created_by_name"] if "created_by_name" in keys else None,
+            item_count=row["item_count"] if "item_count" in keys else None,
+            unit_count=row["unit_count"] if "unit_count" in keys else None,
         )
 
 

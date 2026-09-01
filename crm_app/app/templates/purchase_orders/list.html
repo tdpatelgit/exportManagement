@@ -23,6 +23,7 @@
           <th>Seller</th>
           <th>From proforma</th>
           <th>Created by</th>
+          <th>Production status</th>
           <th class="num">Order value</th>
           <th></th>
         </tr>
@@ -35,6 +36,16 @@
           <td><strong>{{ po.seller_name }}</strong></td>
           <td class="text-sm">{{ po.proforma_invoice_number or '—' }}</td>
           <td class="text-sm">{{ po.created_by_name }}</td>
+          {# n/m of this order's designs marked Ready on its own Production
+             Status page - see purchase_orders/production.html. #}
+          <td class="text-sm">
+            {% set progress = production_summary.get(po.id) %}
+            {% if progress %}
+            <a href="{{ url_for('purchase_orders.purchase_order_production', purchase_order_id=po.id) }}">
+              {{ progress.ready }}/{{ progress.total }} ready
+            </a>
+            {% else %}—{% endif %}
+          </td>
           <td class="num">{{ po.currency_prefix }} {{ '{:,.2f}'.format(po.order_value_inr) }}</td>
           <td><a href="{{ url_for('purchase_orders.view_purchase_order', purchase_order_id=po.id) }}" class="text-sm">Open →</a></td>
         </tr>

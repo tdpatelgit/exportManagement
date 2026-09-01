@@ -34,25 +34,28 @@ from app.models import (
     LEAD_STATUSES, CLIENT_STATUSES, CLIENT_STATUS_ADVANCE_ON, PRODUCT_UNITS, Category, Product,
     ProductPalletType, ProductFolder,
     Design, Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
-    PurchaseOrder, PurchaseOrderItem, JobWork, JobWorkItem, JobWorkProduct, JobOut, JobIn, JobInItem,
+    PurchaseOrder, PurchaseOrderItem, PurchaseOrderItemBatch, PurchaseOrderItemProduction, JobWork, JobWorkItem, JobWorkProduct, JobOut, JobIn, JobInItem,
     PurchaseInvoice, PurchaseInvoiceItem, PackingList, PackingListItem,
     DocumentVersion, PURCHASE_TYPES, DEFAULT_PURCHASE_TYPE, EXEMPTION_IGST_PERCENT,
+    PRODUCTION_STATUSES, DEFAULT_PRODUCTION_STATUS,
     PROFORMA_STATUSES, PROFORMA_STATUS_DRAFT, PROFORMA_STATUS_CONFIRMED,
     ExportInvoice, ExportInvoiceItem, EXPORT_TAX_MODES, EXPORT_TAX_MODE_IGST, EXPORT_TAX_MODE_LUT,
     EXPORT_LOADING_TYPES, EXPORT_LOADING_SELF_SEALING,
     ExportPackingList, ExportPackingListItem, ExportPackingListItemDesign, ExportDesignsPackingList,
     LoadingPlanning, LoadingPlanningItem, LoadingPlanningCarton, LoadingPlanningPallet,
+    PackingPlanning, PackingPlanningItem, PackingPlanningManualUnit,
 )
 from app.repositories import (
     TenantRepository, UserRepositoryBase, LeadRepositoryBase, PartyRepositoryBase, SupplierRepositoryBase,
     TransporterRepositoryBase,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
     CategoryRepository, ProductRepository, ProductPalletTypeRepository, ProductFolderRepository, DesignRepository,
-    QuotationRepository, ProformaInvoiceRepository, PurchaseOrderRepository, JobWorkRepository,
+    QuotationRepository, ProformaInvoiceRepository, PurchaseOrderRepository,
+    PurchaseOrderProductionRepository, JobWorkRepository,
     JobOutRepository, JobInRepository,
     PurchaseInvoiceRepository,
     ExportInvoiceRepository, ExportPackingListRepository,
-    PackingListRepository, LoadingPlanningRepository, DocumentVersionRepository, PermitRepository, BookingDetailRepository, MiscCurrencyRepository, MiscNatureOfContractRepository,
+    PackingListRepository, LoadingPlanningRepository, PackingPlanningRepository, DocumentVersionRepository, PermitRepository, BookingDetailRepository, MiscCurrencyRepository, MiscNatureOfContractRepository,
     MiscPortOfLoadingRepository, MiscContainerTypeRepository, MiscHsnCodeRepository, MiscCountryRepository, MiscUnitRepository,
 )
 from app.database import Database, SCHEMA_VERSION
@@ -3464,6 +3467,147 @@ class PurchaseOrderService:
             return None
         quotation = self.quotation_repo.get_by_id(invoice.quotation_id)
         return quotation.lead_id if quotation else None
+
+
+# ============================================================
+# PURCHASE ORDER PRODUCTION STATUS
+# ============================================================
+class PurchaseOrderProductionService:
+    """The Production Status card on a purchase order's preview page: per
+    DESIGN a hand-set status, plus the batches it was actually produced in.
+    Screen-only - none of this touches the printed purchase order or the
+    combined document.
+
+    A purchase order orders by PRODUCT; which designs those boxes are is only
+    ever settled on the linked proforma invoice's packing list - the same
+    breakdown the sheet's own PACKING DETAILS block prints (see
+    purchase_orders._packing_details_rows, whose rows this takes as
+    `design_rows`). A product with no such breakdown keeps one design-less
+    row, so a hand-typed line still gets a status."""
+
+    def __init__(self, production_repo: PurchaseOrderProductionRepository,
+                 purchase_order_service: PurchaseOrderService):
+        self.production_repo = production_repo
+        # Used for its company scoping: every read and write here goes
+        # through its get(), which 404s on another company's order.
+        self.purchase_order_service = purchase_order_service
+
+    # ---- reads --------------------------------------------------
+    @staticmethod
+    def _product_key(product_id, product_name):
+        """Same key _packing_details_rows matches PO lines to packing list
+        lines on: the catalog id when there is one, else the typed name."""
+        return product_id or (product_name or "").strip().upper()
+
+    def _designs_for_item(self, item, design_rows) -> List[dict]:
+        """The designs of one PO line, in packing-list order, each with the
+        boxes packed for it. Several packing list lines can name the same
+        design (one per pallet split), so they are merged."""
+        wanted = self._product_key(item.product_id, item.product_name)
+        merged = {}
+        for row in design_rows or []:
+            if self._product_key(row.product_id, row.product_name) != wanted:
+                continue
+            if not row.design_id and not row.design_name:
+                continue
+            key = row.design_id or (row.design_name or "").strip().upper()
+            entry = merged.setdefault(key, {"design_id": row.design_id,
+                                            "design_name": row.design_name, "boxes": 0.0})
+            entry["boxes"] += row.quantity_boxes or 0
+        return list(merged.values())
+
+    def get_rows(self, purchase_order_id: int, company_id: int, design_rows=None) -> List[dict]:
+        """One display row per (line, design), in the order the sheet prints
+        its lines: the design being made, the boxes ordered of it, the
+        hand-set status, and the batches under it with their produced total.
+        `design_rows` is the packing-list breakdown; without it every line
+        falls back to a single design-less row carrying the whole quantity."""
+        purchase_order = self.purchase_order_service.get(purchase_order_id, company_id)
+        production = self.production_repo.map_for_purchase_order(purchase_order_id)
+        rows = []
+        for item in purchase_order.items:
+            designs = self._designs_for_item(item, design_rows)
+            if not designs:
+                designs = [{"design_id": None, "design_name": item.design_name,
+                            "boxes": item.quantity_boxes or 0}]
+            for design in designs:
+                key = (item.id,) + self.production_repo.design_key(
+                    design["design_id"], design["design_name"])
+                record = production.get(key) or PurchaseOrderItemProduction(
+                    purchase_order_item_id=item.id, design_id=design["design_id"],
+                    design_name=design["design_name"])
+                rows.append({
+                    "item_id": item.id,
+                    "design_id": design["design_id"],
+                    # design_name is the design's IDENTITY - half of the key a
+                    # row is stored under, and empty for a line with no design
+                    # breakdown at all. design_label is only what to print, so
+                    # such a line still shows something (its product's name).
+                    # Posting the label back as the identity would file the
+                    # save under a key the next read can't find.
+                    "design_name": design["design_name"],
+                    "design_label": design["design_name"] or item.product_name,
+                    "product_name": item.product_name,
+                    "ordered_boxes": design["boxes"],
+                    "quantity_unit": item.quantity_unit,
+                    "status": record.status,
+                    "status_label": PRODUCTION_STATUSES.get(record.status, record.status),
+                    "batches": record.batches,
+                    "produced_boxes": record.produced_boxes,
+                    "updated_by_name": record.updated_by_name,
+                    "updated_at": record.updated_at,
+                })
+        return rows
+
+    def summary_map(self, company_id: int) -> dict:
+        """purchase_order_id -> {'ready': n, 'total': n} for the list page."""
+        return self.production_repo.summary_map_for_company(company_id)
+
+    # ---- writes -------------------------------------------------
+    def save_row(self, purchase_order_id: int, purchase_order_item_id: int,
+                 design_id: Optional[int], design_name: Optional[str], status: str,
+                 batches: List[dict], company_id: int, user_id: Optional[int] = None) -> None:
+        """Saves one design's status and its full set of batches. `batches`
+        is the raw form data - dicts of batch_number/production_date/
+        quantity_boxes/remarks - which is normalised here."""
+        purchase_order = self.purchase_order_service.get(purchase_order_id, company_id)
+        if purchase_order_item_id not in {item.id for item in purchase_order.items}:
+            raise NotFoundError("That line is not part of this purchase order.")
+        status = (status or DEFAULT_PRODUCTION_STATUS).strip()
+        if status not in PRODUCTION_STATUSES:
+            raise ValidationError(f"'{status}' is not a valid production status.")
+        self.production_repo.save_for_design(
+            purchase_order_item_id, design_id, (design_name or "").strip() or None,
+            status, self._clean_batches(batches), user_id,
+        )
+
+    @staticmethod
+    def _clean_batches(batches: List[dict]) -> List[PurchaseOrderItemBatch]:
+        """Drops the rows the user left entirely blank (the form always
+        carries a spare one) and coerces the rest. A quantity that isn't a
+        number is a typo worth reporting, not something to silently zero."""
+        cleaned = []
+        for sr_no, raw in enumerate(batches or [], start=1):
+            batch_number = (raw.get("batch_number") or "").strip()
+            production_date = (raw.get("production_date") or "").strip()
+            remarks = (raw.get("remarks") or "").strip()
+            quantity_raw = str(raw.get("quantity_boxes") or "").strip()
+            if not (batch_number or production_date or remarks or quantity_raw):
+                continue
+            try:
+                quantity = float(quantity_raw) if quantity_raw else 0.0
+            except ValueError:
+                raise ValidationError(f"Batch quantity '{quantity_raw}' is not a number.")
+            if quantity < 0:
+                raise ValidationError("Batch quantity cannot be negative.")
+            cleaned.append(PurchaseOrderItemBatch(
+                id=None, purchase_order_item_id=None, sr_no=sr_no, design_id=None,
+                batch_number=batch_number or None,
+                production_date=production_date or None,
+                quantity_boxes=quantity,
+                remarks=remarks or None,
+            ))
+        return cleaned
 
 
 # ============================================================
@@ -8048,6 +8192,407 @@ class ProformaFulfilmentService:
                 "has_packing_list": has_packing_list,
             })
         return reminders
+
+
+# ============================================================
+# PACKING PLANNING SERVICE
+# ============================================================
+class PackingPlanningService:
+    """The document that works out how what has actually been PRODUCED
+    breaks into whole numbered pallets and cartons - the step before a
+    loading plan decides which container they go in.
+
+    Two things here are worth stating outright:
+
+    * loading is two explicit steps, not one hop. `purchase_orders_for_proformas`
+      lists the purchase orders the ticked PIs pulled in - not their goods yet -
+      so a run that doesn't want every one of them (a supplier not ready, a PO
+      already packed elsewhere) can narrow the set before
+      `build_prefill_from_purchase_orders` commits to loading anything. Goods
+      come in per BATCH, not per design, one level past where
+      LoadingPlanningService stops: a batch number and a manufacturing date
+      exist nowhere else in the app, and they have to ride on the line that
+      gets packed because a pallet is packed out of one batch. ATLANTA LIGHT
+      GREY is one design and two lines here - 200 boxes under batch 102 on the
+      27th, 117 under 103 on the 28th - and packing them as one 317 would put
+      two firings on one pallet.
+
+    * every packing check is a WARNING, never a ValidationError, for the same
+      reason LoadingPlanningService gives about its own: batches are keyed in
+      as the supplier reports them and the leftovers are grouped days later,
+      so a half-planned document must save."""
+
+    def __init__(self, packing_planning_repo: PackingPlanningRepository,
+                 proforma_invoice_repo: ProformaInvoiceRepository,
+                 purchase_order_repo: PurchaseOrderRepository,
+                 production_repo: PurchaseOrderProductionRepository,
+                 product_repo: ProductRepository,
+                 pallet_type_repo: ProductPalletTypeRepository):
+        self.packing_planning_repo = packing_planning_repo
+        self.proforma_invoice_repo = proforma_invoice_repo
+        self.purchase_order_repo = purchase_order_repo
+        self.production_repo = production_repo
+        self.product_repo = product_repo
+        self.pallet_type_repo = pallet_type_repo
+
+    # ---- reads --------------------------------------------------
+    def get(self, packing_planning_id: int, company_id: int) -> PackingPlanning:
+        plan = self.packing_planning_repo.get_by_id(packing_planning_id)
+        if not plan or plan.company_id != company_id:
+            # 404, not 403 - don't reveal that another company's plan exists.
+            raise NotFoundError(f"Packing planning #{packing_planning_id} not found.")
+        return plan
+
+    def list_all(self, company_id: int) -> List[PackingPlanning]:
+        return self.packing_planning_repo.list_all(company_id)
+
+    def next_number(self, company_id: int, planning_date: str) -> str:
+        return self.packing_planning_repo.next_number(company_id, planning_date)
+
+    # ---- loading batches from the selected proforma invoices ------------
+    def _load_proformas(self, proforma_ids: list, company_id: int) -> List[ProformaInvoice]:
+        """Load only the proforma invoices that belong to this company - a
+        crafted id in the request can never pull another company's PI in."""
+        result = []
+        for pid in dict.fromkeys(proforma_ids or []):
+            try:
+                pi = self.proforma_invoice_repo.get_by_id(int(pid))
+            except (TypeError, ValueError):
+                continue
+            if pi and pi.company_id == company_id:
+                result.append(pi)
+        return result
+
+    def _items_for_purchase_order(self, po: PurchaseOrder) -> List[PackingPlanningItem]:
+        """One line per produced BATCH on this order, `sr_no` left at 0 for
+        the caller to number once every order's lines are merged.
+
+        A purchase order line is a product; its production rows are the
+        designs of that product the supplier is making (settled on the
+        linked PI's packing list); and under each design are the batches it
+        was fired in. Only the last of those carries a batch number and a
+        manufacturing date, which is why this document loads at that depth
+        and not the design level a loading plan is happy with.
+
+        Batches with no quantity are skipped - the production form always
+        carries a spare blank row, and one that was only ever used to type a
+        remark has nothing to pack."""
+        items: List[PackingPlanningItem] = []
+        production = self.production_repo.map_for_purchase_order(po.id)
+        for item in po.items:
+            for record in production.values():
+                if record.purchase_order_item_id != item.id:
+                    continue
+                for batch in record.batches:
+                    if (batch.quantity_boxes or 0) <= 0:
+                        continue
+                    items.append(PackingPlanningItem(
+                        id=None, packing_planning_id=None, sr_no=0,
+                        product_name=item.product_name,
+                        proforma_invoice_id=po.proforma_invoice_id, purchase_order_id=po.id,
+                        po_number=po.po_number, purchase_order_item_id=item.id,
+                        product_id=item.product_id,
+                        design_id=record.design_id, design_name=record.design_name,
+                        batch_number=batch.batch_number,
+                        production_date=batch.production_date,
+                        ready_quantity=batch.quantity_boxes or 0,
+                        quantity_unit=item.quantity_unit or "BOX",
+                    ))
+        return items
+
+    def purchase_orders_for_proformas(self, proforma_ids: list, company_id: int) -> List[dict]:
+        """Step 1 of loading: every purchase order the ticked PIs pulled in,
+        each with a summary of what it would add - not yet the batch lines
+        themselves. Lets the operator narrow to just the orders this packing
+        run actually wants (a supplier not ready yet, a PO already packed in
+        an earlier plan) before step 2 commits to loading anything.
+
+        A PO's `proforma_invoice_id` is a single FK, so one order can never
+        surface twice even when several selected PIs are checked."""
+        proformas = self._load_proformas(proforma_ids, company_id)
+
+        rows = []
+        for pi in proformas:
+            for po_header in self.purchase_order_repo.list_for_proforma(pi.id):
+                if po_header.company_id != company_id:
+                    continue
+                # list_for_proforma returns header rows only, so the order
+                # has to be re-fetched to see its lines and match a batch's
+                # unit - the same reason build_prefill_from_purchase_orders
+                # re-fetches its own.
+                po = self.purchase_order_repo.get_by_id(po_header.id) or po_header
+                production = self.production_repo.map_for_purchase_order(po.id)
+                batch_count = 0
+                ready_totals: dict = {}
+                for record in production.values():
+                    unit = None
+                    for item in po.items:
+                        if item.id == record.purchase_order_item_id:
+                            unit = item.quantity_unit or "BOX"
+                            break
+                    for batch in record.batches:
+                        qty = batch.quantity_boxes or 0
+                        if qty <= 0:
+                            continue
+                        batch_count += 1
+                        ready_totals[unit or "BOX"] = round(ready_totals.get(unit or "BOX", 0) + qty, 3)
+                rows.append({
+                    "id": po.id, "po_number": po.po_number, "seller_name": po.seller_name,
+                    "proforma_invoice_id": pi.id, "proforma_invoice_number": po.proforma_invoice_number,
+                    "batch_count": batch_count, "ready_totals": ready_totals,
+                })
+        return rows
+
+    def build_prefill_from_purchase_orders(self, purchase_order_ids: list, company_id: int) -> dict:
+        """Step 2 of loading: the batch lines of exactly the purchase orders
+        ticked in step 1's list, merged and renumbered as one document."""
+        pos = []
+        for poid in dict.fromkeys(purchase_order_ids or []):
+            try:
+                po = self.purchase_order_repo.get_by_id(int(poid))
+            except (TypeError, ValueError):
+                continue
+            # A crafted id can never pull another company's order in - same
+            # guard _load_proformas uses for PIs.
+            if po and po.company_id == company_id:
+                pos.append(po)
+
+        items: List[PackingPlanningItem] = []
+        for po in pos:
+            items.extend(self._items_for_purchase_order(po))
+        for i, item in enumerate(items, start=1):
+            item.sr_no = i
+
+        self.auto_fill(company_id, items)
+        return {
+            "items": [dataclasses.asdict(i) for i in items],
+            "packing_types": self.packing_types_for_items(company_id, items),
+        }
+
+    def packing_types_for_items(self, company_id: int, items: List[PackingPlanningItem]) -> dict:
+        """What each row's packing-type dropdown offers, scoped to the
+        products these batches actually mention. Split by unit_kind exactly
+        as Loading Planning's own pickers are: a CTN of 30 pieces and a
+        pallet of 32 boxes are different objects, and the sheet prints which
+        one a row is packing into."""
+        product_ids = [i.product_id for i in items if i.product_id]
+        out: dict = {}
+        for pt in self.pallet_type_repo.list_for_products(company_id, product_ids):
+            bucket = out.setdefault(str(pt.product_id), {"carton": [], "pallet": []})
+            bucket["carton" if pt.is_carton else "pallet"].append({
+                "id": pt.id, "name": pt.name,
+                "boxes_per_pallet": pt.boxes_per_pallet, "weight_kg": pt.weight_kg,
+                "label": "CTN" if pt.is_carton else "PLT",
+            })
+        return out
+
+    # ---- auto-fill --------------------------------------------------
+    def auto_fill(self, company_id: int, items: List[PackingPlanningItem]) -> List[PackingPlanningItem]:
+        """Fill in the four columns nobody should have to work out by hand:
+        the packing type, its capacity, how many WHOLE units the ready
+        quantity makes, and - through the model - what those units hold.
+
+        A product packed in cartons uses its carton type, otherwise its
+        pallet type: the same rule LoadingPlanningService.auto_build_packing
+        picks by, so both documents agree that tiles go 32 to a pallet and
+        hardware 30 to a carton. Rows already carrying a type are left
+        alone, so re-running this can't undo a hand-picked one.
+
+        Only WHOLE units are taken. 317 at 32 is nine, not 9.91 - the 29
+        that are left are the whole point of the second table, and no rule
+        can decide who they share a pallet with."""
+        types = self.packing_types_for_items(company_id, items)
+        for item in items:
+            if not item.packing_type_id and not item.boxes_per_unit:
+                bucket = types.get(str(item.product_id)) or {}
+                chosen = (bucket.get("carton") or bucket.get("pallet") or [None])[0]
+                if chosen:
+                    item.packing_type_id = chosen["id"]
+                    item.packing_type_name = chosen["name"]
+                    item.packing_unit_label = chosen["label"]
+                    item.boxes_per_unit = chosen["boxes_per_pallet"]
+            if item.boxes_per_unit:
+                item.actual_packing = int((item.ready_quantity or 0) // item.boxes_per_unit)
+        return items
+
+    # ---- validation --------------------------------------------------
+    def _build(self, current_user: User, fields: dict,
+               existing: Optional[PackingPlanning] = None) -> PackingPlanning:
+        planning_date = (fields.get("packing_planning_date") or "").strip()
+        if not planning_date:
+            raise ValidationError("Packing planning date is required.")
+        number = existing.packing_planning_number if existing else (
+            (fields.get("packing_planning_number") or "").strip()
+            or self.next_number(current_user.company_id, planning_date)
+        )
+        return PackingPlanning(
+            id=existing.id if existing else None,
+            company_id=current_user.company_id,
+            created_by=existing.created_by if existing else current_user.id,
+            packing_planning_number=number,
+            packing_planning_date=planning_date,
+            remarks=(fields.get("remarks") or "").strip() or None,
+        )
+
+    @staticmethod
+    def _to_float(raw, label: str) -> Optional[float]:
+        text = (str(raw) if raw is not None else "").strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            raise ValidationError(f"{label} must be a number.")
+
+    @staticmethod
+    def _optional_int(raw) -> Optional[int]:
+        text = (str(raw) if raw is not None else "").strip()
+        if not text or text.lower() in ("none", "null"):
+            return None
+        try:
+            return int(float(text))
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _clean_proforma_ids(raw) -> List[int]:
+        out = []
+        for value in raw or []:
+            try:
+                out.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        return list(dict.fromkeys(out))
+
+    def _clean_items(self, raw) -> List[PackingPlanningItem]:
+        items = []
+        for i, r in enumerate(raw or [], start=1):
+            name = (r.get("product_name") or "").strip()
+            if not name:
+                continue
+            actual = self._optional_int(r.get("actual_packing")) or 0
+            items.append(PackingPlanningItem(
+                id=None, packing_planning_id=None, sr_no=i, product_name=name,
+                proforma_invoice_id=self._optional_int(r.get("proforma_invoice_id")),
+                purchase_order_id=self._optional_int(r.get("purchase_order_id")),
+                po_number=(r.get("po_number") or "").strip() or None,
+                purchase_order_item_id=self._optional_int(r.get("purchase_order_item_id")),
+                product_id=self._optional_int(r.get("product_id")),
+                design_id=self._optional_int(r.get("design_id")),
+                design_name=(r.get("design_name") or "").strip() or None,
+                batch_number=(r.get("batch_number") or "").strip() or None,
+                production_date=(r.get("production_date") or "").strip() or None,
+                ready_quantity=self._to_float(r.get("ready_quantity"), "Production ready qty") or 0,
+                quantity_unit=(r.get("quantity_unit") or "BOX").strip() or "BOX",
+                packing_type_id=self._optional_int(r.get("packing_type_id")),
+                packing_type_name=(r.get("packing_type_name") or "").strip() or None,
+                packing_unit_label=(r.get("packing_unit_label") or "PLT").strip() or "PLT",
+                boxes_per_unit=self._to_float(r.get("boxes_per_unit"), "Boxes per unit"),
+                # Negative actual packing is a typo, not a decision to make.
+                actual_packing=max(actual, 0),
+                packing_no_start=self._optional_int(r.get("packing_no_start")),
+            ))
+        return items
+
+    def _clean_manual_units(self, raw) -> List[PackingPlanningManualUnit]:
+        units = []
+        for r in raw or []:
+            no = self._optional_int(r.get("unit_no"))
+            if not no:
+                continue
+            units.append(PackingPlanningManualUnit(
+                id=None, packing_planning_id=None, unit_no=no,
+                packing_type_id=self._optional_int(r.get("packing_type_id")),
+                packing_type_name=(r.get("packing_type_name") or "").strip() or None,
+                packing_unit_label=(r.get("packing_unit_label") or "PLT").strip() or "PLT",
+                capacity_boxes=self._to_float(r.get("capacity_boxes"), "Manual unit: capacity"),
+                remarks=(r.get("remarks") or "").strip() or None,
+                contents=self._clean_contents(r.get("contents")),
+            ))
+        return units
+
+    def _clean_contents(self, raw) -> List[dict]:
+        rows = []
+        for r in raw or []:
+            sr = self._optional_int(r.get("item_sr_no"))
+            qty = self._to_float(r.get("quantity_boxes"), "Packed quantity") or 0
+            if sr and qty > 0:
+                rows.append({"item_sr_no": sr, "quantity_boxes": qty})
+        return rows
+
+    def packing_warnings(self, plan: PackingPlanning) -> List[str]:
+        """Everything that doesn't add up, phrased for the operator - and
+        returned rather than raised, because none of it stops a save.
+
+        Batches are keyed in as the supplier reports them and the leftovers
+        get grouped days later, so refusing an incomplete document would
+        just mean losing the work. Same call LoadingPlanningService makes."""
+        warnings = []
+        for item in plan.items:
+            if item.over_packed:
+                warnings.append(
+                    f"{item.label}: packing {abs(item.remain_quantity):g} "
+                    f"{item.quantity_unit} MORE than was produced."
+                )
+            elif item.ready_quantity and not item.boxes_per_unit:
+                warnings.append(
+                    f"{item.label}: no packing type, so nothing can be worked out for it."
+                )
+        for row in plan.remain_rows:
+            left = row["left"]
+            if left > 0.001:
+                warnings.append(
+                    f"{row['product_name']}"
+                    f"{' - ' + row['design_name'] if row['design_name'] else ''}"
+                    f"{' [' + row['batch_number'] + ']' if row['batch_number'] else ''}: "
+                    f"{left:g} {row['quantity_unit']} still to be packed by hand."
+                )
+            elif left < -0.001:
+                warnings.append(
+                    f"{row['product_name']}: {abs(left):g} {row['quantity_unit']} MORE "
+                    f"packed by hand than is left over."
+                )
+        for unit in plan.manual_units:
+            if unit.over_capacity:
+                warnings.append(
+                    f"{unit.packing_unit_label} {unit.unit_no}: holds {unit.packed_boxes:g} "
+                    f"against a capacity of {unit.capacity_boxes:g}."
+                )
+        dupes = plan.duplicate_packing_numbers
+        if dupes:
+            warnings.append(
+                "Packing number(s) used more than once: "
+                + ", ".join(str(n) for n in dupes[:10])
+                + ("..." if len(dupes) > 10 else "")
+            )
+        return warnings
+
+    # ---- writes --------------------------------------------------
+    def _assemble(self, plan: PackingPlanning, proforma_ids, items, manual_units) -> PackingPlanning:
+        plan.proforma_invoice_ids = self._clean_proforma_ids(proforma_ids)
+        plan.items = self._clean_items(items)
+        plan.manual_units = self._clean_manual_units(manual_units)
+        return plan
+
+    def create(self, current_user: User, fields: dict, proforma_ids: list,
+               items: list, manual_units: list) -> PackingPlanning:
+        plan = self._build(current_user, fields)
+        self._assemble(plan, proforma_ids, items, manual_units)
+        return self.packing_planning_repo.create(plan)
+
+    def update(self, packing_planning_id: int, current_user: User, fields: dict,
+               proforma_ids: list, items: list, manual_units: list) -> PackingPlanning:
+        existing = self.get(packing_planning_id, current_user.company_id)
+        plan = self._build(current_user, fields, existing=existing)
+        self._assemble(plan, proforma_ids, items, manual_units)
+        self.packing_planning_repo.update(packing_planning_id, plan)
+        return self.get(packing_planning_id, current_user.company_id)
+
+    def delete(self, packing_planning_id: int, current_user: User) -> None:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can delete a packing planning.")
+        self.get(packing_planning_id, current_user.company_id)  # 404s if missing/another company's
+        self.packing_planning_repo.delete(packing_planning_id)
 
 
 # ============================================================

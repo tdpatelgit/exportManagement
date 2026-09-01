@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}Production · {{ purchase_order.po_number }}{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Purchase order</div>
+    <h1>Production status</h1>
+    <div class="text-sm text-soft">
+      {{ purchase_order.po_number }} · {{ purchase_order.seller_name }} · {{ purchase_order.po_date }}
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <a href="{{ url_for('purchase_orders.view_purchase_order', purchase_order_id=purchase_order.id) }}"
+       class="btn btn-ghost btn-sm">← Back to purchase order</a>
+  </div>
+</div>
+
+{% if production_rows %}
+{# One design per row. An order can run to fifty containers and well over
+   fifty designs, so this page is built to be worked down a long list: the
+   counts and the filter above the table narrow it to the designs still open,
+   and each design's batches stay folded away until it is being edited. #}
+<div class="card">
+  <div class="card-header">
+    <h3>{{ production_rows | length }} design{{ '' if production_rows | length == 1 else 's' }} on this order</h3>
+    <div class="flex gap-8">
+      {% for key, label in production_statuses.items() %}
+      <span class="stamp {{ status_stamps[key] }}">
+        {{ production_rows | selectattr('status', 'equalto', key) | list | length }} {{ label }}
+      </span>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="form-row" style="margin-bottom:0;">
+    <div class="field">
+      <label for="design-filter">Find a design</label>
+      <input type="search" id="design-filter" placeholder="Design or product name…" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="status-filter">Show</label>
+      <select id="status-filter">
+        <option value="">All statuses</option>
+        {% for key, label in production_statuses.items() %}
+        <option value="{{ key }}">{{ label }} only</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+  <div class="text-sm text-soft" id="filter-count" hidden></div>
+</div>
+
+<div id="production-list">
+  {% for row in production_rows %}
+  {# data-* carries what the filter matches on, so it never has to read into
+     the row's markup. #}
+  <details class="card production-design" id="design-{{ loop.index }}"
+           data-name="{{ (row.design_label ~ ' ' ~ row.product_name) | lower }}"
+           data-status="{{ row.status }}">
+    <summary class="card-header production-design-summary">
+      <div>
+        <strong>{{ row.design_label }}</strong>
+        <div class="text-sm text-soft">{{ row.product_name }}</div>
+      </div>
+      <div class="flex gap-8" style="align-items:center;">
+        <span class="text-sm">
+          {{ '{:,.2f}'.format(row.produced_boxes) }} / {{ '{:,.2f}'.format(row.ordered_boxes) }}
+          <span class="text-soft">{{ row.quantity_unit }}</span>
+        </span>
+        <span class="text-sm text-soft">
+          {{ row.batches | length }} batch{{ '' if row.batches | length == 1 else 'es' }}
+        </span>
+        <span class="stamp {{ status_stamps[row.status] }}">{{ row.status_label }}</span>
+      </div>
+    </summary>
+
+    <form method="POST"
+          action="{{ url_for('purchase_orders.save_production_status', purchase_order_id=purchase_order.id, item_id=row.item_id) }}">
+      {# design_name is posted as the design's IDENTITY (half of the key the
+         row is stored under), never as the printed label. #}
+      <input type="hidden" name="design_id" value="{{ row.design_id or '' }}">
+      <input type="hidden" name="design_name" value="{{ row.design_name or '' }}">
+
+      <div class="form-row">
+        <div class="field" style="max-width:240px;">
+          <label for="status-{{ loop.index }}">Status</label>
+          <select id="status-{{ loop.index }}" name="status">
+            {% for key, label in production_statuses.items() %}
+            <option value="{{ key }}" {{ 'selected' if row.status == key }}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>Ordered</label>
+          <div class="text-sm">
+            {{ '{:,.2f}'.format(row.ordered_boxes) }} {{ row.quantity_unit }}
+            {% if row.updated_by_name %}
+            <span class="text-soft">· last saved by {{ row.updated_by_name }}, {{ row.updated_at | friendly_date }}</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      {# Every batch of this design is posted back on save, so the rows here
+         are the full set - the service replaces them wholesale and drops
+         whichever were left entirely blank. #}
+      <div class="production-batches">
+        {% for batch in row.batches %}
+        <div class="repeatable-row">
+          <div class="field"><label>Batch no.</label><input type="text" name="batch_number" value="{{ batch.batch_number or '' }}"></div>
+          <div class="field"><label>Production date</label><input type="date" name="production_date" value="{{ batch.production_date or '' }}"></div>
+          <div class="field"><label>Quantity ({{ row.quantity_unit }})</label><input type="number" step="any" min="0" name="batch_quantity" value="{{ batch.quantity_boxes }}"></div>
+          <div class="field"><label>Remarks</label><input type="text" name="batch_remarks" value="{{ batch.remarks or '' }}"></div>
+        </div>
+        {% endfor %}
+        <div class="repeatable-row">
+          <div class="field"><label>Batch no.</label><input type="text" name="batch_number"></div>
+          <div class="field"><label>Production date</label><input type="date" name="production_date"></div>
+          <div class="field"><label>Quantity ({{ row.quantity_unit }})</label><input type="number" step="any" min="0" name="batch_quantity"></div>
+          <div class="field"><label>Remarks</label><input type="text" name="batch_remarks"></div>
+        </div>
+      </div>
+
+      <div class="flex gap-8" style="margin-top:8px;">
+        <button type="button" class="btn btn-ghost btn-sm" data-add-batch>＋ Add batch</button>
+        <button type="submit" class="btn btn-primary btn-sm">Save this design</button>
+      </div>
+    </form>
+  </details>
+  {% endfor %}
+</div>
+
+<div class="empty-state" id="no-matches" hidden>No design matches that filter.</div>
+
+{% else %}
+<div class="card">
+  <div class="empty-state">
+    This purchase order has no product lines, so there is nothing to produce yet.
+  </div>
+</div>
+{% endif %}
+
+<script>
+  // "+ Add batch" clones the last (always blank) row of that design's form.
+  document.querySelectorAll('[data-add-batch]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var container = button.closest('form').querySelector('.production-batches');
+      var row = container.lastElementChild.cloneNode(true);
+      row.querySelectorAll('input').forEach(function (input) { input.value = ''; });
+      container.appendChild(row);
+    });
+  });
+
+  // Filtering is client-side: the whole order is already on the page, and a
+  // round trip per keystroke would be slower than hiding rows.
+  (function () {
+    var nameInput = document.getElementById('design-filter');
+    var statusInput = document.getElementById('status-filter');
+    if (!nameInput || !statusInput) return;
+    var designs = Array.prototype.slice.call(document.querySelectorAll('.production-design'));
+    var count = document.getElementById('filter-count');
+    var empty = document.getElementById('no-matches');
+
+    function apply() {
+      var needle = nameInput.value.trim().toLowerCase();
+      var status = statusInput.value;
+      var shown = 0;
+      designs.forEach(function (design) {
+        var matches = (!needle || design.dataset.name.indexOf(needle) !== -1)
+                   && (!status || design.dataset.status === status);
+        design.hidden = !matches;
+        if (matches) shown += 1;
+      });
+      var filtering = Boolean(needle || status);
+      count.hidden = !filtering;
+      count.textContent = shown + ' of ' + designs.length + ' designs shown';
+      empty.hidden = !(filtering && shown === 0);
+    }
+
+    nameInput.addEventListener('input', apply);
+    statusInput.addEventListener('change', apply);
+  })();
+</script>
+
+{% endblock %}

@@ -626,6 +626,23 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
 .toolbar-menu-empty { padding: 8px 10px; font-size: .8rem; color: var(--color-text-soft); }
 .toolbar-menu-sep { border: 0; border-top: 1px solid var(--color-line); margin: 5px 2px; }
 
+/* One design on a purchase order's Production Status page. A card that is
+   also a disclosure: the summary row is the whole design at a glance, and
+   its batch editor stays folded until that design is being worked on -
+   an order can carry well over fifty of these. */
+.production-design { padding: 0; }
+.production-design > summary.production-design-summary {
+  list-style: none; cursor: pointer; margin: 0;
+}
+.production-design > summary::-webkit-details-marker { display: none; }
+.production-design > summary.production-design-summary::after {
+  content: "▾"; font-size: .7rem; color: var(--color-text-soft); margin-left: 10px;
+}
+.production-design[open] > summary.production-design-summary::after { content: "▴"; }
+.production-design > form { padding: 14px 18px 16px; }
+.production-design[hidden] { display: none; }
+.production-batches .repeatable-row:last-child { border-bottom: 0; }
+
 /* Panels shown above a printable sheet (never printed): the confirmation
    banner and the "designs still to be ordered" table on a proforma invoice. */
 .sheet-note {
@@ -640,6 +657,23 @@ legend { font-size: .8rem; font-weight: 600; color: var(--color-ink); padding: 0
 .sheet-note h3 { margin: 0 0 4px; font-size: .95rem; }
 .sheet-note p { margin: 0; font-size: .84rem; color: var(--color-text-soft); }
 .sheet-note .ledger { margin-top: 12px; background: #fff; }
+
+/* Bordered-grid printable sheets (Loading Planning, Packing Planning) - the
+   plain-table counterpart to .quote-sheet's boxed layout, for documents that
+   are one continuous list rather than a header + line-items form. */
+.sheet { max-width: 1100px; margin: 24px auto 60px; background: #fff; padding: 24px 28px; box-shadow: var(--shadow-card); }
+.sheet-title { text-align: center; font-family: var(--font-mono); font-weight: 600; letter-spacing: .08em; margin: 0 0 16px; font-size: 1rem; }
+.sheet h3 { margin: 22px 0 8px; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
+.sheet-table { width: 100%; border-collapse: collapse; border: 1px solid var(--color-ink); margin-bottom: 6px; font-size: .7rem; }
+.sheet-table th, .sheet-table td { border: 1px solid var(--color-line-dark); padding: 5px 8px; vertical-align: middle; text-align: left; }
+.sheet-table th { background: var(--color-paper); font-size: .62rem; text-transform: uppercase; letter-spacing: .03em; }
+.sheet-table td.num, .sheet-table th.num { text-align: right; font-family: var(--font-mono); }
+.sheet-table tfoot th, .sheet-table tfoot td { background: var(--color-paper); }
+/* A manual pallet's ACTUAL PACKING / PACKING NO cells span every batch line
+   it holds (rowspan), so they must not repeat the border each inner row
+   would otherwise draw between them. */
+.sheet-table td.sheet-rowspan { vertical-align: middle; text-align: center; }
+
 .quote-sheet {
   max-width: 960px; margin: 24px auto 60px; background: #fff; padding: 30px 34px;
   box-shadow: var(--shadow-card); font-size: .6975rem; color: var(--color-text);

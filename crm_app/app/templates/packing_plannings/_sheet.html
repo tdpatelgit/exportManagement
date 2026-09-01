@@ -1,0 +1,110 @@
+{# The printed packing plan: what the packing floor works from - one
+   continuous list of numbered pallets/cartons, exactly the shape
+   PALLET PACKING PLANNING has always been worked from on paper.
+
+   plan.pallet_rows does the merging: an AUTO row is a single batch with a
+   packing-number RANGE ("1 TO 9"), a MANUAL row is one hand-packed unit
+   built from several batches' leftovers with a single packing number
+   ("54") and one line per batch it draws from - ARKOSE's 29 leftover
+   boxes sharing a pallet with ATLANTA's 3, printed as two lines under one
+   ACTUAL PACKING / PACKING NO cell. Both halves share one SR NO sequence
+   and one packing-number sequence, because a pallet number is unique
+   across the document however it was packed. #}
+
+<div class="sheet">
+  <h2 class="sheet-title">PALLET PACKING PLANNING</h2>
+
+  <table class="sheet-table">
+    <tr>
+      <td><strong>No.</strong> {{ plan.packing_planning_number }}</td>
+      <td><strong>Date</strong> {{ plan.packing_planning_date }}</td>
+      <td>
+        <strong>Total</strong>
+        {% for label, count in plan.total_units_by_label.items() %}{{ count }} {{ label }}{{ ", " if not loop.last }}{% endfor %}
+      </td>
+    </tr>
+    {% if plan.proforma_invoice_numbers %}
+    <tr><td colspan="3"><strong>Proforma invoices</strong> {{ plan.proforma_invoice_numbers | join(', ') }}</td></tr>
+    {% endif %}
+    {% if plan.remarks %}<tr><td colspan="3"><strong>Remarks</strong> {{ plan.remarks }}</td></tr>{% endif %}
+  </table>
+
+  <table class="sheet-table">
+    <thead>
+      <tr>
+        <th>SR NO</th>
+        <th>DESCRIPTION OF GOODS</th>
+        <th>MODEL NO OR NAME</th>
+        <th>BATCH NO</th>
+        <th>MANF. DATE</th>
+        <th class="num">ACTUAL PACKING</th>
+        <th class="num">QTY</th>
+        <th>PACKING NO</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in plan.pallet_rows %}
+      {% for line in row.lines %}
+      <tr>
+        {% if loop.first %}
+        <td rowspan="{{ row.lines | length }}" class="sheet-rowspan">{{ row.sr_no }}</td>
+        {% endif %}
+        <td>{{ line.product_name or '—' }}</td>
+        <td>{{ line.design_name or '—' }}</td>
+        <td>{{ line.batch_number or '—' }}</td>
+        <td>{{ line.production_date | dmy_date }}</td>
+        {% if loop.first %}
+        <td class="num sheet-rowspan" rowspan="{{ row.lines | length }}">{{ row.actual_packing }} {{ row.packing_unit_label }}</td>
+        {% endif %}
+        <td class="num">{{ '%g' % line.quantity }} {{ line.quantity_unit }}</td>
+        {% if loop.first %}
+        <td rowspan="{{ row.lines | length }}" class="sheet-rowspan">{{ row.packing_no }}</td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+      {% else %}
+      <tr><td colspan="8" class="text-soft">Nothing packed yet - no pallet or carton has a whole unit to print.</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <th colspan="5">Total</th>
+        <th class="num">
+          {% for label, count in plan.total_units_by_label.items() %}{{ count }} {{ label }}{{ ", " if not loop.last }}{% endfor %}
+        </th>
+        <th class="num">
+          {% for unit, qty in plan.total_quantity_by_unit.items() %}{{ '%g' % qty }} {{ unit }}{{ ", " if not loop.last }}{% endfor %}
+        </th>
+        <th></th>
+      </tr>
+    </tfoot>
+  </table>
+
+  {% set outstanding = plan.remain_rows | selectattr('left', 'gt', 0.001) | list %}
+  {% if outstanding %}
+  <h3>Still to pack by hand</h3>
+  <table class="sheet-table">
+    <thead>
+      <tr>
+        <th>DESCRIPTION OF GOODS</th>
+        <th>MODEL NO OR NAME</th>
+        <th>BATCH NO</th>
+        <th>MANF. DATE</th>
+        <th class="num">QTY LEFT</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in outstanding %}
+      <tr>
+        <td>{{ row.product_name }}</td>
+        <td>{{ row.design_name or '—' }}</td>
+        <td>{{ row.batch_number or '—' }}</td>
+        <td>{{ row.production_date | dmy_date }}</td>
+        <td class="num">{{ '%g' % row.left }} {{ row.quantity_unit }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+</div>

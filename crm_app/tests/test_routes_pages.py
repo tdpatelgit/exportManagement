@@ -58,6 +58,7 @@ class TestListPages:
         "/proforma-invoices/",
         "/purchase-orders/",
         "/packing-lists/",
+        "/packing-plannings/",
         "/reports/",
         "/account",   # profile_bp is mounted at /account
     ])
@@ -71,12 +72,14 @@ class TestListPages:
 # Admin-only pages
 # ==========================================================================
 class TestAdminOnlyPages:
-    @pytest.mark.parametrize("path", ["/admin/employees", "/company/", "/backup/", "/misc/"])
+    @pytest.mark.parametrize("path", ["/admin/employees", "/company/", "/backup/", "/misc/",
+                                     "/packing-plannings/new"])
     def test_admin_can_open(self, admin_ctx, path):
         client, *_ = admin_ctx
         assert client.get(path).status_code == 200
 
-    @pytest.mark.parametrize("path", ["/admin/employees", "/company/", "/backup/", "/misc/"])
+    @pytest.mark.parametrize("path", ["/admin/employees", "/company/", "/backup/", "/misc/",
+                                     "/packing-plannings/new"])
     def test_employee_gets_403(self, employee_ctx, path):
         client, *_ = employee_ctx
         assert client.get(path).status_code == 403
@@ -317,6 +320,109 @@ class TestDocumentRoutes:
         client, container, emp, _ = employee_ctx
         q = self._quotation(container, emp)
         assert f"/quotations/{q.id}/duplicate" not in client.get(f"/quotations/{q.id}").get_data(as_text=True)
+
+    def _production_po(self, container, admin):
+        return container.purchase_order_service.create(
+            admin, {"seller_name": "Supplier Ltd", "po_date": "2026-03-01"},
+            [{"product_name": "Tiles", "design_name": "Carrara", "quantity_boxes": "10",
+              "quantity_value": "100", "price_inr": "500", "price_per": "BOX"}])
+
+    def test_purchase_order_links_to_its_production_page(self, admin_ctx):
+        """Production status is its own page, reached from the purchase
+        order's toolbar the same way its packing list and purchase invoice
+        are - an order of fifty-odd designs is a working list, not something
+        to read above a printable sheet."""
+        client, container, admin, _ = admin_ctx
+        po = self._production_po(container, admin)
+        html = client.get(f"/purchase-orders/{po.id}").get_data(as_text=True)
+        assert f"/purchase-orders/{po.id}/production" in html
+        # ...and nothing of the editor itself is on the sheet page.
+        assert "Production status" in html and "Save this design" not in html
+
+    def test_production_page_lists_every_design(self, admin_ctx):
+        client, container, admin, _ = admin_ctx
+        po = self._production_po(container, admin)
+        html = client.get(f"/purchase-orders/{po.id}/production").get_data(as_text=True)
+        assert "Production status" in html and "Tiles" in html
+        assert "Pending" in html          # no status saved yet
+        assert "Save this design" in html
+        assert po.po_number in html
+
+    def test_production_page_is_company_scoped(self, admin_ctx):
+        client, container, admin, _ = admin_ctx
+        po = self._production_po(container, admin)
+        other = container.tenant_repo.create("Other Co", "other-co-prod")
+        with client.session_transaction() as sess:
+            sess["user_id"] = container.auth_service.create_user(
+                other.id, "otheradmin", "other-pass-1", "Other Admin", "admin").id
+        assert client.get(f"/purchase-orders/{po.id}/production").status_code == 404
+
+    def test_saving_production_status_and_a_batch(self, admin_ctx):
+        client, container, admin, company_id = admin_ctx
+        po = self._production_po(container, admin)
+        resp = client.post(
+            f"/purchase-orders/{po.id}/production/{po.items[0].id}",
+            data={"design_id": "", "design_name": "", "status": "ready",
+                  "batch_number": ["B-101", ""], "production_date": ["2026-03-05", ""],
+                  "batch_quantity": ["10", ""], "batch_remarks": ["first kiln run", ""]},
+            follow_redirects=True)
+        html = resp.get_data(as_text=True)
+        assert "Production status saved." in html
+        assert "B-101" in html and "first kiln run" in html
+        row = container.purchase_order_production_service.get_rows(po.id, company_id)[0]
+        assert row["status"] == "ready" and row["produced_boxes"] == 10
+
+    def test_production_status_never_reaches_the_printed_documents(self, admin_ctx):
+        """Production status is working data, not part of the document - the
+        combined printable must carry no trace of it."""
+        client, container, admin, company_id = admin_ctx
+        po = self._production_po(container, admin)
+        container.purchase_order_production_service.save_row(
+            po.id, po.items[0].id, None, None, "ready",
+            [{"batch_number": "B-101", "production_date": "2026-03-05",
+              "quantity_boxes": "10", "remarks": ""}], company_id, admin.id)
+        combined = client.get(f"/purchase-orders/{po.id}/combined").get_data(as_text=True)
+        assert "Production" not in combined and "B-101" not in combined
+
+    def test_production_status_is_saved_per_design_through_the_form(self, admin_ctx):
+        """The card posts the design it is editing back as a hidden field, and
+        that value has to be the design's IDENTITY (its name as the packing
+        list gives it) - posting the printed label instead would file the save
+        under a key the next page load can't find, and the status would read
+        back as Pending."""
+        client, container, admin, company_id = admin_ctx
+        pi = container.proforma_invoice_service.create(
+            admin, {"consignee_name": "Buyer Co", "invoice_date": "2026-02-01"},
+            [{"product_name": "Tiles", "quantity_value": "100", "price_usd": "2"}])
+        container.packing_list_service.create(
+            admin, {"packing_list_date": "2026-02-02", "proforma_invoice_id": pi.id},
+            [{"product_name": "Tiles", "design_name": "Carrara", "quantity_boxes": "6"},
+             {"product_name": "Tiles", "design_name": "Statuario", "quantity_boxes": "4"}])
+        po = container.purchase_order_service.create(
+            admin, {"seller_name": "Supplier Ltd", "po_date": "2026-03-01",
+                    "proforma_invoice_id": str(pi.id)},
+            [{"product_name": "Tiles", "quantity_boxes": "10", "quantity_value": "100",
+              "price_inr": "500", "price_per": "BOX"}])
+
+        html = client.get(f"/purchase-orders/{po.id}/production").get_data(as_text=True)
+        assert "Carrara" in html and "Statuario" in html
+
+        client.post(f"/purchase-orders/{po.id}/production/{po.items[0].id}",
+                    data={"design_id": "", "design_name": "Carrara", "status": "ready",
+                          "batch_number": ["B-101"], "production_date": ["2026-03-05"],
+                          "batch_quantity": ["6"], "batch_remarks": [""]})
+        design_rows = container.packing_list_service.list_for_proforma(pi.id, company_id)[0].items
+        rows = container.purchase_order_production_service.get_rows(po.id, company_id, design_rows)
+        assert [(r["design_label"], r["status"]) for r in rows] == [
+            ("Carrara", "ready"), ("Statuario", "pending")]
+
+    def test_purchase_order_list_shows_production_progress(self, admin_ctx):
+        client, container, admin, company_id = admin_ctx
+        po = self._production_po(container, admin)
+        container.purchase_order_production_service.save_row(
+            po.id, po.items[0].id, None, None, "ready", [], company_id, admin.id)
+        html = client.get("/purchase-orders/").get_data(as_text=True)
+        assert "Production status" in html and "1/1 ready" in html
 
     def test_purchase_order_form_has_no_nested_form(self, admin_ctx):
         """The admin-only "Add new supplier" panel once shipped as a <form>

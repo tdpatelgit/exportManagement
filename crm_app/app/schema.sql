@@ -832,6 +832,37 @@ CREATE TABLE IF NOT EXISTS purchase_order_items (
     design_name         TEXT   -- snapshot of the chosen design's name at save time
 );
 
+-- Production status of one purchase order line (a design the supplier is
+-- making for us), plus the batches it was actually produced in. Status is
+-- set by hand - it is a statement about the supplier's floor, not something
+-- derivable from the batch quantities, which are recorded alongside for
+-- information and may lag or exceed the ordered quantity. Keyed on the LINE
+-- rather than on design_id so hand-typed lines with no catalog design still
+-- work. A PO orders by PRODUCT; which designs those boxes are is only ever
+-- settled on the proforma invoice's packing list, so a line carries one row
+-- per design of that product (design_id NULL when there is no such split).
+CREATE TABLE IF NOT EXISTS purchase_order_item_production (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_order_item_id  INTEGER NOT NULL REFERENCES purchase_order_items(id) ON DELETE CASCADE,
+    design_id               INTEGER REFERENCES designs(id) ON DELETE SET NULL,   -- NULL when the line has no design breakdown
+    design_name             TEXT,                                                -- snapshot, so a renamed design still reads back
+    status                  TEXT NOT NULL DEFAULT 'pending',   -- 'pending' | 'in_production' | 'ready'
+    updated_by              INTEGER REFERENCES users(id),
+    updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS purchase_order_item_batches (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_order_item_id  INTEGER NOT NULL REFERENCES purchase_order_items(id) ON DELETE CASCADE,
+    design_id               INTEGER REFERENCES designs(id) ON DELETE SET NULL,
+    design_name             TEXT,
+    sr_no                   INTEGER NOT NULL,
+    batch_number            TEXT,
+    production_date         TEXT,
+    quantity_boxes          REAL NOT NULL DEFAULT 0,   -- in the line's own quantity_unit
+    remarks                 TEXT
+);
+
 -- ============================================================
 -- PURCHASE INVOICES  (header + line items + vehicle numbers, number
 -- generated as PINV{YYYYMMDD}{seq-of-that-day} per company. The last
@@ -1061,11 +1092,11 @@ CREATE TABLE IF NOT EXISTS export_invoices (
     shipping_bill_date          TEXT,          -- Annexure-C header: Shipping Bill Date
     currency_code               TEXT,          -- snapshot of the misc_currencies row picked on the form
     currency_symbol             TEXT,          -- (name + symbol, so a later edit of the list can't rewrite a printed invoice)
-    -- Both "generated from" references only. The 11B rows and the goods/split
-    -- they seed are SNAPSHOTS taken when picked, so editing the booking or
-    -- the plan afterwards can't rewrite an already-issued invoice.
+    -- "Generated from" reference only: which Booking Detail the 11B rows
+    -- below were copied off. booking_no is what prints; this survives a
+    -- booking being renumbered. The rows themselves stay a SNAPSHOT, so
+    -- editing the booking afterwards can't rewrite an issued invoice.
     booking_detail_id           INTEGER REFERENCES booking_details(id),
-    loading_planning_id         INTEGER REFERENCES loading_plannings(id),
     created_by                  INTEGER NOT NULL REFERENCES users(id),
     created_at                  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at                  TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1467,6 +1498,107 @@ CREATE TABLE IF NOT EXISTS loading_planning_pallet_contents (
 );
 
 -- ============================================================
+-- PACKING PLANNINGS  (header + proforma links + one row per produced
+-- BATCH + the manual units its leftovers are hand-packed into, number
+-- generated as PP{YYYYMMDD}{seq-of-that-day} per company. The step BEFORE
+-- Loading Planning: a loading plan answers which goods go in which
+-- container, but nothing answered the question that comes first - how many
+-- whole pallets or cartons does what the supplier has actually produced
+-- make, and what is left over.
+--
+-- Lines come in the way Loading Planning's own goods come in - PI ->
+-- purchase orders - but one hop further, to those orders' PRODUCTION
+-- BATCHES (purchase_order_item_batches), because that is the only place a
+-- batch number and manufacturing date exist. One row per batch, not per
+-- design: a design is routinely fired in several batches on different
+-- days, and a pallet is packed out of one of them.
+--
+-- The two tables the document prints are NOT two stored lists. Only the
+-- batch rows are stored; PACKING REMAIN BY MANUAL is derived, being every
+-- row whose ready quantity does not divide exactly into whole units (317
+-- boxes at 32/pallet is 9 pallets and 29 left; 160 at 32 is 5 pallets and
+-- nothing, so it has no manual row at all). Storing the remainder too
+-- would let the two halves drift apart on the next edit.
+--
+-- as_per_pl_packing (317/32 = 9.91), packed_quantity (9 x 32 = 288),
+-- remain_quantity and the END NUMBER are all likewise derived on the
+-- model, never stored - same call LoadingPlanning.container_summary makes.
+--
+-- unit_no/item_sr_no are NATURAL keys, not FKs to row ids, for the same
+-- reason loading_planning_carton_contents keys on carton_no: every child
+-- list is wholesale deleted and re-inserted on save.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS packing_plannings (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id              INTEGER NOT NULL REFERENCES tenants(id),
+    packing_planning_number TEXT NOT NULL,
+    packing_planning_date   TEXT NOT NULL,
+    remarks                 TEXT,
+    created_by              INTEGER NOT NULL REFERENCES users(id),
+    created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (company_id, packing_planning_number)
+);
+
+-- Which proforma invoices this plan packs for - many-to-many, exactly like
+-- loading_planning_proforma_links.
+CREATE TABLE IF NOT EXISTS packing_planning_proforma_links (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    packing_planning_id INTEGER NOT NULL REFERENCES packing_plannings(id) ON DELETE CASCADE,
+    proforma_invoice_id INTEGER NOT NULL REFERENCES proforma_invoices(id) ON DELETE CASCADE,
+    UNIQUE (packing_planning_id, proforma_invoice_id)
+);
+
+-- One row per produced BATCH - the PACKING AUTO FILLED table.
+CREATE TABLE IF NOT EXISTS packing_planning_items (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    packing_planning_id     INTEGER NOT NULL REFERENCES packing_plannings(id) ON DELETE CASCADE,
+    sr_no                   INTEGER NOT NULL,
+    proforma_invoice_id     INTEGER REFERENCES proforma_invoices(id) ON DELETE SET NULL,
+    purchase_order_id       INTEGER REFERENCES purchase_orders(id) ON DELETE SET NULL,
+    po_number               TEXT,          -- provenance, kept even if the PO is deleted
+    purchase_order_item_id  INTEGER REFERENCES purchase_order_items(id) ON DELETE SET NULL,
+    product_id              INTEGER REFERENCES products(id) ON DELETE SET NULL,
+    product_name            TEXT NOT NULL, -- DESCRIPTION OF GOODS
+    design_id               INTEGER REFERENCES designs(id) ON DELETE SET NULL,
+    design_name             TEXT,          -- MODEL NO OR NAME
+    batch_number            TEXT,          -- BATCH NO
+    production_date         TEXT,          -- MANF. DATE
+    ready_quantity          REAL NOT NULL DEFAULT 0,      -- PRODUCTION READY QTY
+    quantity_unit           TEXT NOT NULL DEFAULT 'BOX',  -- the PO line's own unit
+    packing_type_id         INTEGER REFERENCES product_pallet_types(id) ON DELETE SET NULL,
+    packing_type_name       TEXT,          -- snapshot, e.g. 'Pallet' / 'CTN'
+    packing_unit_label      TEXT NOT NULL DEFAULT 'PLT',  -- 'PLT' | 'CTN', off unit_kind
+    boxes_per_unit          REAL,          -- 32 / 30, seeded from the type and overridable
+    actual_packing          INTEGER NOT NULL DEFAULT 0,   -- ACTUAL PACKING, seeded floor(as per PL)
+    -- PACKING NO START FROM. NULL = follow on from the row above; a value
+    -- PINS this row and every row after it counts on from its end.
+    packing_no_start        INTEGER
+);
+
+-- The mixed units the leftovers are hand-packed into. unit_no carries on
+-- the same number sequence the batch rows above use, so a pallet number is
+-- unique across the whole document however it was packed.
+CREATE TABLE IF NOT EXISTS packing_planning_manual_units (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    packing_planning_id INTEGER NOT NULL REFERENCES packing_plannings(id) ON DELETE CASCADE,
+    unit_no             INTEGER NOT NULL,
+    packing_type_id     INTEGER REFERENCES product_pallet_types(id) ON DELETE SET NULL,
+    packing_type_name   TEXT,
+    packing_unit_label  TEXT NOT NULL DEFAULT 'PLT',
+    capacity_boxes      REAL,          -- informational: a mixed unit's capacity is the operator's call
+    remarks             TEXT
+);
+
+CREATE TABLE IF NOT EXISTS packing_planning_manual_contents (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    packing_planning_id INTEGER NOT NULL REFERENCES packing_plannings(id) ON DELETE CASCADE,
+    unit_no             INTEGER NOT NULL,
+    item_sr_no          INTEGER NOT NULL,
+    quantity_boxes      REAL NOT NULL DEFAULT 0
+);
+
+-- ============================================================
 -- PACKING LISTS  (header + line items, number generated as
 -- PL{YYYYMMDD}{seq-of-that-day} per company. Normally started from an
 -- existing proforma invoice, but can also be started directly from a
@@ -1817,6 +1949,13 @@ CREATE INDEX IF NOT EXISTS idx_purchase_orders_company ON purchase_orders(compan
 CREATE INDEX IF NOT EXISTS idx_purchase_orders_created_by ON purchase_orders(created_by);
 CREATE INDEX IF NOT EXISTS idx_purchase_orders_date ON purchase_orders(po_date);
 CREATE INDEX IF NOT EXISTS idx_purchase_order_items_po ON purchase_order_items(purchase_order_id);
+-- A design is identified by its NAME as much as by its id: the packing list
+-- rows that supply the split are frequently free-typed, with no catalog design
+-- behind them at all, so two designs of one product would otherwise collide
+-- on a shared NULL design_id.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_po_item_production_item
+    ON purchase_order_item_production(purchase_order_item_id, COALESCE(design_id, -1), COALESCE(UPPER(TRIM(design_name)), ''));
+CREATE INDEX IF NOT EXISTS idx_po_item_batches_item ON purchase_order_item_batches(purchase_order_item_id);
 CREATE INDEX IF NOT EXISTS idx_purchase_invoices_company ON purchase_invoices(company_id);
 CREATE INDEX IF NOT EXISTS idx_job_outs_purchase_invoice ON job_outs(purchase_invoice_id);
 CREATE INDEX IF NOT EXISTS idx_job_ins_job_out ON job_ins(job_out_id);
@@ -1851,6 +1990,12 @@ CREATE INDEX IF NOT EXISTS idx_loading_planning_cartons_plan ON loading_planning
 CREATE INDEX IF NOT EXISTS idx_loading_planning_carton_contents_plan ON loading_planning_carton_contents(loading_planning_id);
 CREATE INDEX IF NOT EXISTS idx_loading_planning_pallets_plan ON loading_planning_pallets(loading_planning_id);
 CREATE INDEX IF NOT EXISTS idx_loading_planning_pallet_contents_plan ON loading_planning_pallet_contents(loading_planning_id);
+CREATE INDEX IF NOT EXISTS idx_packing_plannings_company ON packing_plannings(company_id);
+CREATE INDEX IF NOT EXISTS idx_packing_plannings_date ON packing_plannings(packing_planning_date);
+CREATE INDEX IF NOT EXISTS idx_packing_planning_proforma_links_plan ON packing_planning_proforma_links(packing_planning_id);
+CREATE INDEX IF NOT EXISTS idx_packing_planning_items_plan ON packing_planning_items(packing_planning_id);
+CREATE INDEX IF NOT EXISTS idx_packing_planning_manual_units_plan ON packing_planning_manual_units(packing_planning_id);
+CREATE INDEX IF NOT EXISTS idx_packing_planning_manual_contents_plan ON packing_planning_manual_contents(packing_planning_id);
 CREATE INDEX IF NOT EXISTS idx_packing_lists_company ON packing_lists(company_id);
 CREATE INDEX IF NOT EXISTS idx_packing_lists_created_by ON packing_lists(created_by);
 CREATE INDEX IF NOT EXISTS idx_packing_lists_date ON packing_lists(packing_list_date);

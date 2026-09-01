@@ -1,0 +1,703 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit packing planning' if plan else 'New packing planning' }}{% endblock %}
+{% block content %}
+
+{% set data = form_data if form_data else plan %}
+{% set selected_str = selected_proforma_ids | map('string') | list %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Documents</div>
+    <h1>{{ 'Edit ' + plan.packing_planning_number if plan else 'New packing planning' }}</h1>
+  </div>
+  {% if plan %}
+  <div class="topbar-actions">
+    <a href="{{ url_for('packing_plannings.view_packing_planning', packing_planning_id=plan.id) }}" class="btn btn-ghost">Print</a>
+  </div>
+  {% endif %}
+</div>
+
+{% if warnings %}
+<div class="card" id="server-warnings">
+  <div class="card-header"><h3>Still to do <span class="text-soft text-sm">— saved anyway; the leftovers are normally grouped days after the batches are keyed in</span></h3></div>
+  <ul style="margin:0;padding-left:20px;">
+    {% for w in warnings %}<li class="text-sm">{{ w }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<form method="POST" id="pp-form">
+
+  <div class="card">
+    <div class="card-header"><h3>Reference proforma invoices</h3></div>
+    <div class="field">
+      <label for="buyer_select">Buyer <span class="text-soft text-sm">(pick a buyer to narrow the proforma invoice list below to just theirs)</span></label>
+      <select id="buyer_select">
+        <option value="">— All buyers —</option>
+        {% for b in buyers %}
+        <option value="{{ b.id }}" data-company-key="{{ (b.company_name or '') | lower | trim }}">{{ b.company_name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>Proforma invoices under this packing planning <span class="text-soft text-sm">(tick one or more — one packing run routinely covers several PIs' orders)</span></label>
+      <div id="proforma-picker" style="max-height:220px;overflow:auto;border:1px solid var(--color-line, #ddd);border-radius:6px;padding:6px 10px;">
+        {% for pi in proforma_invoices %}
+        <label class="js-pi-label" style="display:block;padding:4px 0;cursor:pointer;">
+          <input type="checkbox" class="js-pi-check" name="proforma_invoice_ids[]" value="{{ pi.id }}"
+                 data-company-key="{{ (pi.consignee_name or '') | lower | trim }}"
+                 {{ 'checked' if pi.id | string in selected_str }}>
+          <strong>{{ pi.invoice_number }}</strong> — {{ pi.consignee_name }}{% if pi.buyer_order_no %} · <span class="text-soft">Order {{ pi.buyer_order_no }}</span>{% endif %} ({{ pi.invoice_date }})
+        </label>
+        {% else %}
+        <div class="text-soft text-sm">No proforma invoices yet.</div>
+        {% endfor %}
+      </div>
+    </div>
+    <button type="button" class="btn btn-ghost btn-sm" id="list-pos-btn">↻ List purchase orders for selected PIs</button>
+    <p class="hint">
+      Lists every purchase order the ticked PIs pulled in below &mdash; not their goods yet. Not every PO under a
+      PI belongs in this packing run (a supplier not ready yet, a PO already packed in an earlier plan), so which
+      ones actually load their batches is a second, separate step.
+    </p>
+  </div>
+
+  {# ---- Purchase orders --------------------------------------------------
+     Step 1's result and step 2's input: every PO the ticked PIs pulled in,
+     each with a summary of what it would add, so the operator can narrow the
+     set before committing to loading anything. #}
+  <div class="card">
+    <div class="card-header"><h3>Purchase orders</h3></div>
+    <div class="field">
+      <label>Purchase orders to load batches from <span class="text-soft text-sm">(tick which of these this packing run actually wants)</span></label>
+      <div id="po-picker" style="max-height:220px;overflow:auto;border:1px solid var(--color-line, #ddd);border-radius:6px;padding:6px 10px;">
+        <div class="text-soft text-sm" id="po-picker-empty">List purchase orders for selected PIs above first.</div>
+      </div>
+    </div>
+    <button type="button" class="btn btn-ghost btn-sm" id="load-from-pos-btn">↻ Load batches from selected POs</button>
+    <p class="hint">
+      Loading traces each ticked purchase order to the <strong>batches</strong> it was actually produced in
+      &mdash; the rows on that order's Production Status page. One line per batch, because a batch number and
+      manufacturing date exist nowhere else, and a pallet is packed out of one firing: ATLANTA LIGHT GREY arrives
+      as two lines, 200 boxes under batch 102 and 117 under 103. The packing type and whole-unit count are filled
+      in for you. Only the batch lines are replaced &mdash; any manual grouping you've already done is kept.
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Document</h3></div>
+    <div class="form-row">
+      <div class="field">
+        <label for="packing_planning_number">Packing planning no.</label>
+        <input type="text" id="packing_planning_number" name="packing_planning_number"
+               value="{{ data.packing_planning_number if data and data.packing_planning_number else suggested_number }}" readonly>
+      </div>
+      <div class="field">
+        <label for="packing_planning_date">Date <span class="required-mark">*</span></label>
+        <input type="date" id="packing_planning_date" name="packing_planning_date"
+               value="{{ data.packing_planning_date if data and data.packing_planning_date else today }}" required>
+      </div>
+    </div>
+    <div class="field">
+      <label for="remarks">Remarks</label>
+      <input type="text" id="remarks" name="remarks" value="{{ data.remarks | default('', true) }}">
+    </div>
+  </div>
+
+  {# ---- PACKING AUTO FILLED ------------------------------------------------
+     The arithmetic half. Everything except ACTUAL PACKING, the packing type
+     and a pinned start number is read-only, because it is either provenance
+     from the purchase order or derived from those three. #}
+  <div class="card">
+    <div class="card-header">
+      <h3>Packing auto filled <span class="text-soft text-sm">— one row per produced batch</span></h3>
+      <button type="button" class="btn btn-ghost btn-sm" id="auto-fill-btn">↻ Re-fill packing</button>
+    </div>
+    <div class="table-wrap">
+      <table class="ledger" id="items-table">
+        <thead>
+          <tr>
+            <th>Sr</th>
+            <th>Description of goods</th>
+            <th>Model no. or name</th>
+            <th>Batch no.</th>
+            <th>Manf. date</th>
+            <th class="num">Production ready qty</th>
+            <th>Packing type</th>
+            <th class="num">Per unit</th>
+            <th class="num">As per PL packing</th>
+            <th class="num">Actual packing</th>
+            <th class="num">Qty</th>
+            <th class="num">Packing no. start</th>
+            <th class="num">End no.</th>
+            <th class="num">Remain</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="items-body"></tbody>
+        <tfoot>
+          <tr>
+            <th colspan="5">Total</th>
+            <th class="num" id="items-total-ready">0</th>
+            <th colspan="3"></th>
+            <th class="num" id="items-total-units">0</th>
+            <th class="num" id="items-total-packed">0</th>
+            <th colspan="2"></th>
+            <th class="num" id="items-total-remain">0</th>
+            <th></th>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    <p class="hint">
+      <strong>Actual packing</strong> is seeded with the whole units the ready quantity makes &mdash; 317 boxes at
+      32 a pallet is 9.91, of which nine are real &mdash; and can be typed over. <strong>Packing no. start</strong>
+      is blank to follow on from the row above; type a number to pin a row there, and every row after it counts on
+      from its end. Whatever a row does not pack drops into the manual table below.
+    </p>
+  </div>
+
+  {# ---- PACKING REMAIN BY MANUAL -------------------------------------------
+     Not a stored list: these rows are what the table above did not pack, and
+     they move as soon as an actual-packing figure changes. What IS stored is
+     the units the operator groups them into, which take the next numbers in
+     the same sequence. #}
+  <div class="card">
+    <div class="card-header">
+      <h3>Packing remain by manual <span class="text-soft text-sm">— what is left after the whole units</span></h3>
+      <button type="button" class="btn btn-ghost btn-sm" id="group-selected-btn">Group ticked onto one unit</button>
+    </div>
+    <div class="table-wrap">
+      <table class="ledger" id="remain-table">
+        <thead>
+          <tr>
+            <th style="width:32px;"></th>
+            <th>Sr</th>
+            <th>Description of goods</th>
+            <th>Model no. or name</th>
+            <th>Batch no.</th>
+            <th>Manf. date</th>
+            <th class="num">Qty</th>
+            <th class="num">Grouped</th>
+            <th class="num">Left</th>
+            <th>Packing no.</th>
+          </tr>
+        </thead>
+        <tbody id="remain-body"></tbody>
+      </table>
+    </div>
+    <div id="manual-units-pane" style="margin-top:14px;"></div>
+    <button type="button" class="btn btn-ghost btn-sm" id="add-unit-btn" style="margin-top:8px;">+ Add empty unit</button>
+  </div>
+
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary">{{ 'Save changes' if plan else 'Create packing planning' }}</button>
+    <a href="{{ url_for('packing_plannings.list_packing_plannings') }}" class="btn btn-ghost">Cancel</a>
+  </div>
+
+  <input type="hidden" name="manual_units_json" id="manual_units_json">
+</form>
+
+<script type="application/json" id="pp-initial-items">{{ items_json | safe }}</script>
+<script type="application/json" id="pp-initial-units">{{ manual_units_json | safe }}</script>
+<script type="application/json" id="pp-initial-types">{{ packing_types_json | safe }}</script>
+<script type="application/json" id="pp-initial-pos">{{ purchase_orders_json | safe }}</script>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- state -------------------------------------------------------------
+  // Two arrays are the single source of truth and the DOM is re-rendered off
+  // them. The batch rows go back as item_<field>[] arrays (they are flat);
+  // the manual units go back as one JSON blob, because each is a tree - one
+  // mixed pallet holds leftovers from several batches - and flattening a tree
+  // into foo[] arrays would need an index-matching convention every regroup
+  // would have to keep in sync. The server cleans and revalidates both, so
+  // nothing here is trusted. `purchaseOrders` is step 1's own list - not
+  // posted at all, since only the batches it leads to end up on the document.
+  var items = readJSON("pp-initial-items", []);
+  var units = readJSON("pp-initial-units", []);
+  var packingTypes = readJSON("pp-initial-types", {});
+  var purchaseOrders = readJSON("pp-initial-pos", []);
+
+  function readJSON(id, fallback) {
+    var el = document.getElementById(id);
+    if (!el) return fallback;
+    try { var v = JSON.parse(el.textContent || "null"); return v === null ? fallback : v; }
+    catch (e) { return fallback; }
+  }
+
+  var num = function (v) { var n = parseFloat(v); return isFinite(n) ? n : 0; };
+  var fmt = function (n, dp) {
+    if (n === null || n === undefined || !isFinite(n)) return "—";
+    return n.toLocaleString(undefined, {minimumFractionDigits: dp || 0, maximumFractionDigits: dp || 0});
+  };
+  var esc = function (s) {
+    return String(s === null || s === undefined ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  };
+  function hidden(name, value) {
+    return '<input type="hidden" name="' + name + '" value="' +
+      esc(value === null || value === undefined ? "" : value) + '">';
+  }
+  function itemBySr(sr) {
+    for (var i = 0; i < items.length; i++) { if (num(items[i].sr_no) === num(sr)) return items[i]; }
+    return null;
+  }
+  function itemLabel(it) {
+    if (!it) return "?";
+    var base = it.design_name ? it.product_name + " — " + it.design_name : it.product_name;
+    return it.batch_number ? base + " [" + it.batch_number + "]" : base;
+  }
+
+  // ---- the four derived figures, kept identical to the model's ------------
+  // PackingPlanningItem.as_per_pl_packing / packed_quantity / remain_quantity.
+  // Duplicated here rather than round-tripped so the sheet updates as you
+  // type; the server recomputes them all on save regardless.
+  function asPerPl(it) { var c = num(it.boxes_per_unit); return c ? num(it.ready_quantity) / c : 0; }
+  function packedQty(it) { return Math.round(num(it.actual_packing) * num(it.boxes_per_unit) * 1000) / 1000; }
+  function remainQty(it) { return Math.round((num(it.ready_quantity) - packedQty(it)) * 1000) / 1000; }
+
+  // sr_no -> [start, end]. A row with packing_no_start set PINS itself there
+  // and the counter carries on from ITS end; a row packing nothing takes no
+  // number at all. Mirrors PackingPlanning.packing_numbers.
+  function packingNumbers() {
+    var out = {}, counter = 1;
+    items.forEach(function (it) {
+      var pin = parseInt(it.packing_no_start, 10);
+      if (pin > 0) counter = pin;
+      var count = parseInt(it.actual_packing, 10) || 0;
+      if (count <= 0) { out[it.sr_no] = [null, null]; return; }
+      out[it.sr_no] = [counter, counter + count - 1];
+      counter += count;
+    });
+    return out;
+  }
+  function nextPackingNo() {
+    var used = [], numbers = packingNumbers();
+    Object.keys(numbers).forEach(function (k) { if (numbers[k][1]) used.push(numbers[k][1]); });
+    units.forEach(function (u) { if (u.unit_no) used.push(num(u.unit_no)); });
+    return used.length ? Math.max.apply(null, used) + 1 : 1;
+  }
+  function allocatedBySr() {
+    var out = {};
+    items.forEach(function (it) { out[it.sr_no] = 0; });
+    units.forEach(function (u) {
+      (u.contents || []).forEach(function (c) {
+        if (out[c.item_sr_no] !== undefined) out[c.item_sr_no] += num(c.quantity_boxes);
+      });
+    });
+    return out;
+  }
+
+  // ---- the auto-filled table ---------------------------------------------
+  function typeOptions(it) {
+    var bucket = packingTypes[String(it.product_id)] || {};
+    var all = (bucket.carton || []).concat(bucket.pallet || []);
+    var html = '<option value="">— none —</option>';
+    var matched = false;
+    all.forEach(function (t) {
+      var sel = num(t.id) === num(it.packing_type_id);
+      if (sel) matched = true;
+      html += '<option value="' + esc(t.id) + '"' + (sel ? ' selected' : '') + '>' +
+        esc(t.name) + ' (' + esc(t.boxes_per_pallet) + '/' + esc(t.label) + ')</option>';
+    });
+    // A saved row whose type has since been deleted off the product keeps its
+    // own snapshot rather than silently reverting to "none".
+    if (!matched && it.packing_type_id) {
+      html += '<option value="' + esc(it.packing_type_id) + '" selected>' +
+        esc(it.packing_type_name || "current") + '</option>';
+    }
+    return html;
+  }
+
+  function renderItems() {
+    var body = document.getElementById("items-body");
+    var numbers = packingNumbers();
+    var html = "", tReady = 0, tUnits = 0, tPacked = 0, tRemain = 0;
+    items.forEach(function (it, i) {
+      it.sr_no = i + 1;
+      var ready = num(it.ready_quantity), packed = packedQty(it), remain = remainQty(it);
+      var span = numbers[it.sr_no] || [null, null];
+      tReady += ready; tUnits += parseInt(it.actual_packing, 10) || 0;
+      tPacked += packed; tRemain += Math.max(remain, 0);
+      html += '<tr' + (remain < -0.001 ? ' style="background:#fef2f2;"' : '') + '>' +
+        '<td>' + it.sr_no +
+          hidden("item_proforma_invoice_id[]", it.proforma_invoice_id) +
+          hidden("item_purchase_order_id[]", it.purchase_order_id) +
+          hidden("item_po_number[]", it.po_number) +
+          hidden("item_purchase_order_item_id[]", it.purchase_order_item_id) +
+          hidden("item_product_id[]", it.product_id) +
+          hidden("item_product_name[]", it.product_name) +
+          hidden("item_design_id[]", it.design_id) +
+          hidden("item_design_name[]", it.design_name) +
+          hidden("item_batch_number[]", it.batch_number) +
+          hidden("item_production_date[]", it.production_date) +
+          hidden("item_ready_quantity[]", ready) +
+          hidden("item_quantity_unit[]", it.quantity_unit) +
+          hidden("item_packing_type_name[]", it.packing_type_name) +
+          hidden("item_packing_unit_label[]", it.packing_unit_label) + '</td>' +
+        '<td class="text-sm">' + esc(it.product_name) + '</td>' +
+        '<td class="text-sm">' + esc(it.design_name || "—") + '</td>' +
+        '<td class="mono text-sm">' + esc(it.batch_number || "—") + '</td>' +
+        '<td class="text-sm">' + esc(it.production_date || "—") + '</td>' +
+        '<td class="num">' + fmt(ready, 0) + ' <span class="text-soft text-sm">' + esc(it.quantity_unit || "") + '</span></td>' +
+        '<td><select class="js-item-type" data-sr="' + it.sr_no + '" name="item_packing_type_id[]" style="max-width:150px;">' +
+          typeOptions(it) + '</select></td>' +
+        '<td class="num"><input type="number" step="any" min="0" class="js-item-cap" data-sr="' + it.sr_no +
+          '" name="item_boxes_per_unit[]" value="' + esc(it.boxes_per_unit === null || it.boxes_per_unit === undefined ? "" : it.boxes_per_unit) +
+          '" style="max-width:80px;text-align:right;"></td>' +
+        '<td class="num">' + fmt(asPerPl(it), 2) + ' <span class="text-soft text-sm">' + esc(it.packing_unit_label || "") + '</span></td>' +
+        '<td class="num"><input type="number" step="1" min="0" class="js-item-actual" data-sr="' + it.sr_no +
+          '" name="item_actual_packing[]" value="' + esc(parseInt(it.actual_packing, 10) || 0) +
+          '" style="max-width:70px;text-align:right;"></td>' +
+        '<td class="num">' + fmt(packed, 0) + '</td>' +
+        '<td class="num"><input type="number" step="1" min="1" class="js-item-start" data-sr="' + it.sr_no +
+          '" name="item_packing_no_start[]" placeholder="' + (span[0] || "") + '" value="' +
+          esc(it.packing_no_start || "") + '" style="max-width:80px;text-align:right;"></td>' +
+        '<td class="num">' + (span[1] || "—") + '</td>' +
+        '<td class="num">' + fmt(remain, 0) + '</td>' +
+        '<td><button type="button" class="btn-link-danger js-remove-item" data-sr="' + it.sr_no + '">Remove</button></td>' +
+        '</tr>';
+    });
+    body.innerHTML = html ||
+      '<tr><td colspan="15" class="text-soft text-sm">No batches yet — tick some proforma invoices above and load.</td></tr>';
+    document.getElementById("items-total-ready").textContent = fmt(tReady, 0);
+    document.getElementById("items-total-units").textContent = fmt(tUnits, 0);
+    document.getElementById("items-total-packed").textContent = fmt(tPacked, 0);
+    document.getElementById("items-total-remain").textContent = fmt(tRemain, 0);
+  }
+
+  // ---- the manual half ---------------------------------------------------
+  // remainRows mirrors PackingPlanning.remain_rows: derived, never stored, so
+  // a batch that divides exactly simply isn't here.
+  function remainRows() {
+    var allocated = allocatedBySr(), rows = [];
+    items.forEach(function (it) {
+      var remain = remainQty(it);
+      if (remain <= 0.001) return;
+      var done = allocated[it.sr_no] || 0;
+      var unitNos = [];
+      units.forEach(function (u) {
+        (u.contents || []).forEach(function (c) {
+          if (num(c.item_sr_no) === num(it.sr_no) && unitNos.indexOf(u.unit_no) === -1) unitNos.push(u.unit_no);
+        });
+      });
+      rows.push({sr_no: rows.length + 1, item: it, quantity: remain, allocated: done,
+                 left: Math.round((remain - done) * 1000) / 1000, unit_nos: unitNos.sort(function (a, b) { return a - b; })});
+    });
+    return rows;
+  }
+
+  function renderRemain() {
+    var body = document.getElementById("remain-body");
+    var rows = remainRows(), html = "";
+    rows.forEach(function (r) {
+      var it = r.item;
+      html += '<tr' + (r.left < -0.001 ? ' style="background:#fef2f2;"' : '') + '>' +
+        '<td><input type="checkbox" class="js-remain-pick" data-sr="' + it.sr_no + '"></td>' +
+        '<td>' + r.sr_no + '</td>' +
+        '<td class="text-sm">' + esc(it.product_name) + '</td>' +
+        '<td class="text-sm">' + esc(it.design_name || "—") + '</td>' +
+        '<td class="mono text-sm">' + esc(it.batch_number || "—") + '</td>' +
+        '<td class="text-sm">' + esc(it.production_date || "—") + '</td>' +
+        '<td class="num">' + fmt(r.quantity, 0) + ' <span class="text-soft text-sm">' + esc(it.quantity_unit || "") + '</span></td>' +
+        '<td class="num">' + fmt(r.allocated, 0) + '</td>' +
+        '<td class="num">' + fmt(r.left, 0) + '</td>' +
+        '<td class="text-sm">' + (r.unit_nos.length ? esc(r.unit_nos.join(", ")) : '<span class="text-soft">—</span>') + '</td>' +
+        '</tr>';
+    });
+    body.innerHTML = html ||
+      '<tr><td colspan="10" class="text-soft text-sm">Nothing left over — every batch divides into whole units.</td></tr>';
+  }
+
+  function renderUnits() {
+    var pane = document.getElementById("manual-units-pane");
+    if (!units.length) {
+      pane.innerHTML = '<div class="text-soft text-sm">No manual units yet — tick leftovers above and group them, or add an empty one.</div>';
+      return;
+    }
+    var html = "";
+    units.forEach(function (u, ui) {
+      var over = u.capacity_boxes && u.packed_boxes_cache > num(u.capacity_boxes);
+      html += '<div class="card" style="margin:8px 0;padding:10px;">' +
+        '<div class="flex gap-8" style="align-items:center;flex-wrap:wrap;">' +
+          '<strong>Packing no.</strong>' +
+          '<input type="number" step="1" min="1" class="js-unit-no" data-idx="' + ui + '" value="' + esc(u.unit_no) + '" style="max-width:80px;">' +
+          '<input type="text" class="js-unit-name" data-idx="' + ui + '" value="' + esc(u.packing_type_name || "") + '" placeholder="Type (e.g. Pallet)" style="max-width:140px;">' +
+          '<select class="js-unit-label" data-idx="' + ui + '" style="max-width:80px;">' +
+            '<option value="PLT"' + (u.packing_unit_label === "CTN" ? "" : " selected") + '>PLT</option>' +
+            '<option value="CTN"' + (u.packing_unit_label === "CTN" ? " selected" : "") + '>CTN</option>' +
+          '</select>' +
+          '<input type="number" step="any" min="0" class="js-unit-cap" data-idx="' + ui + '" value="' +
+            esc(u.capacity_boxes === null || u.capacity_boxes === undefined ? "" : u.capacity_boxes) +
+            '" placeholder="Capacity" style="max-width:100px;">' +
+          '<input type="text" class="js-unit-remarks" data-idx="' + ui + '" value="' + esc(u.remarks || "") + '" placeholder="Remarks" style="max-width:180px;">' +
+          '<span style="flex:1;"></span>' +
+          '<button type="button" class="btn-link-danger js-remove-unit" data-idx="' + ui + '">Remove unit</button>' +
+        '</div>';
+      html += '<table class="ledger" style="margin-top:8px;"><tbody>';
+      (u.contents || []).forEach(function (c, ci) {
+        var it = itemBySr(c.item_sr_no);
+        html += '<tr>' +
+          '<td class="text-sm">' + esc(itemLabel(it)) + '</td>' +
+          '<td class="num"><input type="number" step="any" min="0" class="js-content-qty" data-idx="' + ui +
+            '" data-ci="' + ci + '" value="' + esc(c.quantity_boxes) + '" style="max-width:90px;text-align:right;">' +
+            ' <span class="text-soft text-sm">' + esc(it ? it.quantity_unit : "") + '</span></td>' +
+          '<td style="width:80px;"><button type="button" class="btn-link-danger js-remove-content" data-idx="' + ui +
+            '" data-ci="' + ci + '">Remove</button></td>' +
+          '</tr>';
+      });
+      if (!(u.contents || []).length) {
+        html += '<tr><td class="text-soft text-sm" colspan="3">Empty — tick leftovers above and group them onto this unit.</td></tr>';
+      }
+      html += '</tbody></table>';
+      html += '<div class="text-sm" style="margin-top:4px;">Holds <strong>' + fmt(unitPacked(u), 0) + '</strong>' +
+        (u.capacity_boxes ? ' of ' + esc(u.capacity_boxes) : '') +
+        (over ? ' <strong style="color:#b91c1c;">— over capacity</strong>' : '') + '</div>';
+      html += '</div>';
+    });
+    pane.innerHTML = html;
+  }
+
+  function unitPacked(u) {
+    var total = 0;
+    (u.contents || []).forEach(function (c) { total += num(c.quantity_boxes); });
+    u.packed_boxes_cache = Math.round(total * 1000) / 1000;
+    return u.packed_boxes_cache;
+  }
+
+  // ---- the purchase-order picker (step 1's result, step 2's input) --------
+  // Not part of the items/units render loop: it only changes when step 1 is
+  // re-run, and its checkboxes are read directly by loadFromPOs() rather than
+  // tracked in a JS model - there is nothing here for the form itself to post.
+  function poSummary(po) {
+    var parts = [];
+    Object.keys(po.ready_totals || {}).forEach(function (unit) {
+      parts.push(fmt(po.ready_totals[unit], 0) + " " + esc(unit));
+    });
+    var batches = (po.batch_count || 0) + (po.batch_count === 1 ? " batch" : " batches");
+    return batches + (parts.length ? " ready · " + parts.join(", ") : " ready");
+  }
+
+  function renderPOs() {
+    var pane = document.getElementById("po-picker");
+    if (!purchaseOrders.length) {
+      pane.innerHTML = '<div class="text-soft text-sm" id="po-picker-empty">List purchase orders for selected PIs above first.</div>';
+      return;
+    }
+    var html = "";
+    purchaseOrders.forEach(function (po) {
+      // Pre-checked unless a caller (the edit-seed data) explicitly says
+      // otherwise - a plain List -> Load then reproduces loading every PO,
+      // same as before this was split into two steps.
+      html += '<label class="js-po-label" style="display:block;padding:4px 0;cursor:pointer;">' +
+        '<input type="checkbox" class="js-po-check" value="' + esc(po.id) + '"' +
+        (po.checked !== false ? ' checked' : '') + '>' +
+        ' <strong>' + esc(po.po_number) + '</strong> — ' + esc(po.seller_name) +
+        ' <span class="text-soft">(' + esc(po.proforma_invoice_number) + ')</span>' +
+        '<br><span class="text-soft text-sm">' + esc(poSummary(po)) + '</span>' +
+        '</label>';
+    });
+    pane.innerHTML = html;
+  }
+
+  // ---- render pipeline ---------------------------------------------------
+  function renderAll() { renderItems(); renderRemain(); renderUnits(); sync(); }
+  function sync() {
+    document.getElementById("manual_units_json").value = JSON.stringify(units.map(function (u) {
+      return {
+        unit_no: parseInt(u.unit_no, 10) || 0,
+        packing_type_id: u.packing_type_id || null,
+        packing_type_name: u.packing_type_name || null,
+        packing_unit_label: u.packing_unit_label || "PLT",
+        capacity_boxes: (u.capacity_boxes === "" || u.capacity_boxes === undefined) ? null : u.capacity_boxes,
+        remarks: u.remarks || null,
+        contents: (u.contents || []).map(function (c) {
+          return {item_sr_no: parseInt(c.item_sr_no, 10), quantity_boxes: num(c.quantity_boxes)};
+        })
+      };
+    }));
+  }
+
+  // ---- delegated handlers ------------------------------------------------
+  document.addEventListener("change", function (e) {
+    var t = e.target;
+    if (t.classList.contains("js-item-type")) {
+      var it = itemBySr(t.dataset.sr);
+      if (!it) return;
+      var bucket = packingTypes[String(it.product_id)] || {};
+      var all = (bucket.carton || []).concat(bucket.pallet || []);
+      var chosen = null;
+      all.forEach(function (x) { if (String(x.id) === t.value) chosen = x; });
+      if (chosen) {
+        it.packing_type_id = chosen.id;
+        it.packing_type_name = chosen.name;
+        it.packing_unit_label = chosen.label;
+        it.boxes_per_unit = chosen.boxes_per_pallet;
+        // Re-seed the whole-unit count off the new capacity - the number the
+        // old type produced means nothing under a different one.
+        it.actual_packing = Math.floor(num(it.ready_quantity) / num(chosen.boxes_per_pallet)) || 0;
+      } else if (!t.value) {
+        it.packing_type_id = null; it.packing_type_name = null; it.boxes_per_unit = null; it.actual_packing = 0;
+      }
+      renderAll();
+    } else if (t.classList.contains("js-item-cap")) {
+      var it2 = itemBySr(t.dataset.sr);
+      if (!it2) return;
+      it2.boxes_per_unit = t.value === "" ? null : num(t.value);
+      it2.actual_packing = it2.boxes_per_unit ? Math.floor(num(it2.ready_quantity) / it2.boxes_per_unit) : 0;
+      renderAll();
+    } else if (t.classList.contains("js-item-actual")) {
+      var it3 = itemBySr(t.dataset.sr);
+      if (it3) { it3.actual_packing = Math.max(parseInt(t.value, 10) || 0, 0); renderAll(); }
+    } else if (t.classList.contains("js-item-start")) {
+      var it4 = itemBySr(t.dataset.sr);
+      if (it4) { it4.packing_no_start = t.value === "" ? null : (parseInt(t.value, 10) || null); renderAll(); }
+    } else if (t.classList.contains("js-unit-no")) {
+      units[t.dataset.idx].unit_no = parseInt(t.value, 10) || 0; renderAll();
+    } else if (t.classList.contains("js-unit-name")) {
+      units[t.dataset.idx].packing_type_name = t.value; sync();
+    } else if (t.classList.contains("js-unit-label")) {
+      units[t.dataset.idx].packing_unit_label = t.value; sync();
+    } else if (t.classList.contains("js-unit-cap")) {
+      units[t.dataset.idx].capacity_boxes = t.value === "" ? null : num(t.value); renderUnits(); sync();
+    } else if (t.classList.contains("js-unit-remarks")) {
+      units[t.dataset.idx].remarks = t.value; sync();
+    } else if (t.classList.contains("js-content-qty")) {
+      units[t.dataset.idx].contents[t.dataset.ci].quantity_boxes = num(t.value); renderAll();
+    }
+  });
+
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (t.classList.contains("js-remove-item")) {
+      var sr = num(t.dataset.sr);
+      items = items.filter(function (it) { return num(it.sr_no) !== sr; });
+      // Its leftovers go with it - a manual unit holding a batch that is no
+      // longer on the document would post an sr_no the server can't resolve.
+      units.forEach(function (u) {
+        u.contents = (u.contents || []).filter(function (c) { return num(c.item_sr_no) !== sr; });
+      });
+      renderAll();
+    } else if (t.classList.contains("js-remove-unit")) {
+      units.splice(parseInt(t.dataset.idx, 10), 1); renderAll();
+    } else if (t.classList.contains("js-remove-content")) {
+      units[t.dataset.idx].contents.splice(parseInt(t.dataset.ci, 10), 1); renderAll();
+    } else if (t.id === "add-unit-btn") {
+      addUnit([]);
+    } else if (t.id === "group-selected-btn") {
+      var picked = [];
+      document.querySelectorAll(".js-remain-pick:checked").forEach(function (cb) {
+        var it = itemBySr(cb.dataset.sr);
+        if (!it) return;
+        var rows = remainRows();
+        for (var i = 0; i < rows.length; i++) {
+          if (num(rows[i].item.sr_no) === num(it.sr_no) && rows[i].left > 0.001) {
+            picked.push({item_sr_no: num(it.sr_no), quantity_boxes: rows[i].left});
+          }
+        }
+      });
+      if (!picked.length) { alert("Tick one or more leftovers with something still to pack."); return; }
+      addUnit(picked);
+    } else if (t.id === "auto-fill-btn") {
+      autoFill();
+    } else if (t.id === "list-pos-btn") {
+      listPOs();
+    } else if (t.id === "load-from-pos-btn") {
+      loadFromPOs();
+    }
+  });
+
+  function addUnit(contents) {
+    var first = contents.length ? itemBySr(contents[0].item_sr_no) : null;
+    units.push({
+      unit_no: nextPackingNo(),
+      packing_type_id: first ? first.packing_type_id : null,
+      // A mixed unit inherits the first batch's type as a starting point, but
+      // NOT its capacity: what a hand-packed pallet holds is the operator's
+      // call, which is the whole reason these rows exist.
+      packing_type_name: first ? first.packing_type_name : null,
+      packing_unit_label: first ? (first.packing_unit_label || "PLT") : "PLT",
+      capacity_boxes: null, remarks: null, contents: contents
+    });
+    renderAll();
+  }
+
+  // ---- server round-trips ------------------------------------------------
+  function autoFill() {
+    fetch("{{ url_for('packing_plannings.packing_planning_auto_fill') }}", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({items: items})
+    }).then(function (r) { return r.json(); }).then(function (data) {
+      if (data.error) { alert(data.error); return; }
+      items = data.items || [];
+      packingTypes = data.packing_types || {};
+      renderAll();
+    }).catch(function () { alert("Could not re-fill the packing."); });
+  }
+
+  function listPOs() {
+    // Step 1: which purchase orders the ticked PIs pulled in. Does not touch
+    // the goods lines - that's step 2, and only once this has run.
+    var ids = [];
+    document.querySelectorAll(".js-pi-check:checked").forEach(function (cb) { ids.push(cb.value); });
+    if (!ids.length) { alert("Tick at least one proforma invoice first."); return; }
+    fetch("{{ url_for('packing_plannings.packing_planning_purchase_orders') }}?proforma_invoice_ids=" + ids.join(","))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        purchaseOrders = data.purchase_orders || [];
+        renderPOs();
+        if (!purchaseOrders.length) {
+          alert("Those proforma invoices have no purchase orders yet.");
+        }
+      })
+      .catch(function () { alert("Could not list purchase orders for the selected proforma invoices."); });
+  }
+
+  function loadFromPOs() {
+    // Step 2: the batch lines of exactly the ticked purchase orders.
+    var ids = [];
+    document.querySelectorAll(".js-po-check:checked").forEach(function (cb) { ids.push(cb.value); });
+    if (!ids.length) {
+      alert(purchaseOrders.length ? "Tick at least one purchase order first."
+                                   : "List purchase orders for selected PIs first.");
+      return;
+    }
+    fetch("{{ url_for('packing_plannings.packing_planning_prefill') }}?purchase_order_ids=" + ids.join(","))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        items = data.items || [];
+        packingTypes = data.packing_types || {};
+        // The manual units are dropped: they referenced batch rows by sr_no,
+        // and the reload has just renumbered every one of them.
+        units = [];
+        if (!items.length) {
+          alert("Those purchase orders have no production batches keyed in yet.");
+        }
+        renderAll();
+      })
+      .catch(function () { alert("Could not load batches from the selected purchase orders."); });
+  }
+
+  // ---- buyer filter over the PI picker (same as every other document) -----
+  var buyerSelect = document.getElementById("buyer_select");
+  if (buyerSelect) {
+    buyerSelect.addEventListener("change", function () {
+      var opt = buyerSelect.options[buyerSelect.selectedIndex];
+      var key = opt ? (opt.dataset.companyKey || "") : "";
+      document.querySelectorAll(".js-pi-label").forEach(function (label) {
+        var cb = label.querySelector(".js-pi-check");
+        label.style.display = (!key || (cb && cb.dataset.companyKey === key)) ? "" : "none";
+      });
+    });
+  }
+
+  document.getElementById("pp-form").addEventListener("submit", sync);
+  renderPOs();
+  renderAll();
+})();
+</script>
+
+{% endblock %}

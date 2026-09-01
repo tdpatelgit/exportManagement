@@ -41,7 +41,7 @@
         </div>
       </details>
 
-      {% set doc_prefixes = ['quotations.', 'proforma_invoices.', 'purchase_orders.', 'job_works.', 'booking_details.', 'loading_plannings.', 'purchase_invoices.', 'job_outs.', 'job_ins.', 'export_invoices.', 'export_packing_lists.', 'export_annexures.', 'tax_invoices.', 'bl_drafts.', 'vgm_attachments.', 'vgm_declarations.', 'eseals.', 'eway_bills.', 'commercial_invoices.', 'commercial_packing_lists.', 'customer_invoices.', 'packing_lists.'] %}
+      {% set doc_prefixes = ['quotations.', 'proforma_invoices.', 'purchase_orders.', 'job_works.', 'booking_details.', 'packing_plannings.', 'loading_plannings.', 'purchase_invoices.', 'job_outs.', 'job_ins.', 'export_invoices.', 'export_packing_lists.', 'export_annexures.', 'tax_invoices.', 'bl_drafts.', 'vgm_attachments.', 'vgm_declarations.', 'eseals.', 'eway_bills.', 'commercial_invoices.', 'commercial_packing_lists.', 'customer_invoices.', 'packing_lists.'] %}
       {% set doc_open = request.endpoint and (request.endpoint.split('.')[0] ~ '.') in doc_prefixes %}
       <details class="nav-dropdown" {{ 'open' if doc_open }}>
         <summary class="nav-link nav-dropdown-summary {{ 'active' if doc_open }}">📁 Documents</summary>
@@ -51,6 +51,7 @@
           <a class="nav-link nav-sublink {{ 'active' if request.endpoint and request.endpoint.startswith('purchase_orders.') }}" href="{{ url_for('purchase_orders.list_purchase_orders') }}">🧾 Purchase Orders</a>
           <a class="nav-link nav-sublink {{ 'active' if request.endpoint and request.endpoint.startswith('job_works.') }}" href="{{ url_for('job_works.list_job_works') }}">🛠️ PO for Job Work</a>
           <a class="nav-link nav-sublink {{ 'active' if request.endpoint and request.endpoint.startswith('booking_details.') }}" href="{{ url_for('booking_details.list_booking_details') }}">🚢 Booking Detail</a>
+          <a class="nav-link nav-sublink {{ 'active' if request.endpoint and request.endpoint.startswith('packing_plannings.') }}" href="{{ url_for('packing_plannings.list_packing_plannings') }}">📦 Packing Planning</a>
           <a class="nav-link nav-sublink {{ 'active' if request.endpoint and request.endpoint.startswith('loading_plannings.') }}" href="{{ url_for('loading_plannings.list_loading_plannings') }}">📦 Loading Planning</a>
           <a class="nav-link nav-sublink {{ 'active' if request.endpoint and request.endpoint.startswith('purchase_invoices.') }}" href="{{ url_for('purchase_invoices.list_purchase_invoices') }}">🧾 Purchase Invoices</a>
           <a class="nav-link nav-sublink {{ 'active' if request.endpoint and request.endpoint.startswith('job_outs.') }}" href="{{ url_for('job_outs.list_job_outs') }}">🚚 Job Out</a>

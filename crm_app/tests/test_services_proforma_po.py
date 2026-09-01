@@ -343,6 +343,179 @@ class TestPurchaseOrder:
 
 
 # ==========================================================================
+# PurchaseOrderProductionService
+# ==========================================================================
+class TestPurchaseOrderProduction:
+    def _po(self, container, seed, items=None):
+        return container.purchase_order_service.create(
+            seed.admin, {"seller_name": "Supplier Ltd", "po_date": "2026-03-01"},
+            items or [{"product_name": "Tiles", "design_name": "Carrara", "quantity_boxes": "10",
+                       "quantity_value": "100", "price_inr": "500", "price_per": "BOX"}])
+
+    def _batch(self, **over):
+        batch = {"batch_number": "B-101", "production_date": "2026-03-05",
+                 "quantity_boxes": "4", "remarks": "first kiln run"}
+        batch.update(over)
+        return batch
+
+    def test_rows_default_to_pending_with_no_batches(self, container, seed):
+        po = self._po(container, seed)
+        rows = container.purchase_order_production_service.get_rows(po.id, seed.company_id)
+        assert len(rows) == 1
+        # No packing list, so no design breakdown - the line stands alone and
+        # is labelled by its product.
+        assert rows[0]["design_id"] is None and rows[0]["design_name"] is None
+        assert rows[0]["design_label"] == "Tiles"
+        assert rows[0]["status"] == "pending"
+        assert rows[0]["batches"] == [] and rows[0]["produced_boxes"] == 0
+
+    def test_status_and_batches_round_trip(self, container, seed):
+        po = self._po(container, seed)
+        item_id = po.items[0].id
+        container.purchase_order_production_service.save_row(
+            po.id, item_id, None, None, "ready",
+            [self._batch(), self._batch(batch_number="B-102", quantity_boxes="6", remarks="")],
+            seed.company_id, seed.admin.id)
+        row = container.purchase_order_production_service.get_rows(po.id, seed.company_id)[0]
+        assert row["status"] == "ready" and row["status_label"] == "Ready"
+        assert [b.batch_number for b in row["batches"]] == ["B-101", "B-102"]
+        assert row["produced_boxes"] == 10          # 4 + 6, the full ordered qty
+        assert row["updated_by_name"] == "Ada Admin"
+
+    def test_saving_again_replaces_the_batches(self, container, seed):
+        po = self._po(container, seed)
+        service = container.purchase_order_production_service
+        service.save_row(po.id, po.items[0].id, None, None, "in_production",
+                         [self._batch()], seed.company_id, seed.admin.id)
+        service.save_row(po.id, po.items[0].id, None, None, "ready",
+                         [self._batch(batch_number="B-999", quantity_boxes="10")],
+                         seed.company_id, seed.admin.id)
+        row = service.get_rows(po.id, seed.company_id)[0]
+        assert [b.batch_number for b in row["batches"]] == ["B-999"]
+
+    def test_blank_batch_rows_are_dropped(self, container, seed):
+        """The form always carries one spare row - saving with it untouched
+        must not store an empty batch."""
+        po = self._po(container, seed)
+        container.purchase_order_production_service.save_row(
+            po.id, po.items[0].id, None, None, "pending",
+            [self._batch(), {"batch_number": "", "production_date": "", "quantity_boxes": "", "remarks": ""}],
+            seed.company_id, seed.admin.id)
+        assert len(container.purchase_order_production_service.get_rows(
+            po.id, seed.company_id)[0]["batches"]) == 1
+
+    def test_unknown_status_is_rejected(self, container, seed):
+        po = self._po(container, seed)
+        with pytest.raises(ValidationError):
+            container.purchase_order_production_service.save_row(
+                po.id, po.items[0].id, None, None, "almost_ready", [],
+                seed.company_id, seed.admin.id)
+
+    def test_non_numeric_batch_quantity_is_rejected(self, container, seed):
+        po = self._po(container, seed)
+        with pytest.raises(ValidationError):
+            container.purchase_order_production_service.save_row(
+                po.id, po.items[0].id, None, None, "ready",
+                [self._batch(quantity_boxes="ten")], seed.company_id, seed.admin.id)
+
+    def test_a_line_from_another_purchase_order_is_not_found(self, container, seed):
+        first, second = self._po(container, seed), self._po(container, seed)
+        with pytest.raises(NotFoundError):
+            container.purchase_order_production_service.save_row(
+                second.id, first.items[0].id, None, None, "ready", [],
+                seed.company_id, seed.admin.id)
+
+    def test_another_companys_order_is_not_found(self, container, seed):
+        po = self._po(container, seed)
+        other = container.tenant_repo.create("Other", "other")
+        with pytest.raises(NotFoundError):
+            container.purchase_order_production_service.get_rows(po.id, other.id)
+
+    def test_designs_come_from_the_proforma_invoices_packing_list(self, container, seed):
+        """A purchase order orders by PRODUCT - one line of 10 boxes of Tiles.
+        Which designs those boxes are is settled on the linked proforma
+        invoice's packing list, so the card must split that one line into a
+        row per design, each carrying its own share of the boxes."""
+        pi = container.proforma_invoice_service.create(
+            seed.admin, {"consignee_name": "Buyer Co", "invoice_date": "2026-02-01"},
+            [{"product_name": "Tiles", "quantity_value": "100", "price_usd": "2"}])
+        container.packing_list_service.create(
+            seed.admin, {"packing_list_date": "2026-02-02", "proforma_invoice_id": pi.id},
+            [{"product_name": "Tiles", "design_name": "Carrara", "quantity_boxes": "6"},
+             {"product_name": "Tiles", "design_name": "Statuario", "quantity_boxes": "4"}])
+        po = container.purchase_order_service.create(
+            seed.admin, {"seller_name": "Supplier Ltd", "po_date": "2026-03-01",
+                         "proforma_invoice_id": str(pi.id)},
+            [{"product_name": "Tiles", "quantity_boxes": "10", "quantity_value": "100",
+              "price_inr": "500", "price_per": "BOX"}])
+
+        design_rows = container.packing_list_service.list_for_proforma(pi.id, seed.company_id)[0].items
+        rows = container.purchase_order_production_service.get_rows(
+            po.id, seed.company_id, design_rows)
+        assert [(r["design_label"], r["ordered_boxes"]) for r in rows] == [
+            ("Carrara", 6), ("Statuario", 4)]
+
+        # Each design carries its own status and batches, independently.
+        container.purchase_order_production_service.save_row(
+            po.id, rows[0]["item_id"], rows[0]["design_id"], "Carrara", "ready",
+            [self._batch(quantity_boxes="6")], seed.company_id, seed.admin.id)
+        reloaded = container.purchase_order_production_service.get_rows(
+            po.id, seed.company_id, design_rows)
+        assert [r["status"] for r in reloaded] == ["ready", "pending"]
+        assert reloaded[0]["produced_boxes"] == 6 and reloaded[1]["batches"] == []
+
+    def test_summary_map_counts_ready_lines(self, container, seed):
+        po = self._po(container, seed, items=[
+            {"product_name": "Tiles", "design_name": "Carrara", "quantity_boxes": "10",
+             "quantity_value": "100", "price_inr": "500", "price_per": "BOX"},
+            {"product_name": "Tiles", "design_name": "Statuario", "quantity_boxes": "5",
+             "quantity_value": "50", "price_inr": "500", "price_per": "BOX"},
+        ])
+        container.purchase_order_production_service.save_row(
+            po.id, po.items[0].id, None, None, "ready", [], seed.company_id, seed.admin.id)
+        summary = container.purchase_order_production_service.summary_map(seed.company_id)
+        assert summary[po.id] == {"ready": 1, "total": 2}
+
+    def test_summary_counts_designs_not_lines_when_there_is_a_packing_list(self, container, seed):
+        """One PO line of Tiles that the packing list splits into two designs
+        is two rows on the card, so marking one Ready is 1/2 - counting the
+        LINE would have shown a misleading 1/1."""
+        pi = container.proforma_invoice_service.create(
+            seed.admin, {"consignee_name": "Buyer Co", "invoice_date": "2026-02-01"},
+            [{"product_name": "Tiles", "quantity_value": "100", "price_usd": "2"}])
+        container.packing_list_service.create(
+            seed.admin, {"packing_list_date": "2026-02-02", "proforma_invoice_id": pi.id},
+            [{"product_name": "Tiles", "design_name": "Carrara", "quantity_boxes": "6"},
+             {"product_name": "Tiles", "design_name": "Statuario", "quantity_boxes": "4"}])
+        po = container.purchase_order_service.create(
+            seed.admin, {"seller_name": "Supplier Ltd", "po_date": "2026-03-01",
+                         "proforma_invoice_id": str(pi.id)},
+            [{"product_name": "Tiles", "quantity_boxes": "10", "quantity_value": "100",
+              "price_inr": "500", "price_per": "BOX"}])
+        service = container.purchase_order_production_service
+        assert service.summary_map(seed.company_id)[po.id] == {"ready": 0, "total": 2}
+        service.save_row(po.id, po.items[0].id, None, "Carrara", "ready", [],
+                         seed.company_id, seed.admin.id)
+        assert service.summary_map(seed.company_id)[po.id] == {"ready": 1, "total": 2}
+
+    def test_editing_the_order_keeps_the_production_history(self, container, seed):
+        """PurchaseOrderRepository._replace_items deletes and re-inserts every
+        line on save, and production rows cascade off those ids - they have to
+        be carried across by sr_no or a plain re-save wipes them."""
+        po = self._po(container, seed)
+        container.purchase_order_production_service.save_row(
+            po.id, po.items[0].id, None, None, "ready", [self._batch()],
+            seed.company_id, seed.admin.id)
+        container.purchase_order_service.update(
+            seed.admin, po.id, {"seller_name": "Supplier Ltd", "po_date": "2026-03-02"},
+            [{"product_name": "Tiles", "design_name": "Carrara", "quantity_boxes": "12",
+              "quantity_value": "120", "price_inr": "500", "price_per": "BOX"}])
+        row = container.purchase_order_production_service.get_rows(po.id, seed.company_id)[0]
+        assert row["status"] == "ready"
+        assert [b.batch_number for b in row["batches"]] == ["B-101"]
+
+
+# ==========================================================================
 # ClientService.document_feed
 # ==========================================================================
 class TestDocumentFeed:

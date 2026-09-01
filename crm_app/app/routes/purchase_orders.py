@@ -16,6 +16,7 @@ from datetime import date
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError
+from app.models import PRODUCTION_STATUSES
 from app.utils import login_required, admin_required, verify_delete_password
 
 purchase_orders_bp = Blueprint("purchase_orders", __name__, url_prefix="/purchase-orders")
@@ -143,8 +144,11 @@ def _product_meta_map(items) -> dict:
 @purchase_orders_bp.route("/")
 @login_required
 def list_purchase_orders():
-    purchase_orders = current_app.container.purchase_order_service.list_all(g.user.company_id)
-    return render_template("purchase_orders/list.html", purchase_orders=purchase_orders)
+    container = current_app.container
+    purchase_orders = container.purchase_order_service.list_all(g.user.company_id)
+    production_summary = container.purchase_order_production_service.summary_map(g.user.company_id)
+    return render_template("purchase_orders/list.html", purchase_orders=purchase_orders,
+                           production_summary=production_summary)
 
 
 @purchase_orders_bp.route("/new", methods=["GET", "POST"])
@@ -293,6 +297,74 @@ def delete_purchase_order(purchase_order_id):
     except NotFoundError:
         abort(404)
     return redirect(url_for("purchase_orders.list_purchase_orders"))
+
+
+# Which stamp colour each status prints in, kept out of the template so the
+# page and any later reader of it agree on one mapping.
+_PRODUCTION_STAMPS = {"pending": "stamp-slate", "in_production": "stamp-amber", "ready": "stamp-green"}
+
+
+@purchase_orders_bp.route("/<int:purchase_order_id>/production")
+@login_required
+def purchase_order_production(purchase_order_id):
+    """The Production Status page: what the supplier has actually made
+    against this order, one row per design. Its own page rather than a block
+    on the purchase order sheet - an order can run to fifty containers and
+    well over fifty designs, which is a working list, not something to read
+    above a printable document."""
+    container = current_app.container
+    try:
+        purchase_order = container.purchase_order_service.get(purchase_order_id, g.user.company_id)
+    except NotFoundError:
+        abort(404)
+    # The page tracks designs, and the design split of a PO's products is the
+    # same PACKING DETAILS breakdown the sheet itself prints.
+    pi_packing_lists = (
+        container.packing_list_service.list_for_proforma(purchase_order.proforma_invoice_id, g.user.company_id)
+        if purchase_order.proforma_invoice_id else []
+    )
+    production_rows = container.purchase_order_production_service.get_rows(
+        purchase_order_id, g.user.company_id, _packing_details_rows(purchase_order, pi_packing_lists))
+    return render_template("purchase_orders/production.html", purchase_order=purchase_order,
+                           production_rows=production_rows, production_statuses=PRODUCTION_STATUSES,
+                           status_stamps=_PRODUCTION_STAMPS)
+
+
+@purchase_orders_bp.route("/<int:purchase_order_id>/production/<int:item_id>", methods=["POST"])
+@login_required
+def save_production_status(purchase_order_id, item_id):
+    """Saves one design's production status and the full set of batches
+    posted with it, then goes back to the design on the production page."""
+    # A line with no design breakdown posts both design fields empty, which
+    # is its own key - not a missing one.
+    try:
+        design_id = int(request.form.get("design_id") or 0) or None
+    except ValueError:
+        abort(400)
+    batch_numbers = request.form.getlist("batch_number")
+    production_dates = request.form.getlist("production_date")
+    quantities = request.form.getlist("batch_quantity")
+    remarks = request.form.getlist("batch_remarks")
+    batches = [
+        {"batch_number": batch_number,
+         "production_date": production_dates[i] if i < len(production_dates) else "",
+         "quantity_boxes": quantities[i] if i < len(quantities) else "",
+         "remarks": remarks[i] if i < len(remarks) else ""}
+        for i, batch_number in enumerate(batch_numbers)
+    ]
+    try:
+        current_app.container.purchase_order_production_service.save_row(
+            purchase_order_id, item_id, design_id,
+            request.form.get("design_name"), request.form.get("status"), batches,
+            g.user.company_id, g.user.id,
+        )
+        flash("Production status saved.", "success")
+    except ValidationError as e:
+        flash(str(e), "error")
+    except NotFoundError:
+        abort(404)
+    return redirect(url_for("purchase_orders.purchase_order_production",
+                            purchase_order_id=purchase_order_id))
 
 
 @purchase_orders_bp.route("/<int:purchase_order_id>/versions")

@@ -22,18 +22,21 @@ from app.repositories import (
     SqlitePartyRepository, SqliteSupplierRepository, SqliteTransporterRepository,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
     CategoryRepository, ProductRepository, ProductPalletTypeRepository, ProductFolderRepository, DesignRepository,
-    QuotationRepository, ProformaInvoiceRepository, PurchaseOrderRepository, JobWorkRepository,
+    QuotationRepository, ProformaInvoiceRepository, PurchaseOrderRepository,
+    PurchaseOrderProductionRepository, JobWorkRepository,
     PurchaseInvoiceRepository, JobOutRepository, JobInRepository,
     ExportInvoiceRepository, ExportPackingListRepository, ExportDesignsPackingListRepository,
-    PackingListRepository, LoadingPlanningRepository, DocumentVersionRepository, PermitRepository, BookingDetailRepository, MiscCurrencyRepository, MiscNatureOfContractRepository,
+    PackingListRepository, LoadingPlanningRepository, PackingPlanningRepository, DocumentVersionRepository, PermitRepository, BookingDetailRepository, MiscCurrencyRepository, MiscNatureOfContractRepository,
     MiscPortOfLoadingRepository, MiscContainerTypeRepository, MiscHsnCodeRepository, MiscCountryRepository, MiscUnitRepository,
 )
 from app.services import (
     AuthService, LeadService, PartyService, SupplierService, TransporterService, CurrencyService,
     CommunicationService, StatsService, CompanyService, ReportService, ProductService,
-    QuotationService, ProformaInvoiceService, PurchaseOrderService, JobWorkService, PurchaseInvoiceService,
+    QuotationService, ProformaInvoiceService, PurchaseOrderService, PurchaseOrderProductionService,
+    JobWorkService, PurchaseInvoiceService,
     JobOutService, JobInService,
-    ExportInvoiceService, ExportPackingListService, PackingListService, LoadingPlanningService, BackupService,
+    ExportInvoiceService, ExportPackingListService, PackingListService, LoadingPlanningService,
+    PackingPlanningService, BackupService,
     DocumentVersionService, ProformaFulfilmentService,
     InventoryService, PermitService, BookingDetailService, MiscListService,
 )
@@ -68,6 +71,7 @@ class ServiceContainer:
         self.quotation_repo = QuotationRepository(db)
         self.proforma_invoice_repo = ProformaInvoiceRepository(db)
         self.purchase_order_repo = PurchaseOrderRepository(db)
+        self.purchase_order_production_repo = PurchaseOrderProductionRepository(db)
         self.job_work_repo = JobWorkRepository(db)
         self.purchase_invoice_repo = PurchaseInvoiceRepository(db)
         self.job_out_repo = JobOutRepository(db)
@@ -79,6 +83,7 @@ class ServiceContainer:
         )
         self.packing_list_repo = PackingListRepository(db)
         self.loading_planning_repo = LoadingPlanningRepository(db)
+        self.packing_planning_repo = PackingPlanningRepository(db)
         self.document_version_repo = DocumentVersionRepository(db)
         self.permit_repo = PermitRepository(db)
         self.booking_detail_repo = BookingDetailRepository(db)
@@ -164,6 +169,13 @@ class ServiceContainer:
             self.document_version_service, self.party_repos, self.supplier_repo, self.company_repo,
             self.proforma_fulfilment_service, self.misc_list_service, self.quotation_repo,
         )
+        # Screen-only companion to the purchase order: what the supplier has
+        # actually produced against each of its lines (see the Production
+        # Status card on the PO preview page). Leans on PurchaseOrderService
+        # for its company scoping rather than re-checking company_id itself.
+        self.purchase_order_production_service = PurchaseOrderProductionService(
+            self.purchase_order_production_repo, self.purchase_order_service,
+        )
         # Wired after PackingListService's own repo (job work reads a proforma
         # invoice's designs off its packing list, since an invoice only sells
         # by product - see JobWorkService.design_rows_for_proforma_invoice).
@@ -177,6 +189,17 @@ class ServiceContainer:
             self.lead_repo, self.proforma_invoice_repo, self.document_version_service,
             self.quotation_repo, self.purchase_order_repo, self.proforma_fulfilment_service,
             self.purchase_invoice_repo, self.job_work_repo,
+        )
+        # Packing Planning. Wired before Loading Planning because that is
+        # the order the two documents run in: this one turns what the
+        # supplier has produced into whole numbered pallets and cartons,
+        # and only then does a loading plan decide which container they
+        # go in. It takes purchase_order_production_repo, not
+        # packing_list_repo, because its lines are BATCHES - a batch
+        # number and a manufacturing date exist nowhere else.
+        self.packing_planning_service = PackingPlanningService(
+            self.packing_planning_repo, self.proforma_invoice_repo, self.purchase_order_repo,
+            self.purchase_order_production_repo, self.product_repo, self.product_pallet_type_repo,
         )
         # Loading Planning. Wired after packing_list_repo because its whole
         # reason for existing is that hop: it traces a proforma invoice
@@ -324,6 +347,7 @@ def create_app(config_class=Config) -> Flask:
     from app.routes.products import products_bp
     from app.routes.inventory import inventory_bp
     from app.routes.booking_details import booking_details_bp
+    from app.routes.packing_plannings import packing_plannings_bp
     from app.routes.loading_plannings import loading_plannings_bp
     from app.routes.quotations import quotations_bp
     from app.routes.proforma_invoices import proforma_invoices_bp
@@ -365,6 +389,7 @@ def create_app(config_class=Config) -> Flask:
     app.register_blueprint(products_bp)
     app.register_blueprint(inventory_bp)
     app.register_blueprint(booking_details_bp)
+    app.register_blueprint(packing_plannings_bp)
     app.register_blueprint(loading_plannings_bp)
     app.register_blueprint(quotations_bp)
     app.register_blueprint(proforma_invoices_bp)

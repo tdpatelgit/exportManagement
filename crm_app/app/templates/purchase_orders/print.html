@@ -51,6 +51,7 @@
       {% else %}
       <a href="{{ url_for('purchase_invoices.new_purchase_invoice', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">🧾 Create purchase invoice</a>
       {% endif %}
+      <a href="{{ url_for('purchase_orders.purchase_order_production', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">🏭 Production status</a>
       <a href="{{ url_for('purchase_orders.edit_purchase_order', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">Edit</a>
       {% if current_user.is_admin %}
       <a href="{{ url_for('purchase_orders.purchase_order_versions', purchase_order_id=purchase_order.id) }}" class="btn btn-ghost btn-sm">Version history</a>

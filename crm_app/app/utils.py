@@ -263,6 +263,20 @@ def register_template_helpers(app):
             return str(value)
         return f"{parsed.day} {parsed.strftime('%B %Y')}"
 
+    @app.template_filter("dmy_date")
+    def dmy_date(value):
+        """'2026-08-29' -> '29-08-2026' (the date style the Packing Planning
+        sheet's MANF. DATE column prints in, because that sheet is read
+        side by side with the spreadsheet it replaces)."""
+        if not value:
+            return "—"
+        from datetime import datetime
+        try:
+            parsed = datetime.strptime(str(value)[:10], "%Y-%m-%d")
+        except ValueError:
+            return str(value)
+        return parsed.strftime("%d-%m-%Y")
+
     @app.template_filter("inr_group")
     def inr_group(value):
         """2480000 -> '24,80,000.00' - the Indian lakh/crore digit grouping

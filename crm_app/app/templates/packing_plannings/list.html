@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Packing Planning{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Documents</div>
+    <h1>Packing Planning</h1>
+  </div>
+  {% if current_user.is_admin %}
+  <div class="topbar-actions">
+    <a href="{{ url_for('packing_plannings.new_packing_planning') }}" class="btn btn-primary">+ New packing planning</a>
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  {% if plans %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th>Number</th>
+          <th>Date</th>
+          <th class="num">Batches</th>
+          <th class="num">Manual units</th>
+          <th>Remarks</th>
+          <th>Created by</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for plan in plans %}
+        <tr>
+          <td class="mono"><strong>{{ plan.packing_planning_number }}</strong></td>
+          <td class="text-sm">{{ plan.packing_planning_date }}</td>
+          <td class="num">{{ plan.item_count or 0 }}</td>
+          <td class="num">{{ plan.unit_count or 0 }}</td>
+          <td class="text-sm">{{ plan.remarks or '—' }}</td>
+          <td class="text-sm">{{ plan.created_by_name }}</td>
+          <td class="text-sm" style="white-space:nowrap;">
+            <a href="{{ url_for('packing_plannings.view_packing_planning', packing_planning_id=plan.id) }}" class="btn btn-ghost btn-sm">Print</a>
+            {% if current_user.is_admin %}
+            <a href="{{ url_for('packing_plannings.edit_packing_planning', packing_planning_id=plan.id) }}" class="btn btn-ghost btn-sm">Edit</a>
+            <form method="POST" action="{{ url_for('packing_plannings.delete_packing_planning', packing_planning_id=plan.id) }}" style="display:inline;"
+                  onsubmit="return confirmDeleteWithPassword(this, 'Delete this packing planning? This cannot be undone.');">
+              <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    No packing plannings yet.
+    {% if current_user.is_admin %}<a href="{{ url_for('packing_plannings.new_packing_planning') }}">Add one →</a>{% endif %}
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}
