@@ -7,10 +7,9 @@
 {# Items beyond what fits on the invoice page spill onto the ANNEXURE sheet
    (_annexure.html) - the invoice page then shows a "(CONTINUE TO
    ANNEXURE----->)" marker, per-page totals and an Annexure line in the
-   charges block, like the original Excel document. Keep PI_ANNEX_START in
-   sync with _annexure.html. #}
+   charges block, like the original Excel document. Where the split falls is
+   measured from the rows the items print (goods.annex_start). #}
 {% import 'proforma_invoices/_goods_rows.html' as goods %}
-{% set PI_ANNEX_START = 6 %}
 {% set pi_mode = invoice.display_mode or 'index' %}
 {# printed_items, not items: the typed rate is the FOB rate, and what a
    buyer reads here is the CIF rate - the charges spread over the total ALT
@@ -21,6 +20,7 @@
    step: customs has no round-off line to accept, and the FOB value this is
    all built up from is the figure the buyer and the seller agreed. #}
 {% set printed_items = invoice.printed_items %}
+{% set PI_ANNEX_START = goods.annex_start(printed_items, pi_mode)|int %}
 {% set main_items = printed_items[:PI_ANNEX_START] %}
 {% set annex_items = printed_items[PI_ANNEX_START:] %}
 {# The filler row's height is measured in the browser (templates/_page_filler.html)
@@ -75,8 +75,8 @@
   .pi-nest table.pi-nosplit td + td { border-left: none; }
   .pi-items thead td { text-align: center; vertical-align: middle; font-size: 9px; }
   .pi-items tbody tr.pi-goods td, .pi-items tbody tr.pi-filler td { border-top: none; border-bottom: none; padding: 2px 5px; }
+  .pi-items tbody tr.pi-goods td { font-size: 8px; }
   .pi-items tbody tr.pi-goods td.pi-right, .pi-items tbody tr.pi-goods td.pi-center { white-space: nowrap; }
-  .pi-items tbody tr.pi-group-gap td { height: 8px; padding: 0; }
   .pi-charge-label { text-align: left; font-weight: bold; font-size: 9px; vertical-align: middle; }
   .pi-sign-cell { height: 92px; padding: 4px 6px; }
   .pi-sign-flex { display: flex; flex-direction: column; justify-content: space-between; height: 100%; }
@@ -173,8 +173,10 @@
   <!-- Goods -->
   <table class="pi-items">
     <colgroup>
-      <col style="width:6%"><col style="width:29%"><col style="width:8%"><col style="width:9%"><col style="width:11%">
-      <col style="width:11%"><col style="width:9%"><col style="width:17%">
+      {# Same widths as the export invoice sheet's goods table. #}
+      <col style="width:5%"><col style="width:40%"><col style="width:8%">
+      <col style="width:9%"><col style="width:8%"><col style="width:9%">
+      <col style="width:11%"><col style="width:10%">
     </colgroup>
     <thead>
       <tr>

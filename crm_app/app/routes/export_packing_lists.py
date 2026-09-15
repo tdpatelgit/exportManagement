@@ -17,6 +17,7 @@ both of which the export_invoices blueprint already owns.
 from flask import Blueprint, render_template, url_for, current_app, g, abort, redirect
 
 from app.exceptions import NotFoundError
+from app.routes.export_invoices import _packing_labels
 from app.utils import login_required
 
 export_packing_lists_bp = Blueprint("export_packing_lists", __name__, url_prefix="/export-packing-lists")
@@ -47,6 +48,10 @@ def view_export_packing_list(export_packing_list_id):
     return render_template(
         "export_packing_lists/print.html",
         packing_list=packing_list, invoice=packing_list.invoice, company=company, lut_no=lut_no,
+        # Same per-goods-line units the export invoice prints (PLTS / CTNS /
+        # PCS, from Packing Planning), keyed by the invoice line's sr_no -
+        # which is what every packing-list row's invoice_item_sr_no points at.
+        packing_labels=_packing_labels(packing_list.invoice),
     )
 
 

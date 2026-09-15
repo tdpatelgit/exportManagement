@@ -60,6 +60,7 @@
   .ti-items tbody td { vertical-align: top; }
   .ti-goods { font-weight: bold; }
   .ti-tot td { font-weight: bold; }
+  .ti-hsn-head td { font-weight: bold; }
   /* The two figures the reader is here for get a shaded band and heavier
      rules. Money columns only - the e-way-bill and quantity cells beside them
      must not be cut across. */
@@ -101,6 +102,11 @@
 {% macro rs(v) -%}
   {%- set n = invoice.in_inr(v) -%}
   {%- if n %}₹&nbsp;{{ ind(n) }}{% else %}₹&nbsp;-{% endif -%}
+{%- endmacro %}
+
+{# The Total Amount column: a bare figure, no ₹ and no digit grouping. #}
+{% macro plain(n) -%}
+  {%- if n %}{{ '{:.2f}'.format(n) }}{% else %}-{% endif -%}
 {%- endmacro %}
 
 {# As above, but always carrying its sign - for ROUND-OFF, which has to read as
@@ -213,9 +219,9 @@
   <!-- ============ GOODS + TOTALS (one shared column grid) ============ -->
   <table class="ti-items">
     <colgroup>
-      <col style="width:5%"><col style="width:34%"><col style="width:9%">
+      <col style="width:5%"><col style="width:35%"><col style="width:6%">
       <col style="width:6%"><col style="width:6%"><col style="width:9%">
-      <col style="width:9%"><col style="width:5%"><col style="width:17%">
+      <col style="width:9%"><col style="width:5%"><col style="width:5%"><col style="width:14%">
     </colgroup>
     <thead>
       <tr>
@@ -227,6 +233,7 @@
         <td>Alt. Qty</td>
         <td>Rate</td>
         <td>Unit</td>
+        <td>IGST %</td>
         <td>Total Amount</td>
       </tr>
     </thead>
@@ -243,19 +250,23 @@
           {{ item.product_name }}
           {%- if item.dimension_mm %}<br>{{ item.dimension_mm }}{% endif -%}
         </td>
-        <td class="ti-c">{{ item.hsn_code or '' }}</td>
+        {# Print shows the 6-digit HSN heading; the stored code stays 8 digits. #}
+        <td class="ti-c">{{ ((item.hsn_code or '')|string|trim)[:6] }}</td>
         <td class="ti-cnum">{{ '{:,.0f}'.format(item.pallets) if item.pallets else '' }}</td>
         <td class="ti-cnum">{% if item.quantity_boxes %}{{ '{:,.0f}'.format(item.quantity_boxes) }} <span class="ti-unit-sm">{{ item.quantity_unit }}</span>{% endif %}</td>
         <td class="ti-cnum">{{ '{:,.2f}'.format(item.quantity_value) }} <span class="ti-unit-sm">{{ item.unit }}</span></td>
         <td class="ti-cnum">{{ rs(item.price_usd) }}</td>
         <td class="ti-c">{{ item.unit }}</td>
-        <td class="ti-num">{{ rs(item.total_usd) }}</td>
+        {# The line's own IGST rate, snapshotted from the product when saved;
+           0 under LUT, where no IGST is charged. #}
+        <td class="ti-c">{{ '%g'|format(0 if invoice.tax_mode == 'lut' else (item.igst_percent or 0)) }}%</td>
+        <td class="ti-num">{{ plain(invoice.in_inr(item.total_usd)) }}</td>
       </tr>
       {% endfor %}
       {# Blank filler, stretched by _page_filler.html so the sheet fills its A4
          page exactly however few goods lines there are. #}
       <tr class="js-page-filler">
-        <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+        <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
       </tr>
 
       {# Totals: two money rows only. This document is not the charges ladder -
@@ -267,8 +278,8 @@
         <td class="ti-cnum">{{ '{:,.0f}'.format(ns.plts) if ns.plts else '' }}</td>
         <td class="ti-cnum">{{ '{:,.0f}'.format(ns.boxes) if ns.boxes else '' }}</td>
         <td class="ti-cnum">{{ '{:,.2f}'.format(ns.qty) }}</td>
-        <td colspan="2" class="ti-r">Total Invoice Value</td>
-        <td class="ti-num">{{ rs(invoice.cif_value_usd) }}</td>
+        <td colspan="3" class="ti-r">Total Invoice Value</td>
+        <td class="ti-num">{{ plain(invoice.in_inr(invoice.cif_value_usd)) }}</td>
       </tr>
       <tr class="ti-tot">
         <td colspan="3" style="font-weight:normal;">
@@ -281,11 +292,45 @@
         <td class="ti-c">Alt. Qty</td>
         {# Already an INR figure (the per-product percentages are applied to the
            converted line totals), so it is NOT put through rs() again. #}
-        <td colspan="2" class="ti-r">IGST</td>
-        <td class="ti-num">{% if invoice.tax_mode != 'lut' %}₹&nbsp;{{ ind(invoice.igst_amount_inr) }}{% else %}NIL{% endif %}</td>
+        <td colspan="3" class="ti-r">IGST</td>
+        <td class="ti-num">{% if invoice.tax_mode != 'lut' %}{{ '{:.2f}'.format(invoice.igst_amount_inr or 0) }}{% else %}NIL{% endif %}</td>
       </tr>
     </tbody>
   </table>
+
+  <!-- ============ HSN-WISE SUMMARY (its own grid) ============ -->
+  {# The goods lines summed per printed 6-digit HSN (and IGST %, should one
+     HSN carry two rates). Display only - the Total Invoice Value and IGST rows
+     above are worked out as before. IGST AMOUNT = TAXABLE AMOUNT x IGST %;
+     NIL under LUT, matching the IGST row. #}
+  {% set hsn = namespace(keys=[], totals={}) %}
+  {% for item in invoice.printed_items %}
+    {% set key = (((item.hsn_code or '')|string|trim)[:6], 0 if invoice.tax_mode == 'lut' else (item.igst_percent or 0)) %}
+    {% if key not in hsn.totals %}{% set _ = hsn.keys.append(key) %}{% endif %}
+    {% set _ = hsn.totals.update({key: hsn.totals.get(key, 0) + invoice.in_inr(item.total_usd)}) %}
+  {% endfor %}
+  {% if hsn.keys %}
+  <table class="ti-hsn">
+    <colgroup><col style="width:25%"><col style="width:25%"><col style="width:25%"><col style="width:25%"></colgroup>
+    <tr class="ti-hsn-head">
+      <td colspan="4" class="ti-c">HSNC wise Summary</td>
+    </tr>
+    <tr class="ti-hsn-head">
+      <td class="ti-c">HSNC</td>
+      <td class="ti-c">TAXABLE AMOUNT</td>
+      <td class="ti-c">IGST %</td>
+      <td class="ti-c">IGST AMOUNT</td>
+    </tr>
+    {% for key in hsn.keys %}
+    <tr>
+      <td class="ti-c">{{ key[0] or '-' }}</td>
+      <td class="ti-num">{{ plain(hsn.totals[key]) }}</td>
+      <td class="ti-c">{{ '%g'|format(key[1]) }}%</td>
+      <td class="ti-num">{% if invoice.tax_mode != 'lut' %}{{ '{:.2f}'.format(hsn.totals[key] * key[1] / 100) }}{% else %}NIL{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
 
   <!-- ============ AMOUNTS IN WORDS | SIGNATORY ============ -->
   {# Indian crore/lakh wording, the same filter the printed Purchase Order

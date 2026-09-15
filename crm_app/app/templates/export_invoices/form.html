@@ -51,6 +51,28 @@
     <p class="hint">Loading traces each selected PI through its purchase orders to their purchase invoices, and pulls in the goods lines actually bought on those invoices (priced at the PI's own USD rate) plus EPCG / export-under / supplier purchase details. Only the fields that come from the PIs are replaced &mdash; anything else you've already typed (invoice no., permit details, containers) is kept, so re-loading after a wrong pick is safe.</p>
   </div>
 
+  {# ---- Reference loading planning -----------------------------------------
+     The second importer on this form, and the physical counterpart of the one
+     above it. The PI loader fills the commercial half (consignee, charges,
+     bank, supplier/EPCG rows); this one fills what actually left the yard -
+     the containers, the goods on them and the container split - off the
+     Loading Planning already raised for the same PIs. The two fill disjoint
+     sets of fields on purpose, so either can be re-run after a wrong pick
+     without undoing the other. Nothing here is stored on the invoice: the
+     plan is an import source, not a link. #}
+  <div class="card">
+    <div class="card-header"><h3>Reference loading planning</h3></div>
+    <div class="field">
+      <label for="loading_planning_select">Loading planning <span class="text-soft text-sm">(the plans raised against the proforma invoices ticked above)</span></label>
+      <select id="loading_planning_select">
+        <option value="">— Tick proforma invoices above first —</option>
+      </select>
+    </div>
+    <button type="button" class="btn btn-ghost btn-sm" id="load-from-lp-btn">↻ Load container details, goods &amp; packing split</button>
+    <div id="lp-warnings" class="text-warn text-sm" style="margin-top:10px;"></div>
+    <p class="hint">Loading replaces the booking, vessel/voyage, transporter, the container rows and the whole <strong>11B</strong> table with the plan's own snapshot, rewrites <strong>Products</strong> as one line per product (the plan's per-batch rows are merged, and priced at the PI's USD rate), and fills the <strong>Export packing list — container split</strong> from the pallets actually loaded — boxes, pallets and net/gross weights per container. Everything else you've already typed (invoice no., permit details, charges, bank) is kept, so re-loading after a wrong pick is safe.</p>
+  </div>
+
   <div class="card">
     <div class="card-header"><h3>Purchase details <span class="text-soft text-sm">— supplier GSTIN, invoice no., name, Purchase under, EPCG number &amp; date (imported for all purchases)</span></h3></div>
     <div id="purchase-detail-rows">
@@ -366,10 +388,6 @@
         {% if not can_edit_rate %}<div class="text-sm text-soft">Set already — only an admin can change it.</div>{% endif %}
       </div>
     </div>
-    <div class="form-row">
-      <div class="field"><label for="shipping_bill_no">Shipping bill no.</label><input type="text" id="shipping_bill_no" name="shipping_bill_no" value="{{ data.shipping_bill_no | default('', true) }}"></div>
-      <div class="field"><label for="shipping_bill_date">Shipping bill date</label><input type="date" id="shipping_bill_date" name="shipping_bill_date" value="{{ (data.shipping_bill_date | default('', true))[:10] }}"></div>
-    </div>
     <div class="field">
       <label for="permit_select">Permit no. <span class="text-soft text-sm">(optional — fills the invoice's permit details in from Our Company permits; printed on the export invoice, packing list and Annexure-C)</span></label>
       <select id="permit_select">
@@ -510,7 +528,7 @@
           {% set rows = form_items if form_items is not none else (invoice.items if invoice else []) %}
           {% for row in rows %}
           {% set meta = (product_meta_map.get(row.product_id | int, {}) if row.product_id else {}) %}
-          <tr class="item-row" data-alt-qty=""
+          <tr class="item-row" data-alt-qty="{{ meta.get('alternate_quantity') or '' }}"
               data-pallet-types="{{ (pallet_types_map.get(row.product_id | int, []) if row.product_id else []) | tojson | forceescape }}"
               data-igst="{{ row.igst_percent | default('', true) }}"
               data-net-weight="{{ meta.get('net_weight_kg') or '' }}"
@@ -526,7 +544,9 @@
             </td>
             <td><input type="text" name="item_hsn_code[]" class="js-hsn" value="{{ row.hsn_code or '' }}" readonly tabindex="-1"></td>
             <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" value="{{ row.quantity_boxes or '' }}"></td>
-            <td><select class="js-pallet-type"><option value="">Loose — no pallets</option></select></td>
+            {# Read-only: the packing is decided in Packing Planning and comes in
+               through the loaded goods lines, so it is not picked here. #}
+            <td><select class="js-pallet-type" disabled title="Comes from Packing / Loading Planning"><option value="">Loose — no pallets</option></select></td>
             <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets" value="{{ row.pallets or '' }}"></td>
             <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required value="{{ row.quantity_value or '' }}"></td>
             <td>
@@ -737,7 +757,7 @@
       </td>
       <td><input type="text" name="item_hsn_code[]" class="js-hsn" readonly tabindex="-1"></td>
       <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes"></td>
-      <td><select class="js-pallet-type"><option value="">Loose — no pallets</option></select></td>
+      <td><select class="js-pallet-type" disabled title="Comes from Packing / Loading Planning"><option value="">Loose — no pallets</option></select></td>
       <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets"></td>
       <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required></td>
       <td>
@@ -1006,6 +1026,9 @@
     // raised in (see currency_code's server-rendered `disabled` above and
     // _build_header, which enforces the same rule either way).
     currencySelect.disabled = proformaPicker.querySelectorAll('.js-pi-check:checked').length > 0;
+    // The loading-planning dropdown is narrowed by the same ticked set, so it
+    // is refetched from here rather than wired to its own listener.
+    refreshLoadingPlanningOptions();
   }
 
   if (proformaPicker) {
@@ -1108,6 +1131,11 @@
     tr.querySelector('.js-qty').value = item.quantity_value || '';
     setUnitValue(tr.querySelector('.js-unit'), item.unit);
     tr.querySelector('.js-price').value = item.price_usd || '';
+    // Qty (SQM/LM) is boxes x the product's alternate quantity. A value the
+    // prefill already carries (the PI loader's, off what was actually bought)
+    // is kept; a blank one is derived here instead of being left empty.
+    tr.dataset.altQty = parseFloat(item.alternate_quantity) || '';
+    if (!(parseFloat(item.quantity_value) > 0)) recalcRowQty(tr);
     return tr;
   }
 
@@ -1251,6 +1279,125 @@
       .then(applyPrefill)
       .catch(() => alert("Couldn't load the details from those proforma invoices. Please try again."))
       .finally(() => { loadBtn.disabled = false; loadBtn.textContent = label; });
+  });
+
+  // ---- reference loading-planning loader ------------------------------------
+  // The physical counterpart of the PI loader above: containers, goods and
+  // the container split, off a finished Loading Planning. It touches nothing
+  // the PI loader fills and nothing the PI loader touches, so the two can be
+  // run in either order and either can be re-run on its own.
+  const lpWarnings = document.getElementById('lp-warnings');
+  const lpLoadBtn = document.getElementById('load-from-lp-btn');
+
+  // Looked up per call rather than held in a const: the reference-PI picker
+  // above calls this on its own first pass, which happens before the consts
+  // in this block have been initialised.
+  function refreshLoadingPlanningOptions() {
+    const lpSelect = document.getElementById('loading_planning_select');
+    if (!lpSelect) return;
+    const ids = Array.from(document.querySelectorAll('.js-pi-check:checked')).map((c) => c.value).filter(Boolean);
+    const keep = lpSelect.value;
+    if (!ids.length) {
+      lpSelect.innerHTML = '<option value="">— Tick proforma invoices above first —</option>';
+      return;
+    }
+    fetch('{{ url_for("export_invoices.export_invoice_loading_plannings") }}?proforma_invoice_ids=' + encodeURIComponent(ids.join(',')))
+      .then((r) => { if (!r.ok) throw new Error('failed'); return r.json(); })
+      .then((data) => {
+        const plans = data.loading_plannings || [];
+        lpSelect.innerHTML = plans.length
+          ? '<option value="">— Select a loading planning —</option>'
+          : '<option value="">— No loading planning for these proforma invoices —</option>';
+        plans.forEach((p) => {
+          const bits = [p.loading_planning_date, p.booking_no ? 'Booking ' + p.booking_no : '',
+                        p.container_count + ' cntr', p.packing_count + ' pkg'].filter(Boolean);
+          lpSelect.appendChild(new Option(p.loading_planning_number + ' — ' + bits.join(' · '), p.id));
+        });
+        // A reload triggered by an unrelated tick shouldn't lose the pick.
+        if (keep && Array.from(lpSelect.options).some((o) => o.value === keep)) lpSelect.value = keep;
+      })
+      .catch(() => { lpSelect.innerHTML = '<option value="">— Could not load the list —</option>'; });
+  }
+
+  function applyLoadingPrefill(data) {
+    // Booking fields are set directly, NOT by firing the dropdown's change
+    // handler: that handler re-copies the booking's CURRENT container rows,
+    // which would throw away the snapshot the plan actually shipped under.
+    const bookingSelect = document.getElementById('booking_no');
+    const bookingNo = data.fields.booking_no || '';
+    if (bookingNo && !Array.from(bookingSelect.options).some((o) => o.value === bookingNo)) {
+      bookingSelect.appendChild(new Option(bookingNo, bookingNo));
+    }
+    bookingSelect.value = bookingNo;
+    document.getElementById('booking_detail_id').value = data.fields.booking_detail_id || '';
+    document.getElementById('vessel_name').value = data.fields.vessel_name || '';
+    document.getElementById('voyage_no').value = data.fields.voyage_no || '';
+    document.getElementById('cd_transporter_name').value = data.fields.cd_transporter_name || '';
+
+    const containerWrap = document.getElementById('container-rows');
+    containerWrap.innerHTML = '';
+    (data.containers || []).forEach((c) => {
+      const div = document.createElement('div');
+      div.className = 'form-row container-row';
+      div.innerHTML = `
+        <div class="field"><label>Container type</label><input type="text" name="container_type[]" class="js-container-type" value="${c.container_type || ''}" readonly></div>
+        <div class="field" style="max-width:120px;"><label>No. of containers</label><input type="number" min="0" step="1" name="container_count[]" class="js-container-count" value="${c.container_count || ''}"></div>
+        <div class="field" style="max-width:90px;align-self:flex-end;"><button type="button" class="btn-link-danger js-remove-container">Remove</button></div>`;
+      containerWrap.appendChild(div);
+    });
+    updateTypeColumnVisibility();
+
+    cdBody.innerHTML = '';
+    (data.container_details || []).forEach((cd) => {
+      const tr = cdRowTemplate();
+      tr.querySelector('[name="cd_container_type[]"]').value = cd.container_type || '';
+      tr.querySelector('[name="cd_container_no[]"]').value = cd.container_no || '';
+      tr.querySelector('[name="cd_max_permitted_weight[]"]').value = cd.max_permitted_weight || '';
+      tr.querySelector('[name="cd_tare_weight_kg[]"]').value = cd.tare_weight_kg !== '' && cd.tare_weight_kg != null ? cd.tare_weight_kg : '';
+      tr.querySelector('[name="cd_vehicle_no[]"]').value = cd.vehicle_no || '';
+      tr.querySelector('[name="cd_lr_no[]"]').value = cd.lr_no || '';
+      tr.querySelector('[name="cd_line_seal_no[]"]').value = cd.line_seal_no || '';
+      tr.querySelector('[name="cd_rfid_seal_no[]"]').value = cd.rfid_seal_no || '';
+      cdBody.appendChild(tr);
+    });
+    cdRenumber();
+
+    // Goods come across merged per product - the plan's batch rows are not
+    // something the invoice prints. Same row builder the PI loader uses, so a
+    // loaded row behaves like a freshly picked product.
+    itemsBody.innerHTML = '';
+    (data.items || []).forEach((item) => {
+      const tr = buildLoadedRow(item);
+      itemsBody.appendChild(tr);
+      initRowPalletSelection(tr);
+    });
+    renumber();
+    recalcTotals();
+
+    // NOT 'goods-replaced', which resets the split to "everything in
+    // container 1" - this carries the plan's own split with it.
+    itemsBody.dispatchEvent(new CustomEvent('packing-split-loaded', {
+      bubbles: true, detail: { allocations: data.allocations || [] },
+    }));
+
+    const warnings = data.warnings || [];
+    lpWarnings.innerHTML = warnings.length
+      ? warnings.map((w) => '<div>⚠ ' + w.replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch])) + '</div>').join('')
+      : '';
+  }
+
+  lpLoadBtn.addEventListener('click', () => {
+    const planId = document.getElementById('loading_planning_select').value;
+    if (!planId) { alert('Pick a loading planning first.'); return; }
+    if (!confirm('This replaces the container details, the goods lines and the container split with this loading planning. Continue?')) return;
+    const label = lpLoadBtn.textContent;
+    lpLoadBtn.disabled = true;
+    lpLoadBtn.textContent = 'Loading…';
+    fetch('{{ url_for("export_invoices.export_invoice_loading_prefill") }}?loading_planning_id=' + encodeURIComponent(planId))
+      .then((r) => { if (!r.ok) throw new Error('failed'); return r.json(); })
+      .then(applyLoadingPrefill)
+      .catch(() => alert("Couldn't load that loading planning. Please try again."))
+      .finally(() => { lpLoadBtn.disabled = false; lpLoadBtn.textContent = label; });
   });
 
   // ---- repeatable list helpers (containers / purchase details / 11B) ----
@@ -1735,6 +1882,12 @@
   // Loading from the reference PIs replaces the goods lines outright, so the
   // old split refers to rows that no longer exist - start it over.
   itemsBody.addEventListener('goods-replaced', () => render(defaultState(goodsLines())));
+  // Loading from a reference loading planning replaces the goods lines AND
+  // knows how they were really split, so it supplies the state instead.
+  // render() re-renders with force=false, so the plan's own pallets and
+  // net/gross weights survive untouched.
+  itemsBody.addEventListener('packing-split-loaded', (e) =>
+    render((e.detail && e.detail.allocations) || []));
 
   document.getElementById('alloc-rebuild-btn').addEventListener('click', () => render(readState()));
   document.getElementById('alloc-fill-btn').addEventListener('click', () => {

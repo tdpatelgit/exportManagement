@@ -265,6 +265,10 @@ def _product_maps(items) -> tuple:
             for pt in container.product_service.pallet_types_for_product(product_id)
         ]
         meta_map[product_id] = {
+            # Per-box SQM/LM, so Qty can be derived from Boxes on a row the
+            # product picker never touched (a saved invoice, or one loaded
+            # from the PIs or a loading planning).
+            "alternate_quantity": product.alternate_quantity,
             "net_weight_kg": product.net_weight_kg,
             "gross_weight_kg": product.gross_weight_kg,
             "group_label": container.export_packing_list_service.group_label_for(product, product.product_name),
@@ -426,6 +430,7 @@ def export_invoice_prefill():
             # The catalog extras the rendered rows carry as data- attributes,
             # so a loaded row behaves like a freshly picked product.
             "pallet_types": pallet_types_map.get(product_id, []),
+            "alternate_quantity": meta.get("alternate_quantity") or "",
             "net_weight_kg": meta.get("net_weight_kg") or "",
             "gross_weight_kg": meta.get("gross_weight_kg") or "",
             "group_label": meta.get("group_label") or "",
@@ -446,6 +451,138 @@ def export_invoice_prefill():
                     "product_sources": built["product_sources"], "job_ins": job_ins})
 
 
+@export_invoices_bp.route("/api/loading-plannings")
+@login_required
+def export_invoice_loading_plannings():
+    """The loading plannings raised against the currently ticked proforma
+    invoices - what fills the form's "Reference loading planning" dropdown.
+
+    Narrowed by the PIs rather than listed whole, for the same reason the PI
+    picker is narrowed by buyer: one export invoice covers one shipment, and
+    the plan that loaded it is one of a handful."""
+    raw_ids = request.args.get("proforma_invoice_ids") or request.args.get("proforma_invoice_id") or ""
+    proforma_ids = [p for p in raw_ids.split(",") if p.strip()]
+    plans = current_app.container.loading_planning_service.loading_plannings_for_proformas(
+        proforma_ids, g.user.company_id
+    )
+    return jsonify({"loading_plannings": plans})
+
+
+@export_invoices_bp.route("/api/loading-prefill")
+@login_required
+def export_invoice_loading_prefill():
+    """The physical half of the invoice, off one finished loading planning:
+    the containers that went out, the goods on them merged per product, and
+    the container split.
+
+    Deliberately separate from /api/prefill, which covers the commercial half
+    off the reference PIs - the two loaders fill disjoint sets of fields, so
+    either can be re-run after a wrong pick without undoing the other."""
+    try:
+        built = current_app.container.loading_planning_service.build_export_invoice_prefill(
+            request.args.get("loading_planning_id"), g.user.company_id
+        )
+    except NotFoundError as e:
+        return jsonify({"error": str(e)}), 404
+
+    # Same catalog extras /api/prefill attaches, for the same reason: the
+    # goods rows carry them as data- attributes, and the container split reads
+    # its group label and per-box weights straight off those.
+    pallet_types_map, product_meta_map = _product_maps(built["items"])
+    items = []
+    for item in built["items"]:
+        try:
+            product_id = int(item["product_id"]) if item.get("product_id") else None
+        except (TypeError, ValueError):
+            product_id = None
+        meta = product_meta_map.get(product_id, {})
+        items.append({
+            **{k: ("" if v is None else v) for k, v in item.items()},
+            "pallet_types": pallet_types_map.get(product_id, []),
+            "alternate_quantity": meta.get("alternate_quantity") or "",
+            "net_weight_kg": meta.get("net_weight_kg") or "",
+            "gross_weight_kg": meta.get("gross_weight_kg") or "",
+            "group_label": meta.get("group_label") or "",
+        })
+
+    return jsonify({
+        "fields": {k: ("" if v is None else v) for k, v in built["fields"].items()},
+        "loading_planning_number": built["loading_planning_number"],
+        "containers": built["containers"],
+        "container_details": [{k: ("" if v is None else v) for k, v in cd.items()}
+                              for cd in built["container_details"]],
+        "items": items,
+        "allocations": built["allocations"],
+        "warnings": built["warnings"],
+    })
+
+
+# Packing Planning's unit labels, as the printed Packing column spells them.
+_PACKING_UNIT_PLURALS = {"PLT": "PLTS", "CTN": "CTNS", "BOX": "BOXES", "BAG": "BAGS", "SET": "SETS", "PCS": "PCS"}
+
+
+def _packing_labels(invoice) -> dict:
+    """sr_no -> the unit the printed Packing column shows for that goods line
+    (PLTS, CTNS, PCS ...).
+
+    Packing Planning decides the unit, Loading Planning carries it onto every
+    packing, and the export invoice is loaded from the loading plan - so the
+    packing plannings behind this invoice's proforma invoices are asked first.
+    Where a product was planned more than one way, the unit whose capacity
+    gives exactly this line's count wins.
+
+    Only a product no packing planning covers falls back to its catalog
+    packing types, recognised the way the form's pallet-type dropdown does
+    (initRowPalletSelection): the type whose boxes-per-unit gives this count,
+    else the one whose weight was snapshotted onto the line, else cartons when
+    every type the product has is a carton - pallets otherwise.
+    Works for invoices saved before this existed, with nothing re-saved."""
+    container = current_app.container
+    planned = container.packing_planning_service.packing_unit_labels(
+        g.user.company_id, [pid for pid in (invoice.proforma_invoice_ids or []) if pid])
+    types_by_product: dict = {}
+    labels = {}
+    for item in invoice.items:
+        if not item.pallets:
+            continue
+
+        units = planned.get(item.product_id) or []
+        if units:
+            match = None
+            if item.quantity_boxes:
+                match = next((u for u in units if u["boxes_per_unit"]
+                              and abs(item.quantity_boxes / u["boxes_per_unit"] - item.pallets) < 1e-6), None)
+            label = (match or units[0])["label"]
+            labels[item.sr_no] = _PACKING_UNIT_PLURALS.get(label, label)
+            continue
+
+        types = []
+        if item.product_id:
+            if item.product_id not in types_by_product:
+                try:
+                    container.product_service.get_product(item.product_id, g.user.company_id)
+                    types_by_product[item.product_id] = container.product_service.pallet_types_for_product(
+                        item.product_id)
+                except NotFoundError:
+                    types_by_product[item.product_id] = []
+            types = types_by_product[item.product_id]
+
+        chosen = None
+        if item.quantity_boxes:
+            chosen = next((t for t in types if t.boxes_per_pallet
+                           and abs(item.quantity_boxes / t.boxes_per_pallet - item.pallets) < 1e-6), None)
+        if chosen is None and item.pallet_weight_kg is not None:
+            chosen = next((t for t in types if t.weight_kg is not None
+                           and abs(t.weight_kg - item.pallet_weight_kg) < 1e-6), None)
+
+        if chosen is not None:
+            is_carton = chosen.is_carton
+        else:
+            is_carton = bool(types) and all(t.is_carton for t in types)
+        labels[item.sr_no] = "CTNS" if is_carton else "PLTS"
+    return labels
+
+
 @export_invoices_bp.route("/<int:export_invoice_id>")
 @login_required
 def view_export_invoice(export_invoice_id):
@@ -456,7 +593,8 @@ def view_export_invoice(export_invoice_id):
         abort(404)
     company = container.company_service.get(g.user.company_id)
     packing_list = container.export_packing_list_service.get_for_invoice(invoice.id, g.user.company_id)
-    return render_template("export_invoices/print.html", invoice=invoice, company=company, packing_list=packing_list)
+    return render_template("export_invoices/print.html", invoice=invoice, company=company, packing_list=packing_list,
+                           packing_labels=_packing_labels(invoice))
 
 
 @export_invoices_bp.route("/<int:export_invoice_id>/edit", methods=["GET", "POST"])
@@ -495,6 +633,46 @@ def edit_export_invoice(export_invoice_id):
         container_details=invoice.container_details, purchase_details=invoice.purchase_details,
         product_sources=invoice.product_sources, job_ins=invoice.job_ins,
     )
+
+
+@export_invoices_bp.route("/<int:export_invoice_id>/shipping-bill", methods=["POST"])
+@login_required
+def update_shipping_bill(export_invoice_id):
+    """The Export Invoices list's "Update shipping bill no" popup posts here.
+    Writes only the shipping bill no. and date, then returns to the list."""
+    container = current_app.container
+    try:
+        invoice = container.export_invoice_service.update_shipping_bill(
+            g.user, export_invoice_id,
+            {"shipping_bill_no": request.form.get("shipping_bill_no", ""),
+             "shipping_bill_date": request.form.get("shipping_bill_date", "")},
+        )
+        flash(f"Shipping bill updated for export invoice {invoice.export_invoice_number}.", "success")
+    except (ValidationError, PermissionDeniedError) as e:
+        flash(str(e), "error")
+    except NotFoundError:
+        abort(404)
+    return redirect(url_for("export_invoices.list_export_invoices"))
+
+
+@export_invoices_bp.route("/<int:export_invoice_id>/eway-bill", methods=["POST"])
+@login_required
+def update_eway_bill(export_invoice_id):
+    """The Export Invoices list's "Update Eway bill no" popup posts here.
+    Writes only the e-way bill no. and date, then returns to the list."""
+    container = current_app.container
+    try:
+        invoice = container.export_invoice_service.update_eway_bill(
+            g.user, export_invoice_id,
+            {"eway_bill_no": request.form.get("eway_bill_no", ""),
+             "eway_bill_date": request.form.get("eway_bill_date", "")},
+        )
+        flash(f"E-way bill updated for tax invoice {invoice.tax_invoice_number_printed}.", "success")
+    except (ValidationError, PermissionDeniedError) as e:
+        flash(str(e), "error")
+    except NotFoundError:
+        abort(404)
+    return redirect(url_for("export_invoices.list_export_invoices"))
 
 
 @export_invoices_bp.route("/<int:export_invoice_id>/delete", methods=["POST"])
@@ -555,4 +733,5 @@ def view_export_invoice_version(export_invoice_id, version_number):
     return render_template(
         "export_invoices/print.html", invoice=historical_invoice, company=company,
         historical_version=version, packing_list=None,
+        packing_labels=_packing_labels(historical_invoice),
     )

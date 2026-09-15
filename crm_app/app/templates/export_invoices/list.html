@@ -23,6 +23,8 @@
           <th>Consignee</th>
           <th>Buyer If Other Then Consignee[Notify]</th>
           <th class="num">Invoice value</th>
+          <th>Shipping bill</th>
+          <th>E-way bill</th>
           <th></th>
         </tr>
       </thead>
@@ -34,6 +36,28 @@
           <td><strong>{{ inv.consignee_name }}</strong></td>
           <td class="text-sm">{{ inv.notify_name or '-' }}</td>
           <td class="num">$ {{ '{:,.2f}'.format(inv.invoice_value_usd) }}</td>
+          <td class="text-sm">
+            {% if inv.shipping_bill_no or inv.shipping_bill_date %}
+            <div class="mono">{{ inv.shipping_bill_no or '—' }}</div>
+            <div class="text-soft">{{ (inv.shipping_bill_date or '')[:10] or '—' }}</div>
+            {% endif %}
+            <button type="button" class="btn btn-ghost btn-sm js-shipping-bill"
+                    data-action="{{ url_for('export_invoices.update_shipping_bill', export_invoice_id=inv.id) }}"
+                    data-invoice-no="{{ inv.export_invoice_number }}"
+                    data-shipping-bill-no="{{ inv.shipping_bill_no or '' }}"
+                    data-shipping-bill-date="{{ (inv.shipping_bill_date or '')[:10] }}">Update shipping bill no</button>
+          </td>
+          <td class="text-sm">
+            {% if inv.eway_bill_no or inv.eway_bill_date %}
+            <div class="mono">{{ inv.eway_bill_no or '—' }}</div>
+            <div class="text-soft">{{ (inv.eway_bill_date or '')[:10] or '—' }}</div>
+            {% endif %}
+            <button type="button" class="btn btn-ghost btn-sm js-eway-bill"
+                    data-action="{{ url_for('export_invoices.update_eway_bill', export_invoice_id=inv.id) }}"
+                    data-tax-invoice-no="{{ inv.tax_invoice_number_printed }}"
+                    data-eway-bill-no="{{ inv.eway_bill_no or '' }}"
+                    data-eway-bill-date="{{ (inv.eway_bill_date or '')[:10] }}">Update Eway bill no</button>
+          </td>
           <td><a href="{{ url_for('export_invoices.view_export_invoice', export_invoice_id=inv.id) }}" class="text-sm">Open →</a></td>
         </tr>
         {% endfor %}
@@ -44,5 +68,121 @@
   <div class="empty-state">No export invoices yet. <a href="{{ url_for('export_invoices.new_export_invoice') }}">Create one →</a></div>
   {% endif %}
 </div>
+
+{# ---- Update shipping bill no popup --------------------------------------
+   One shared popup; each row's button points its form at that invoice and
+   prefills whatever is already saved. #}
+<div id="shipping-bill-overlay" class="modal-overlay" hidden>
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Update shipping bill no <span class="text-soft text-sm" id="shipping-bill-invoice"></span></h3>
+      <button type="button" class="btn-link-danger" id="shipping-bill-close">✕ Close</button>
+    </div>
+    <form method="POST" id="shipping-bill-form">
+      <div class="form-row">
+        <div class="field">
+          <label for="sb_shipping_bill_no">Shipping bill no.</label>
+          <input type="text" id="sb_shipping_bill_no" name="shipping_bill_no" maxlength="30" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="sb_shipping_bill_date">Shipping bill date</label>
+          <input type="date" id="sb_shipping_bill_date" name="shipping_bill_date">
+        </div>
+      </div>
+      <div class="flex gap-8">
+        <button type="submit" class="btn btn-primary">Save</button>
+        <button type="button" class="btn btn-ghost" id="shipping-bill-cancel">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  const overlay = document.getElementById('shipping-bill-overlay');
+  const form = document.getElementById('shipping-bill-form');
+  const noInput = document.getElementById('sb_shipping_bill_no');
+  const dateInput = document.getElementById('sb_shipping_bill_date');
+  const invoiceLabel = document.getElementById('shipping-bill-invoice');
+
+  function close() { overlay.hidden = true; }
+
+  document.querySelectorAll('.js-shipping-bill').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      form.action = btn.dataset.action;
+      invoiceLabel.textContent = '— ' + btn.dataset.invoiceNo;
+      noInput.value = btn.dataset.shippingBillNo || '';
+      dateInput.value = btn.dataset.shippingBillDate || '';
+      overlay.hidden = false;
+      noInput.focus();
+    });
+  });
+  document.getElementById('shipping-bill-close').addEventListener('click', close);
+  document.getElementById('shipping-bill-cancel').addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay.hidden) close(); });
+})();
+</script>
+
+{# ---- Update Eway bill no popup ------------------------------------------
+   Same pattern as the shipping bill popup. The tax invoice number is shown
+   for reference only - it is the invoice's own unless one was saved. #}
+<div id="eway-bill-overlay" class="modal-overlay" hidden>
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Update Eway bill no</h3>
+      <button type="button" class="btn-link-danger" id="eway-bill-close">✕ Close</button>
+    </div>
+    <form method="POST" id="eway-bill-form">
+      <div class="form-row">
+        <div class="field">
+          <label for="eb_tax_invoice_no">Tax invoice no.</label>
+          <input type="text" id="eb_tax_invoice_no" readonly tabindex="-1">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label for="eb_eway_bill_no">E-way bill no.</label>
+          <input type="text" id="eb_eway_bill_no" name="eway_bill_no" maxlength="20" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="eb_eway_bill_date">E-way bill date</label>
+          <input type="date" id="eb_eway_bill_date" name="eway_bill_date">
+        </div>
+      </div>
+      <div class="flex gap-8">
+        <button type="submit" class="btn btn-primary">Save</button>
+        <button type="button" class="btn btn-ghost" id="eway-bill-cancel">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  const overlay = document.getElementById('eway-bill-overlay');
+  const form = document.getElementById('eway-bill-form');
+  const taxInvoiceInput = document.getElementById('eb_tax_invoice_no');
+  const noInput = document.getElementById('eb_eway_bill_no');
+  const dateInput = document.getElementById('eb_eway_bill_date');
+
+  function close() { overlay.hidden = true; }
+
+  document.querySelectorAll('.js-eway-bill').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      form.action = btn.dataset.action;
+      taxInvoiceInput.value = btn.dataset.taxInvoiceNo || '';
+      noInput.value = btn.dataset.ewayBillNo || '';
+      dateInput.value = btn.dataset.ewayBillDate || '';
+      overlay.hidden = false;
+      noInput.focus();
+    });
+  });
+  document.getElementById('eway-bill-close').addEventListener('click', close);
+  document.getElementById('eway-bill-cancel').addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay.hidden) close(); });
+})();
+</script>
 
 {% endblock %}

@@ -21,7 +21,6 @@
       <a href="{{ url_for('export_invoices.view_export_invoice', export_invoice_id=invoice.id) }}" class="btn btn-ghost btn-sm">🌐 Export invoice {{ invoice.export_invoice_number }}</a>
     </div>
     <div class="flex gap-8">
-      <a href="{{ url_for('tax_invoices.edit_tax_invoice', export_invoice_id=invoice.id) }}" class="btn btn-ghost btn-sm">Edit</a>
       <a href="{{ url_for('export_invoices.edit_export_invoice', export_invoice_id=invoice.id) }}" class="btn btn-ghost btn-sm">Edit export invoice</a>
       <button type="button" class="btn btn-primary btn-sm" onclick="window.print()">🖨 Print</button>
     </div>
@@ -29,9 +28,8 @@
 
   <div class="sheet-note no-print">
     This tax invoice is generated from export invoice
-    <strong>{{ invoice.export_invoice_number }}</strong>. Its own number and date are the only fields it
-    owns (<strong>Edit</strong> above{% if not invoice.tax_invoice_number and not invoice.tax_invoice_date %} —
-    both are unset, so it currently prints the export invoice's{% endif %}); every other field comes from that
+    <strong>{{ invoice.export_invoice_number }}</strong>. The e-way bill no. and date are set from the
+    Export Invoices list (<strong>Update Eway bill no</strong>); every other field comes from that
     invoice, with the money converted to INR at its exchange
     rate{% if invoice.exchange_rate %} (₹&nbsp;{{ '{:,.2f}'.format(invoice.exchange_rate) }}){% endif %}.
     {% if not invoice.exchange_rate %}

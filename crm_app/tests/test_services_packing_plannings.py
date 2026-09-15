@@ -893,3 +893,25 @@ def test_another_companys_job_ins_are_never_reachable(container, seed):
     other = container.tenant_repo.create("OTHER CO", "other")
     assert svc(container).job_ins_for_proformas([pi.id], other.id) == []
     assert svc(container).build_prefill_from_job_ins([job_in.id], other.id)["items"] == []
+
+
+# --------------------------------------------------------------------------
+# The unit each product was planned in - what the export invoice prints
+# --------------------------------------------------------------------------
+def test_packing_unit_labels_report_the_planned_unit_per_product(container, seed, tiles, hardware):
+    """Packing Planning decides PLT or CTN; the export invoice's printed
+    Packing column follows it. Only products behind the asked-for PIs come
+    back, each with the capacity it was planned at."""
+    save(container, seed, prefill_items(container, seed, tiles["pi"], hardware["pi"]))
+
+    labels = svc(container).packing_unit_labels(seed.company_id, [hardware["pi"].id])
+
+    assert set(labels) == {hardware["rod"].id, hardware["dish"].id}
+    assert labels[hardware["rod"].id] == [{"label": "CTN", "boxes_per_unit": 30}]
+
+
+def test_packing_unit_labels_are_company_scoped_and_empty_without_proformas(container, seed, hardware):
+    save(container, seed, prefill_items(container, seed, hardware["pi"]))
+
+    assert svc(container).packing_unit_labels(seed.company_id + 999, [hardware["pi"].id]) == {}
+    assert svc(container).packing_unit_labels(seed.company_id, []) == {}

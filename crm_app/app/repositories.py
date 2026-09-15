@@ -2044,12 +2044,12 @@ class QuotationRepository:
                 conn.execute(
                     """INSERT INTO quotation_items
                        (quotation_id, sr_no, product_id, product_name, dimension_mm, hsn_code,
-                        quantity_boxes, quantity_unit, pallets, quantity_value, unit, price_usd,
+                        quantity_boxes, quantity_unit, pallets, packing_unit, quantity_value, unit, price_usd,
                         fob_price_usd, total_usd)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (quotation_id, item.sr_no, item.product_id, item.product_name, item.dimension_mm,
-                     item.hsn_code, item.quantity_boxes, item.quantity_unit, item.pallets, item.quantity_value,
-                     item.unit, item.price_usd, item.fob_price_usd, item.total_usd),
+                     item.hsn_code, item.quantity_boxes, item.quantity_unit, item.pallets, item.packing_unit,
+                     item.quantity_value, item.unit, item.price_usd, item.fob_price_usd, item.total_usd),
                 )
 
     def _replace_containers(self, quotation_id: int, containers: list) -> None:
@@ -2260,11 +2260,11 @@ class ProformaInvoiceRepository:
                 conn.execute(
                     """INSERT INTO proforma_invoice_items
                        (proforma_invoice_id, sr_no, product_id, product_name, dimension_mm, hsn_code,
-                        surface, pallets, quantity_boxes, quantity_unit, quantity_value, unit, price_usd,
+                        surface, pallets, packing_unit, quantity_boxes, quantity_unit, quantity_value, unit, price_usd,
                         fob_price_usd, total_usd)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (invoice_id, item.sr_no, item.product_id, item.product_name, item.dimension_mm,
-                     item.hsn_code, item.surface, item.pallets, item.quantity_boxes, item.quantity_unit,
+                     item.hsn_code, item.surface, item.pallets, item.packing_unit, item.quantity_boxes, item.quantity_unit,
                      item.quantity_value, item.unit, item.price_usd, item.fob_price_usd, item.total_usd),
                 )
 
@@ -2465,14 +2465,18 @@ class ExportInvoiceRepository:
     # form never posts them, and _build_header turns an absent field into
     # None - so carrying them through the shared create/update path would
     # blank them every time that form is saved.
-    TAX_INVOICE_FIELDS = (
-        "tax_invoice_number", "tax_invoice_date", "eway_bill_no", "eway_bill_date",
-    )
+    # Set from the Export Invoices list's "Update Eway bill no" popup; they
+    # print on the tax invoice and e-way bill sheets.
+    EWAY_BILL_FIELDS = ("eway_bill_no", "eway_bill_date")
     VGM_DECLARATION_FIELDS = (
         "vgm_signatory", "vgm_contact_24x7", "vgm_weighing_method",
         "vgm_cargo_type", "vgm_hazardous_details",
     )
     PACKING_LIST_FIELDS = ("bill_of_lading_no", "bill_of_lading_date")
+    # Set from the Export Invoices list's "Update shipping bill no" popup, not
+    # the invoice form - the shipping bill is issued by customs AFTER the
+    # invoice is cut, so it is filled in later against an existing invoice.
+    SHIPPING_BILL_FIELDS = ("shipping_bill_no", "shipping_bill_date")
 
     def update_document_fields(self, invoice_id: int, fields: dict, names: Sequence[str]) -> None:
         """Write just `names` onto this invoice - see the note above."""
@@ -2489,7 +2493,7 @@ class ExportInvoiceRepository:
         Used by the per-container documents that own a couple of columns each
         (the VGM attachment's weighbridge pair, the E-Seal sheet's sealing
         time/date). A targeted write for the same reason
-        update_tax_invoice_details is one: the export invoice form has no
+        update_document_fields is one: the export invoice form has no
         input for any of them, so they must not travel on the path that
         rewrites the 11B rows wholesale.
 
@@ -4836,6 +4840,50 @@ class LoadingPlanningRepository:
             plans.append(plan)
         return plans
 
+    def list_for_proformas(self, company_id: int, proforma_invoice_ids: list) -> List[dict]:
+        """Every loading planning raised against any of these proforma
+        invoices - what the export invoice's own loading-planning dropdown is
+        narrowed to.
+
+        Matched on the plan's OWN proforma links, for the same reason
+        PackingPlanningRepository.list_for_proformas is: a plan's lines can
+        come from JOB IN returns, which carry no purchase order and no
+        proforma invoice of their own, so walking PI -> orders -> items would
+        silently hide them. The link table is the ticked set the document
+        itself records and covers both kinds.
+
+        Header + counts only; the caller re-fetches the one plan it picks."""
+        ids = []
+        for value in dict.fromkeys(proforma_invoice_ids or []):
+            try:
+                ids.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        rows = self.db.query(
+            f"""SELECT lp.id, lp.loading_planning_number, lp.loading_planning_date, lp.booking_no,
+                       (SELECT COUNT(*) FROM loading_planning_containers
+                        WHERE loading_planning_id = lp.id) AS container_count,
+                       (SELECT COUNT(*) FROM loading_planning_packings
+                        WHERE loading_planning_id = lp.id) AS packing_count
+                FROM loading_plannings lp
+                JOIN loading_planning_proforma_links l ON l.loading_planning_id = lp.id
+                WHERE lp.company_id = ? AND l.proforma_invoice_id IN ({placeholders})
+                GROUP BY lp.id
+                ORDER BY lp.loading_planning_date DESC, lp.id DESC""",
+            tuple([company_id] + ids),
+        )
+        return [{
+            "id": r["id"],
+            "loading_planning_number": r["loading_planning_number"],
+            "loading_planning_date": r["loading_planning_date"],
+            "booking_no": r["booking_no"],
+            "container_count": r["container_count"] or 0,
+            "packing_count": r["packing_count"] or 0,
+        } for r in rows]
+
     def create(self, plan: LoadingPlanning) -> LoadingPlanning:
         new_id = self.db.execute(
             """INSERT INTO loading_plannings
@@ -5168,6 +5216,38 @@ class PackingPlanningRepository:
             "po_numbers": [n for n in (r["po_numbers"] or "").split(",") if n],
             "batch_count": r["batch_count"] or 0,
         } for r in rows]
+
+    def packing_units_for_proformas(self, company_id: int, proforma_invoice_ids: list) -> List[dict]:
+        """The packing unit (PLT / CTN / PCS ...) and capacity every product
+        was planned in, across the packing plannings behind these proforma
+        invoices - what the export invoice's printed Packing column reads.
+
+        A line counts when it names one of the PIs itself OR sits on a plan
+        linked to one: job-in lines carry no proforma invoice of their own
+        (see list_for_proformas), and the link table may not name a PI whose
+        lines are all there. Distinct (product, unit, capacity) rows only."""
+        ids = []
+        for value in dict.fromkeys(proforma_invoice_ids or []):
+            try:
+                ids.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        rows = self.db.query(
+            f"""SELECT DISTINCT i.product_id, i.packing_unit_label, i.boxes_per_unit
+                FROM packing_planning_items i
+                JOIN packing_plannings pp ON pp.id = i.packing_planning_id
+                WHERE pp.company_id = ? AND i.product_id IS NOT NULL
+                  AND i.packing_unit_label IS NOT NULL AND i.packing_unit_label != ''
+                  AND (i.proforma_invoice_id IN ({placeholders})
+                       OR pp.id IN (SELECT packing_planning_id FROM packing_planning_proforma_links
+                                    WHERE proforma_invoice_id IN ({placeholders})))
+                ORDER BY i.product_id, i.packing_unit_label, i.boxes_per_unit""",
+            tuple([company_id] + ids + ids),
+        )
+        return [dict(r) for r in rows]
 
     def labels_for_plan(self, packing_planning_id: int):
         rows = self.db.query(

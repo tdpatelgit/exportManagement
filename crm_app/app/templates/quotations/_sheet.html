@@ -7,10 +7,10 @@
 {# Items beyond what fits on the quotation page spill onto the ANNEXURE sheet
    (_annexure.html) - the quotation page then shows a "(CONTINUE TO
    ANNEXURE----->)" marker, per-page totals and an Annexure line in the
-   charges block, like the original Excel document. Keep QUOTE_ANNEX_START in
-   sync with _annexure.html. #}
+   charges block, like the original Excel document. Where the split falls is
+   measured from the rows the items print (goods.annex_start). #}
 {% import 'quotations/_goods_rows.html' as goods %}
-{% set QUOTE_ANNEX_START = 8 %}
+{% set QUOTE_ANNEX_START = goods.annex_start(quotation.items)|int %}
 {% set main_items = quotation.items[:QUOTE_ANNEX_START] %}
 {% set annex_items = quotation.items[QUOTE_ANNEX_START:] %}
 {# The filler row's height is measured in the browser (templates/_page_filler.html)
@@ -47,6 +47,7 @@
   .qt-left { text-align: left; vertical-align: top; }
   .qt-right { text-align: right; }
   .qt-mid { vertical-align: middle !important; }
+  .qt-bottom { vertical-align: bottom !important; }
   .qt-unit-sm { font-size: .85em; text-transform: uppercase; font-weight: normal; }
   {# Header/bank bands: a host cell holding its own nested table, borderless
      itself so the nested table supplies the interior rules - the same
@@ -64,6 +65,7 @@
   .qt-nest table.qt-nosplit td + td { border-left: none; }
   .qt-items thead td { text-align: center; vertical-align: middle; font-size: 9px; }
   .qt-items tbody tr.qt-goods td, .qt-items tbody tr.qt-filler td { border-top: none; border-bottom: none; padding: 2px 5px; }
+  .qt-items tbody tr.qt-goods td { font-size: 8px; }
   .qt-items tbody tr.qt-goods td.qt-right, .qt-items tbody tr.qt-goods td.qt-center { white-space: nowrap; }
   .qt-charge-label { text-align: left; font-weight: bold; font-size: 9px; vertical-align: middle; }
   .qt-sign-cell { height: 92px; padding: 4px 6px; }
@@ -146,8 +148,10 @@
   <!-- Goods -->
   <table class="qt-items">
     <colgroup>
-      <col style="width:6%"><col style="width:31%"><col style="width:8%"><col style="width:10%"><col style="width:10%">
-      <col style="width:12%"><col style="width:10%"><col style="width:13%">
+      {# Same widths as the proforma invoice sheet's goods table. #}
+      <col style="width:5%"><col style="width:40%"><col style="width:8%">
+      <col style="width:9%"><col style="width:8%"><col style="width:9%">
+      <col style="width:11%"><col style="width:10%">
     </colgroup>
     <thead>
       <tr>
@@ -162,7 +166,7 @@
       </tr>
     </thead>
     <tbody>
-      {{ goods.rows(main_items, quotation.currency_prefix) }}
+      {{ goods.rows(main_items, 0, quotation.currency_prefix) }}
       {% if annex_items %}
       <tr class="qt-goods">
         <td></td>

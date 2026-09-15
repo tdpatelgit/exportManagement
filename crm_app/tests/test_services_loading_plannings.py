@@ -631,3 +631,309 @@ def test_list_all_counts_both_halves(container, seed, tiles):
     row = svc(container).list_all(seed.company_id)[0]
     assert row.item_count == 2
     assert row.packing_count == 14
+# --------------------------------------------------------------------------
+# Handing the plan to an export invoice
+#
+# The export invoice form has two importers. The reference-PI one fills the
+# commercial half (consignee, charges, bank, supplier/EPCG rows); this one
+# fills the physical half - the containers that went out, the goods on them,
+# and the container split - and the two must fill disjoint sets of fields so
+# either can be re-run on its own.
+#
+# Three things are worth pinning down, because all three are easy to get
+# quietly wrong:
+#   - goods MERGE to one row per product. A plan's lines are batches, which
+#     is what a pallet is packed out of and nothing an invoice prints.
+#   - container_sr_no is 1-based here and the split's container_index is
+#     0-based there, over the SAME blank-row filtering the export invoice
+#     applies at save time - an off-by-one puts cargo in the wrong container.
+#   - a pallet carrying two products contributes its BOX SHARE to each, so
+#     the parts still add back up to exactly one pallet.
+# --------------------------------------------------------------------------
+@pytest.fixture
+def mixed(container, seed):
+    """One order, two products, each fired in a batch that does NOT divide by
+    its packing type - so both leave a remainder and the two remainders can be
+    hand-packed onto ONE shared pallet. That shared pallet is the case the
+    split's pallet arithmetic turns on."""
+    pallet = [{"name": "Pallet", "boxes_per_pallet": "10", "weight_kg": "20", "unit_kind": "pallet"}]
+    alpha = make_product(container, seed, "ALPHA 300X300MM", "69072100", 10.0, "BOX", "1", pallet)
+    beta = make_product(container, seed, "BETA 300X300MM", "69072200", 20.0, "BOX", "1", pallet)
+    a_design = make_design(container, seed, alpha, "A1")
+    b_design = make_design(container, seed, beta, "B1")
+
+    def line(product, hsn, boxes, price_key, price, **extra):
+        return dict({"product_id": str(product.id), "product_name": product.product_name,
+                     "hsn_code": hsn, "quantity_boxes": str(boxes), "quantity_unit": "BOX",
+                     "quantity_value": str(boxes), "unit": "SQM", price_key: str(price)}, **extra)
+
+    pi, po = make_chain(
+        container, seed,
+        pi_items=[line(alpha, "69072100", 25, "price_usd", 4),
+                  line(beta, "69072200", 14, "price_usd", 9)],
+        po_items=[line(alpha, "69072100", 25, "price_inr", 300, price_per="BOX"),
+                  line(beta, "69072200", 14, "price_inr", 700, price_per="BOX")],
+        pi_number="PI20260827003", po_number="PO20260827003",
+    )
+    # 25 packs as two pallets of 10 with 5 over; 14 as one with 4 over.
+    record_batches(container, seed, po, 0, a_design, [batch("A101", "2026-08-29", 25)])
+    record_batches(container, seed, po, 1, b_design, [batch("B101", "2026-08-29", 14)])
+    return {"pi": pi, "po": po, "alpha": alpha, "beta": beta}
+
+
+def export_prefill(container, seed, plan):
+    return svc(container).build_export_invoice_prefill(plan.id, seed.company_id)
+
+
+def test_export_prefill_merges_batches_into_one_product_line(container, seed, tiles):
+    """Two batches of one product are ONE sellable line. The invoice has no
+    use for the batch numbers a pallet is packed out of."""
+    source = packing_plan(container, seed, tiles)
+    loaded = prefill(container, seed, source)
+    plan = save(container, seed, loaded, containers_for(("AAAA1111111", 2200, 30000)))
+
+    out = export_prefill(container, seed, plan)
+
+    assert len(loaded["items"]) == 2                     # two batches on the plan
+    assert len(out["items"]) == 1                        # one product on the invoice
+    line = out["items"][0]
+    assert line["product_name"] == "GVT/PGVT 600X1200MM"
+    assert line["quantity_boxes"] == 288 + 160
+    assert line["pallets"] == 14                         # nine pallets plus five
+    assert line["price_usd"] == 5.5                      # the PI's own quoted rate
+    assert line["hsn_code"] == "69072100"
+
+
+def test_export_prefill_fills_qty_from_boxes_and_alternate_quantity(container, seed, tiles):
+    """Qty (SQM/LM) must not arrive blank: it is boxes x the product's
+    alternate quantity (1.44 SQM a box here), the same figure the export
+    invoice settles on at save time."""
+    source = packing_plan(container, seed, tiles)
+    plan = save(container, seed, prefill(container, seed, source),
+                containers_for(("AAAA1111111", 2200, 30000)))
+
+    assert export_prefill(container, seed, plan)["items"][0]["quantity_value"] == round(448 * 1.44, 2)
+
+
+def test_export_prefill_takes_the_containers_that_actually_went_out(container, seed, tiles):
+    source = packing_plan(container, seed, tiles)
+    plan = save(container, seed, prefill(container, seed, source),
+                containers_for(("AAAA1111111", 2200, 30000), ("BBBB2222222", 2100, 30000)))
+
+    out = export_prefill(container, seed, plan)
+
+    assert [c["container_no"] for c in out["container_details"]] == ["AAAA1111111", "BBBB2222222"]
+    assert out["container_details"][0]["tare_weight_kg"] == 2200
+    # The type/count summary above the 11B table: two of the one type.
+    assert out["containers"] == [{"container_type": "20FT FCL", "container_count": 2}]
+
+
+def test_export_prefill_leaves_out_a_container_that_never_shipped(container, seed, tiles):
+    """A plan row carrying nothing but a type is a placeholder. The export
+    invoice's split filters exactly such a row out of its own container list,
+    so emitting it would put it in the 11B table and shift every container
+    index after it by one - cargo silently in the wrong container."""
+    source = packing_plan(container, seed, tiles)
+    service = svc(container)
+    loaded = prefill(container, seed, source)
+    rows = [{"container_type": "20FT FCL", "container_no": "", "tare_weight_kg": "",
+             "max_permitted_weight": "30000"},
+            {"container_no": "BBBB2222222", "container_type": "20FT FCL",
+             "tare_weight_kg": "2200", "max_permitted_weight": "30000"}]
+    packings = loaded["packings"]
+    for p in packings:
+        p["container_sr_no"] = 2                     # everything in the REAL container
+    plan = save(container, seed, loaded, rows, packings=packings)
+
+    out = export_prefill(container, seed, plan)
+
+    # The placeholder is gone, so the real container is index 0 - not 1.
+    assert [c["container_no"] for c in out["container_details"]] == ["BBBB2222222"]
+    assert {a["container_index"] for a in out["allocations"]} == {0}
+    assert any("no container number" in w for w in out["warnings"])
+
+
+def test_export_prefill_maps_containers_onto_zero_based_indexes(container, seed, tiles):
+    """container_sr_no is 1-based on the plan; the export invoice's split is
+    0-based. Getting this wrong puts cargo in the wrong container."""
+    source = packing_plan(container, seed, tiles)
+    service = svc(container)
+    loaded = prefill(container, seed, source)
+    rows = service._clean_containers(containers_for(("AAAA1111111", 2200, 30000),
+                                                    ("BBBB2222222", 2200, 30000)))
+    packings = service._clean_packings(loaded["packings"])
+    items = service._clean_items(loaded["items"])
+    assigned = service.auto_assign_containers(packings, rows, items)["packings"]
+    plan = save(container, seed, loaded, containers_for(("AAAA1111111", 2200, 30000),
+                                                        ("BBBB2222222", 2200, 30000)),
+                packings=assigned)
+
+    out = export_prefill(container, seed, plan)
+
+    assert sorted({a["container_index"] for a in out["allocations"]}) == [0, 1]
+    # Seven pallets each, one product - so seven pallets and 7 x 32 boxes a side.
+    assert sorted(a["quantity_boxes"] for a in out["allocations"]) == [224, 224]
+    assert sorted(a["pallets"] for a in out["allocations"]) == [7, 7]
+
+
+def test_export_prefill_split_adds_back_up_to_the_goods_line(container, seed, tiles):
+    """The invariant the export invoice's own submit guard enforces: every box
+    on a goods line is in exactly one container."""
+    source = packing_plan(container, seed, tiles)
+    service = svc(container)
+    loaded = prefill(container, seed, source)
+    rows = service._clean_containers(containers_for(("AAAA1111111", 2200, 30000),
+                                                    ("BBBB2222222", 2200, 30000)))
+    assigned = service.auto_assign_containers(
+        service._clean_packings(loaded["packings"]), rows,
+        service._clean_items(loaded["items"]))["packings"]
+    plan = save(container, seed, loaded, containers_for(("AAAA1111111", 2200, 30000),
+                                                        ("BBBB2222222", 2200, 30000)),
+                packings=assigned)
+
+    out = export_prefill(container, seed, plan)
+    allocated = sum(a["quantity_boxes"] for a in out["allocations"])
+
+    assert allocated == out["items"][0]["quantity_boxes"]
+    assert not out["warnings"]
+
+
+def test_export_prefill_weights_are_the_plans_own(container, seed, tiles):
+    """Net is boxes x the per-box weight; gross adds the packing's REAL tare,
+    which the plan snapshots - not the export form's catalog guess."""
+    source = packing_plan(container, seed, tiles)
+    service = svc(container)
+    loaded = prefill(container, seed, source)
+    rows = service._clean_containers(containers_for(("AAAA1111111", 2200, 300000)))
+    assigned = service.auto_assign_containers(
+        service._clean_packings(loaded["packings"]), rows,
+        service._clean_items(loaded["items"]))["packings"]
+    plan = save(container, seed, loaded, containers_for(("AAAA1111111", 2200, 300000)),
+                packings=assigned)
+
+    out = export_prefill(container, seed, plan)
+    alloc = out["allocations"][0]
+
+    assert alloc["net_weight_kg"] == pytest.approx(448 * 27)
+    assert alloc["gross_weight_kg"] == pytest.approx(448 * 27 + 14 * 20)
+
+
+def test_export_prefill_splits_a_shared_pallet_by_box_share(container, seed, mixed):
+    """Five boxes of ALPHA and four of BETA hand-packed onto one pallet is
+    5/9 and 4/9 of a pallet, not one pallet each - so the pallet counts still
+    add back up to what physically went out."""
+    plain = packing_plan(container, seed, mixed)
+    leftovers = plain.remain_rows
+    source = packing_plan(container, seed, mixed, manual_units=[{
+        "unit_no": plain.next_packing_no, "packing_unit_label": "PLT",
+        "contents": [{"item_sr_no": r["item_sr_no"], "quantity_boxes": r["left"]}
+                     for r in leftovers if r["left"]],
+    }])
+    service = svc(container)
+    loaded = prefill(container, seed, source)
+    rows = service._clean_containers(containers_for(("AAAA1111111", 2200, 300000)))
+    assigned = service.auto_assign_containers(
+        service._clean_packings(loaded["packings"]), rows,
+        service._clean_items(loaded["items"]))["packings"]
+    plan = save(container, seed, loaded, containers_for(("AAAA1111111", 2200, 300000)),
+                packings=assigned)
+
+    out = export_prefill(container, seed, plan)
+    by_name = {i["product_name"]: i for i in out["items"]}
+
+    # Everything produced is now on a numbered pallet, shared one included.
+    assert by_name["ALPHA 300X300MM"]["quantity_boxes"] == 25
+    assert by_name["BETA 300X300MM"]["quantity_boxes"] == 14
+    # Four whole pallets (two ALPHA, one BETA, and the shared one split 5:4).
+    assert by_name["ALPHA 300X300MM"]["pallets"] == pytest.approx(2 + 5 / 9, abs=0.01)
+    assert by_name["BETA 300X300MM"]["pallets"] == pytest.approx(1 + 4 / 9, abs=0.01)
+    assert sum(a["pallets"] for a in out["allocations"]) == pytest.approx(4, abs=0.01)
+
+
+def test_export_prefill_warns_about_a_packing_still_to_be_loaded(container, seed, tiles):
+    """A plan half-assigned is a normal state here - it must come across with
+    what IS loaded, and say plainly why the goods lines won't balance."""
+    source = packing_plan(container, seed, tiles)
+    loaded = prefill(container, seed, source)
+    packings = loaded["packings"]
+    for p in packings:
+        p["container_sr_no"] = 1
+    packings[0]["container_sr_no"] = None
+    plan = save(container, seed, loaded, containers_for(("AAAA1111111", 2200, 300000)),
+                packings=packings)
+
+    out = export_prefill(container, seed, plan)
+    allocated = sum(a["quantity_boxes"] for a in out["allocations"])
+
+    assert allocated == 448 - 32                         # the unloaded pallet is missing
+    assert out["items"][0]["quantity_boxes"] == 448      # but the goods line is whole
+    assert len(out["warnings"]) == 1
+    assert "not in a container" in out["warnings"][0]
+
+
+def test_export_prefill_is_company_scoped(container, seed, tiles):
+    source = packing_plan(container, seed, tiles)
+    plan = save(container, seed, prefill(container, seed, source),
+                containers_for(("AAAA1111111", 2200, 30000)))
+
+    with pytest.raises(NotFoundError):
+        svc(container).build_export_invoice_prefill(plan.id, seed.company_id + 999)
+
+
+def test_export_dropdown_lists_only_plans_for_the_ticked_proformas(container, seed, tiles, hardware):
+    source = packing_plan(container, seed, tiles)
+    plan = save(container, seed, prefill(container, seed, source),
+                containers_for(("AAAA1111111", 2200, 30000)))
+    service = svc(container)
+
+    listed = service.loading_plannings_for_proformas([tiles["pi"].id], seed.company_id)
+    assert [p["loading_planning_number"] for p in listed] == [plan.loading_planning_number]
+    assert listed[0]["container_count"] == 1
+    assert listed[0]["packing_count"] == 14
+
+    assert service.loading_plannings_for_proformas([hardware["pi"].id], seed.company_id) == []
+    assert service.loading_plannings_for_proformas([], seed.company_id) == []
+def _posted(rows):
+    """The prefill as the browser actually sends it back: every value a
+    string, the way the form's inputs post."""
+    return [{k: ("" if v is None else str(v)) for k, v in row.items()} for row in rows]
+
+
+def test_a_loaded_plan_becomes_a_balanced_export_invoice_and_packing_list(container, seed, tiles):
+    """End to end, and the reason the index arithmetic above matters: the
+    prefill goes back through the export invoice form unchanged and has to
+    produce a packing list that balances - ExportPackingListService.build_items
+    refuses one that doesn't, which is the hard check this whole feature has
+    to satisfy."""
+    source = packing_plan(container, seed, tiles)
+    service = svc(container)
+    loaded = prefill(container, seed, source)
+    rows = service._clean_containers(containers_for(("AAAA1111111", 2200, 30000),
+                                                    ("BBBB2222222", 2200, 30000)))
+    assigned = service.auto_assign_containers(
+        service._clean_packings(loaded["packings"]), rows,
+        service._clean_items(loaded["items"]))["packings"]
+    plan = save(container, seed, loaded, containers_for(("AAAA1111111", 2200, 30000),
+                                                        ("BBBB2222222", 2200, 30000)),
+                packings=assigned)
+
+    out = export_prefill(container, seed, plan)
+    invoice = container.export_invoice_service.create(
+        seed.admin,
+        {"consignee_name": "ROBUST INTERNATIONAL", "invoice_date": "2026-09-10",
+         "tax_mode": "igst", "exchange_rate": "86.70", "export_invoice_number": "1000000042",
+         "booking_no": out["fields"]["booking_no"] or "",
+         "vessel_name": out["fields"]["vessel_name"] or "",
+         "voyage_no": out["fields"]["voyage_no"] or "",
+         "container_details_list": _posted(out["container_details"]),
+         "packing_allocations": _posted(out["allocations"])},
+        _posted(out["items"]),
+    )
+
+    packing_list = container.export_packing_list_service.get_for_invoice(invoice.id, seed.company_id)
+    assert packing_list is not None
+    # Both containers carry cargo, and the split adds back up to the invoice.
+    assert {i.container_sr_no for i in packing_list.items} == {1, 2}
+    assert sum(i.quantity_boxes for i in packing_list.items) == 448
+    assert sum(i.quantity_boxes for i in invoice.items) == 448
+    assert [c["container_no"] for c in invoice.container_details] == ["AAAA1111111", "BBBB2222222"]

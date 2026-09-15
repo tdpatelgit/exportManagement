@@ -917,3 +917,74 @@ class TestExportInvoiceCurrency:
         invoice = make_export(container, seed, currency_code="XYZ")
         assert (invoice.currency_code, invoice.currency_symbol) == ("XYZ", None)
         assert invoice.currency_label == "XYZ"
+
+
+# --------------------------------------------------------------------------
+# Shipping bill no. & date - set from the Export Invoices list's popup
+# --------------------------------------------------------------------------
+def test_update_shipping_bill_writes_both_fields(container, seed):
+    inv = make_export(container, seed)
+    updated = container.export_invoice_service.update_shipping_bill(
+        seed.admin, inv.id, {"shipping_bill_no": " 2620324 ", "shipping_bill_date": "2026-04-22"})
+    assert updated.shipping_bill_no == "2620324"
+    assert (updated.shipping_bill_date or "")[:10] == "2026-04-22"
+
+
+def test_update_shipping_bill_blank_clears(container, seed):
+    inv = make_export(container, seed, shipping_bill_no="SB-1", shipping_bill_date="2026-04-22")
+    updated = container.export_invoice_service.update_shipping_bill(
+        seed.admin, inv.id, {"shipping_bill_no": "", "shipping_bill_date": ""})
+    assert updated.shipping_bill_no is None
+    assert updated.shipping_bill_date is None
+
+
+def test_update_shipping_bill_rejects_an_overlong_number(container, seed):
+    inv = make_export(container, seed)
+    with pytest.raises(ValidationError):
+        container.export_invoice_service.update_shipping_bill(
+            seed.admin, inv.id, {"shipping_bill_no": "X" * 31, "shipping_bill_date": ""})
+
+
+def test_update_eway_bill_writes_both_fields(container, seed):
+    inv = make_export(container, seed)
+    updated = container.export_invoice_service.update_eway_bill(
+        seed.admin, inv.id, {"eway_bill_no": " 622115137765 ", "eway_bill_date": "2026-04-22"})
+    assert updated.eway_bill_no == "622115137765"
+    assert (updated.eway_bill_date or "")[:10] == "2026-04-22"
+    # The tax invoice number is shown in the popup but never written by it.
+    assert updated.tax_invoice_number is None
+
+
+def test_update_eway_bill_blank_clears(container, seed):
+    inv = make_export(container, seed)
+    container.export_invoice_service.update_eway_bill(
+        seed.admin, inv.id, {"eway_bill_no": "622115137765", "eway_bill_date": "2026-04-22"})
+    updated = container.export_invoice_service.update_eway_bill(
+        seed.admin, inv.id, {"eway_bill_no": "", "eway_bill_date": ""})
+    assert updated.eway_bill_no is None
+    assert updated.eway_bill_date is None
+
+
+def test_update_eway_bill_rejects_an_overlong_number(container, seed):
+    inv = make_export(container, seed)
+    with pytest.raises(ValidationError):
+        container.export_invoice_service.update_eway_bill(
+            seed.admin, inv.id, {"eway_bill_no": "X" * 21, "eway_bill_date": ""})
+
+
+def test_editing_the_invoice_keeps_the_shipping_bill(container, seed):
+    """The form no longer posts these two fields, so an ordinary edit must
+    carry the saved values forward instead of blanking them."""
+    inv = make_export(container, seed)
+    container.export_invoice_service.update_shipping_bill(
+        seed.admin, inv.id, {"shipping_bill_no": "2620324", "shipping_bill_date": "2026-04-22"})
+
+    updated = container.export_invoice_service.update(
+        seed.admin, inv.id,
+        {"consignee_name": "ROBUST", "invoice_date": "2026-03-01", "exchange_rate": "86.70",
+         "export_invoice_number": "1000000001"},
+        [{"product_name": "Tiles", "quantity_value": "100", "unit": "SQM", "price_usd": "5.92"}])
+
+    assert updated.consignee_name == "ROBUST"
+    assert updated.shipping_bill_no == "2620324"
+    assert (updated.shipping_bill_date or "")[:10] == "2026-04-22"

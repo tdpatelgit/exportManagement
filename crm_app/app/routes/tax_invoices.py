@@ -10,7 +10,9 @@ invoice's OWN number and date (a tax invoice is not separately numbered
 here), and every other field is either that invoice's or is derived from it
 by converting the money at the invoice's own exchange rate. So there is
 nothing to create, edit or delete - just a list (of export invoices, since
-there is no tax-invoice table to list) and a single detail view.
+there is no tax-invoice table to list) and a single detail view. The e-way
+bill no. and date it prints are set from the Export Invoices list's
+"Update Eway bill no" popup (export_invoices.update_eway_bill).
 
 Two cells on the sheet are lookups rather than plain invoice fields, and
 both are assembled here so the template stays presentation-only:
@@ -18,9 +20,9 @@ GSTIN/Transporter ID (the chosen transporter's registration number) and
 Loading Port PIN Code (the port list keeps the port and its PIN together).
 """
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, g, abort
+from flask import Blueprint, render_template, current_app, g, abort
 
-from app.exceptions import NotFoundError, ValidationError, PermissionDeniedError
+from app.exceptions import NotFoundError
 from app.utils import login_required
 
 tax_invoices_bp = Blueprint("tax_invoices", __name__, url_prefix="/tax-invoices")
@@ -91,33 +93,3 @@ def view_tax_invoice(export_invoice_id):
     return render_template(
         "tax_invoices/print.html", invoice=invoice, company=company, consignment=consignment,
     )
-
-
-@tax_invoices_bp.route("/<int:export_invoice_id>/edit", methods=["GET", "POST"])
-@login_required
-def edit_tax_invoice(export_invoice_id):
-    """The only form this document has. Everything on the sheet except the
-    four fields below is derived from the parent export invoice, so they are
-    the only inputs here - the export invoice's own number and date are shown
-    beside them for reference, read-only."""
-    container = current_app.container
-    try:
-        invoice = container.export_invoice_service.get(export_invoice_id, g.user.company_id)
-    except NotFoundError:
-        abort(404)
-
-    editable = ("tax_invoice_number", "tax_invoice_date", "eway_bill_no", "eway_bill_date")
-
-    if request.method == "POST":
-        fields = {key: request.form.get(key, "") for key in editable}
-        try:
-            container.export_invoice_service.update_tax_invoice_details(
-                g.user, export_invoice_id, fields)
-        except (ValidationError, PermissionDeniedError) as exc:
-            flash(str(exc), "error")
-            return render_template("tax_invoices/form.html", invoice=invoice, data=fields), 400
-        flash("Tax invoice details saved.", "success")
-        return redirect(url_for("tax_invoices.view_tax_invoice", export_invoice_id=export_invoice_id))
-
-    data = {key: getattr(invoice, key) or "" for key in editable}
-    return render_template("tax_invoices/form.html", invoice=invoice, data=data)

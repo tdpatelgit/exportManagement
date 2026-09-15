@@ -110,9 +110,20 @@
 {% set primary_lut = (company.lut_details | selectattr('is_primary') | list | first) if company and company.lut_details else None %}
 {% set lut_no = (primary_lut or (company.lut_details[0] if company and company.lut_details else {}) or {}).get('lut_number') %}
 
-{% set ns = namespace(plts=0, boxes=0, qty=0, amount=0) %}
+{# packing_labels (sr_no -> "PLTS" / "CTNS" / "PCS" ...) comes from the route,
+   which reads the unit Packing Planning decided for each line; a caller that
+   doesn't pass it prints every line as pallets, as before. The Packing total
+   is kept per unit (pk.order / pk.sums), since pallets, cartons and pieces
+   can't be added together. #}
+{% set packing_labels = packing_labels if packing_labels is defined and packing_labels else {} %}
+{% set ns = namespace(boxes=0, qty=0, amount=0) %}
+{% set pk = namespace(order=[], sums={}) %}
 {% for item in invoice.items %}
-  {% set ns.plts = ns.plts + (item.pallets or 0) %}
+  {% if item.pallets %}
+    {% set pk_label = packing_labels.get(item.sr_no, 'PLTS') %}
+    {% if pk_label not in pk.order %}{% set pk.order = pk.order + [pk_label] %}{% endif %}
+    {% set _ = pk.sums.update({pk_label: pk.sums.get(pk_label, 0) + item.pallets}) %}
+  {% endif %}
   {% set ns.boxes = ns.boxes + (item.quantity_boxes or 0) %}
   {% set ns.qty = ns.qty + (item.quantity_value or 0) %}
   {% set ns.amount = ns.amount + (item.total_usd or 0) %}
@@ -217,9 +228,9 @@
   <!-- ============ GOODS + TOTALS (one shared column grid) ============ -->
   <table class="ei-items">
     <colgroup>
-      <col style="width:5%"><col style="width:34%"><col style="width:9%">
-      <col style="width:10%"><col style="width:8%"><col style="width:9%">
-      <col style="width:11%"><col style="width:14%">
+      <col style="width:5%"><col style="width:40%"><col style="width:8%">
+      <col style="width:9%"><col style="width:8%"><col style="width:9%">
+      <col style="width:11%"><col style="width:10%">
     </colgroup>
     <thead>
       <tr>
@@ -252,7 +263,7 @@
           {%- if item.dimension_mm %}<br>{{ item.dimension_mm }}{% endif -%}
         </td>
         <td class="ei-c">{{ item.hsn_code or '' }}</td>
-        <td class="ei-cnum">{% if item.pallets %}{{ '{:,.0f}'.format(item.pallets) }} <span class="ei-unit-sm">PLTS</span>{% endif %}</td>
+        <td class="ei-cnum">{% if item.pallets %}{{ '{:,.0f}'.format(item.pallets) }} <span class="ei-unit-sm">{{ packing_labels.get(item.sr_no, 'PLTS') }}</span>{% endif %}</td>
         <td class="ei-cnum">{% if item.quantity_boxes %}{{ '{:,.0f}'.format(item.quantity_boxes) }} <span class="ei-unit-sm">{{ item.quantity_unit }}</span>{% endif %}</td>
         <td class="ei-cnum">{{ '{:,.2f}'.format(item.quantity_value) }} <span class="ei-unit-sm">{{ item.unit }}</span></td>
         <td class="ei-cnum">{% if cif_or_cfr %}{{ invoice.currency_prefix }}&nbsp;{{ '{:,.5f}'.format(item.price_usd) if item.price_usd else '-' }}{% else %}{{ usd(item.price_usd) }}{% endif %} <span class="ei-unit-sm">/ {{ item.unit }}</span></td>
@@ -358,7 +369,10 @@
           SUPPLY MEANT FOR EXPORT {{ invoice.tax_mode_label|upper }}
           {%- if invoice.tax_mode == 'lut' and lut_no %} - LUT NO : {{ lut_no }}{% endif -%}
         </td>
-        <td class="ei-cnum">{{ '{:,.0f}'.format(ns.plts) if ns.plts else '' }}</td>
+        {# The Packing total is one bare figure - every packing unit counted
+           together, whatever each line's own unit (PLTS / CTNS / PCS). #}
+        {% set pk_total = pk.sums.values() | sum %}
+        <td class="ei-cnum">{{ '{:,.0f}'.format(pk_total) if pk_total else '' }}</td>
         <td class="ei-cnum">{{ '{:,.0f}'.format(ns.boxes) if ns.boxes else '' }}</td>
         <td class="ei-cnum">{{ '{:,.2f}'.format(ns.qty) }}</td>
         {% elif loop.index0 == 1 %}
@@ -389,13 +403,32 @@
   </table>
 
   <!-- ============ CONCESSIONAL PURCHASE & EPCG DETAILS | INVOICE VALUE & IGST DETAILS ============ -->
-  {# The 0.1% concessional rate only applies to purchases made under
-     exemption, and only means anything on an invoice actually raised
-     without payment of IGST under LUT - so this block lists only the
-     exemption rows, and only prints them at all under that tax_mode.
-     Otherwise the block stays up (paired in the same table as Invoice
-     Value & IGST Details) but empty. #}
-  {% set pd_list = (invoice.purchase_details | selectattr('purchase_type', 'equalto', 'exemption') | list) if invoice.tax_mode == 'lut' else [] %}
+  {# Rows only print on an invoice raised without payment of IGST under LUT;
+     otherwise the block stays up (paired in the same table as Invoice Value
+     & IGST Details) but empty.
+
+     Under LUT, in the Purchase details' own order:
+     * an EXEMPTION purchase (the 0.1% concessional rate) prints in full -
+       supplier GSTIN, invoice no., EPCG number and date;
+     * a FULL TAX purchase prints its EPCG number and date only, GSTIN and
+       invoice no. left blank - it is listed for the licence, not as a
+       concessional purchase. One with no EPCG at all has nothing to print
+       and is skipped, as is one whose EPCG number & date the block already
+       shows (the licence is the exporter's, so suppliers commonly share it). #}
+  {% set pd_ns = namespace(rows=[], seen=[]) %}
+  {% if invoice.tax_mode == 'lut' %}
+    {% for pd in invoice.purchase_details %}
+      {% set epcg_key = (pd.epcg_number or '') ~ '|' ~ (pd.epcg_date or '') %}
+      {% if pd.purchase_type == 'exemption' %}
+        {% set pd_ns.rows = pd_ns.rows + [{'supplier_gstin': pd.supplier_gstin, 'supplier_invoice_no': pd.supplier_invoice_no, 'epcg_number': pd.epcg_number, 'epcg_date': pd.epcg_date}] %}
+        {% if pd.epcg_number or pd.epcg_date %}{% set pd_ns.seen = pd_ns.seen + [epcg_key] %}{% endif %}
+      {% elif (pd.epcg_number or pd.epcg_date) and epcg_key not in pd_ns.seen %}
+        {% set pd_ns.rows = pd_ns.rows + [{'supplier_gstin': None, 'supplier_invoice_no': None, 'epcg_number': pd.epcg_number, 'epcg_date': pd.epcg_date}] %}
+        {% set pd_ns.seen = pd_ns.seen + [epcg_key] %}
+      {% endif %}
+    {% endfor %}
+  {% endif %}
+  {% set pd_list = pd_ns.rows %}
   {% set pd_count = pd_list|length %}
   {% set pd_rows = pd_count if pd_count >= 3 else 3 %}
   <table>

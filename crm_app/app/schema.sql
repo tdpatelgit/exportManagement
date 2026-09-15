@@ -662,6 +662,7 @@ CREATE TABLE IF NOT EXISTS quotation_items (
     quantity_boxes      REAL,
     quantity_unit       TEXT NOT NULL DEFAULT 'PCS',  -- snapshots products.quantity_unit, printed as small text after quantity_boxes
     pallets             REAL,      -- "Plts" column - same derived-from-boxes pattern as proforma_invoice_items.pallets
+    packing_unit        TEXT,      -- unit `pallets` counts: PLT (NULL) | CTN | BOX | BAG | PCS | SET - picked on "Manual - Packing"
     quantity_value       REAL NOT NULL DEFAULT 0,
     unit                TEXT NOT NULL DEFAULT 'SQM',
     price_usd           REAL NOT NULL DEFAULT 0,   -- the absolute FOB price the user typed - never adjusted
@@ -752,6 +753,7 @@ CREATE TABLE IF NOT EXISTS proforma_invoice_items (
     hsn_code              TEXT,
     surface               TEXT,      -- optional finish (GLOSSY / MATT / ...), drives the surface-grouped print view
     pallets                REAL,      -- "Plts" column
+    packing_unit           TEXT,      -- see quotation_items.packing_unit
     quantity_boxes        REAL,
     quantity_unit         TEXT NOT NULL DEFAULT 'PCS',  -- snapshots products.quantity_unit, printed as small text after quantity_boxes
     quantity_value         REAL NOT NULL DEFAULT 0,
@@ -1059,7 +1061,7 @@ CREATE TABLE IF NOT EXISTS export_invoices (
     voyage_no                   TEXT,          -- voyage number, printed alongside vessel_name in the same cell
     -- The four columns the Tax Invoice attachment owns. All are typed on that
     -- document's own edit form, never on the export invoice form, so they are
-    -- written by ExportInvoiceRepository.update_tax_invoice_details rather
+    -- written by ExportInvoiceRepository.update_document_fields rather
     -- than the shared header tuple. tax_invoice_number/_date fall back to the
     -- export invoice's own number/date while blank, which is how every tax
     -- invoice starts out.

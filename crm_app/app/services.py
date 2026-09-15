@@ -2654,6 +2654,17 @@ class QuotationService:
         return f"{prefix}{seq:03d}"
 
     # ---- validation --------------------------------------------------
+    # The units a "Manual - Packing" line's Plts figure can count. PLT is
+    # stored as NULL (the default every pallet-type line prints with).
+    ITEM_PACKING_UNITS = ("PLT", "CTN", "BOX", "BAG", "PCS", "SET")
+
+    @classmethod
+    def _packing_unit(cls, raw_unit, pallets) -> Optional[str]:
+        unit = (raw_unit or "").strip().upper()
+        if not pallets or unit not in cls.ITEM_PACKING_UNITS or unit == "PLT":
+            return None
+        return unit
+
     def _build_items(self, company_id: int, raw_items: list) -> List[QuotationItem]:
         items = []
         for i, raw in enumerate(raw_items, start=1):
@@ -2698,7 +2709,8 @@ class QuotationService:
             items.append(QuotationItem(
                 id=None, quotation_id=None, sr_no=i, product_id=product_id, product_name=product_name,
                 hsn_code=(raw.get("hsn_code") or "").strip() or None,
-                quantity_boxes=quantity_boxes, quantity_unit=quantity_unit, pallets=pallets, quantity_value=quantity_value,
+                quantity_boxes=quantity_boxes, quantity_unit=quantity_unit, pallets=pallets,
+                packing_unit=self._packing_unit(raw.get("packing_unit"), pallets), quantity_value=quantity_value,
                 unit=(raw.get("unit") or "SQM").strip() or "SQM",
                 price_usd=price_usd, total_usd=round(quantity_value * price_usd, 2),
             ))
@@ -3007,7 +3019,8 @@ class ProformaInvoiceService:
             {
                 "product_id": item.product_id, "product_name": item.product_name,
                 "hsn_code": item.hsn_code, "quantity_boxes": item.quantity_boxes,
-                "pallets": item.pallets, "quantity_value": item.quantity_value, "unit": item.unit,
+                "pallets": item.pallets, "packing_unit": item.packing_unit,
+                "quantity_value": item.quantity_value, "unit": item.unit,
                 "price_usd": item.price_usd,
             }
             for item in quotation.items
@@ -3056,7 +3069,8 @@ class ProformaInvoiceService:
             items.append(ProformaInvoiceItem(
                 id=None, proforma_invoice_id=None, sr_no=i, product_id=product_id, product_name=product_name,
                 hsn_code=(raw.get("hsn_code") or "").strip() or None,
-                pallets=pallets, quantity_boxes=quantity_boxes, quantity_unit=quantity_unit, quantity_value=quantity_value,
+                pallets=pallets, packing_unit=QuotationService._packing_unit(raw.get("packing_unit"), pallets),
+                quantity_boxes=quantity_boxes, quantity_unit=quantity_unit, quantity_value=quantity_value,
                 unit=(raw.get("unit") or "SQM").strip() or "SQM",
                 price_usd=price_usd, total_usd=round(quantity_value * price_usd, 2),
             ))
@@ -6529,6 +6543,12 @@ class ExportInvoiceService:
         # Examination date is fixed at creation - keep the stored value.
         invoice.examination_date = invoice.examination_date or existing.examination_date
 
+        # The shipping bill no. and date are no longer on this form - they are
+        # set from the list page's popup (update_shipping_bill). Carry the
+        # stored values forward, or every ordinary edit would blank them.
+        invoice.shipping_bill_no = existing.shipping_bill_no
+        invoice.shipping_bill_date = existing.shipping_bill_date
+
         packing_items = self._build_packing_items(fields, raw_items, invoice)
 
         if pdf_file and pdf_file.filename:
@@ -6549,27 +6569,35 @@ class ExportInvoiceService:
             advance_client_status(self.party_repos, self.lead_repo, updated.lead_id, "export_invoice")
         return updated
 
-    def update_tax_invoice_details(self, current_user: User, invoice_id: int, fields: dict) -> ExportInvoice:
-        """Everything the Tax Invoice attachment owns: its own number and
-        date, and the e-way bill number and date (which appear on that sheet
-        and nowhere else, so they are asked for there rather than on the
-        export invoice form). Every other field on the sheet derives from this
-        invoice, so its form asks for nothing more.
+    def update_eway_bill(self, current_user: User, invoice_id: int, fields: dict) -> ExportInvoice:
+        """The e-way bill no. and date, from the Export Invoices list's
+        "Update Eway bill no" popup. They print on the tax invoice and e-way
+        bill sheets; the tax invoice has no edit form of its own.
 
-        All four are optional. A blank tax invoice number/date falls back to
-        this invoice's own (see ExportInvoice.tax_invoice_*_printed), which is
-        how a tax invoice starts out.
-
-        Unlike the export invoice number the tax invoice number is not checked
-        for uniqueness: it is a reference typed to match the physical
-        paperwork, and nothing looks an invoice up by it."""
+        A targeted write of just these two columns, the same as
+        update_shipping_bill. Both optional; blank clears."""
         # Ownership first, so a too-long number posted at another company's
         # invoice still 404s rather than answering with a validation message.
         self._assert_can_modify(self.get(invoice_id, current_user.company_id), current_user)
-        if len((fields.get("tax_invoice_number") or "").strip()) > 16:
-            raise ValidationError("Tax invoice number must be at most 16 characters.")
+        if len((fields.get("eway_bill_no") or "").strip()) > 20:
+            raise ValidationError("E-way bill no. must be at most 20 characters.")
         return self._update_document_fields(
-            current_user, invoice_id, fields, ExportInvoiceRepository.TAX_INVOICE_FIELDS)
+            current_user, invoice_id, fields, ExportInvoiceRepository.EWAY_BILL_FIELDS)
+
+    def update_shipping_bill(self, current_user: User, invoice_id: int, fields: dict) -> ExportInvoice:
+        """The shipping bill no. and date, from the Export Invoices list's
+        "Update shipping bill no" popup.
+
+        Customs issues the shipping bill after the invoice is cut, so these
+        are filled in later against an existing invoice rather than typed on
+        its form. A targeted write of just these two columns, for the same
+        reason update_eway_bill is one: it must not travel the path
+        that rebuilds the whole invoice. Both optional; blank clears."""
+        self._assert_can_modify(self.get(invoice_id, current_user.company_id), current_user)
+        if len((fields.get("shipping_bill_no") or "").strip()) > 30:
+            raise ValidationError("Shipping bill no. must be at most 30 characters.")
+        return self._update_document_fields(
+            current_user, invoice_id, fields, ExportInvoiceRepository.SHIPPING_BILL_FIELDS)
 
     def _update_document_fields(self, current_user: User, invoice_id: int, fields: dict,
                                 names) -> ExportInvoice:
@@ -8363,6 +8391,24 @@ class PackingPlanningService:
         self.job_in_repo = job_in_repo
 
     # ---- reads --------------------------------------------------
+    def packing_unit_labels(self, company_id: int, proforma_ids: list) -> dict:
+        """product_id -> [{"label": "CTN", "boxes_per_unit": 30}, ...]: the
+        unit each product was packed in on the packing plannings behind these
+        proforma invoices.
+
+        Packing Planning is where PLT / CTN / PCS is decided, Loading Planning
+        copies that label onto every packing, and the export invoice is loaded
+        from the loading plan - so this is the authority the export invoice's
+        printed Packing column follows. A product planned more than one way
+        lists each."""
+        out: dict = {}
+        for row in self.packing_planning_repo.packing_units_for_proformas(company_id, proforma_ids):
+            out.setdefault(row["product_id"], []).append({
+                "label": (row["packing_unit_label"] or "PLT").strip().upper(),
+                "boxes_per_unit": row["boxes_per_unit"],
+            })
+        return out
+
     def get(self, packing_planning_id: int, company_id: int) -> PackingPlanning:
         plan = self.packing_planning_repo.get_by_id(packing_planning_id)
         if not plan or plan.company_id != company_id:
@@ -9259,6 +9305,259 @@ class LoadingPlanningService:
             "container_sr_no": packing.container_sr_no,
             "contents": packing.contents,
         }
+
+    # ---- exporting into an export invoice -----------------------------
+    def loading_plannings_for_proformas(self, proforma_ids: list, company_id: int) -> List[dict]:
+        """The loading plannings covering the ticked proforma invoices - what
+        the export invoice form's loading-planning dropdown lists.
+
+        Narrowed the same way the invoice's goods already are: one export
+        invoice covers one set of PIs, and the plan that loaded them is
+        almost always one of a handful."""
+        return self.loading_planning_repo.list_for_proformas(company_id, proforma_ids)
+
+    @staticmethod
+    def _is_shipped_container(row: dict) -> bool:
+        """Is this a container that actually went out, as the export invoice's
+        container split counts them?
+
+        Deliberately the SPLIT's test - the `containers()` filter in the
+        export invoice form, which keeps a row only for a container no., a
+        seal, an RFID tag, a vehicle or a tare - and not the broader one
+        _clean_container_details applies at save time, which would also keep a
+        row carrying nothing but a type or a permitted weight.
+
+        The narrower test is the one that matters here because the split is
+        indexed by POSITION. Emitting a type-only placeholder row would put it
+        in the 11B table, where the split would then filter it straight back
+        out, and every container index after it would be off by one - cargo
+        silently in the wrong container. A plan row with no container number,
+        seal, vehicle or tare is a placeholder, not something that shipped."""
+        for key in ("container_no", "line_seal_no", "rfid_seal_no", "vehicle_no"):
+            if (row.get(key) or "").strip():
+                return True
+        return row.get("tare_weight_kg") is not None
+
+    def _surface_by_product(self, plan: LoadingPlanning, company_id: int) -> dict:
+        """product_id -> the finish the proforma invoice quoted it under.
+
+        A loading plan knows designs and batches but not surface, and the
+        export invoice prints one. Read off the PIs behind the plan - the same
+        source, and the same `pi.items` rather than `printed_items`, that
+        _rates_by_product uses."""
+        out: dict = {}
+        ids = dict.fromkeys(list(plan.proforma_invoice_ids)
+                            + [i.proforma_invoice_id for i in plan.items if i.proforma_invoice_id])
+        for pi_id in ids:
+            pi = self.proforma_invoice_repo.get_by_id(pi_id)
+            if not pi or pi.company_id != company_id:
+                continue
+            for item in pi.items:
+                if item.product_id is not None and item.product_id not in out and item.surface:
+                    out[item.product_id] = item.surface
+        return out
+
+    def build_export_invoice_prefill(self, loading_planning_id, company_id: int) -> dict:
+        """Everything an export invoice takes from a finished loading plan:
+        the containers that actually went out, the goods on them, and which
+        boxes went into which container.
+
+        This is the physical half of the invoice. The reference-PI loader
+        beside it supplies the commercial half - consignee, charges, bank,
+        supplier and EPCG rows - and the two deliberately do not overlap:
+        nothing here touches a field that loader fills, and nothing there
+        touches the container tables.
+
+        Three shapes are deliberate:
+
+        * goods are merged to ONE ROW PER PRODUCT. A plan's lines are batches
+          (product - design [batch]), which is what a pallet is packed out of
+          and nothing an invoice should print; two batches of one product are
+          one sellable line.
+
+        * the split's pallet figure comes from the REAL packings, not the
+          export form's pro-rata guess. A pallet carrying two products
+          contributes its box share to each, so the parts still add back up
+          to exactly one pallet.
+
+        * every problem is a warning, never a ValidationError - the rule the
+          rest of this service follows. The operator is shown what does not
+          add up and decides, and the export invoice's own submit guard
+          refuses an unbalanced split anyway."""
+        plan = self.get(loading_planning_id, company_id)
+        warnings: List[str] = []
+
+        # ---- containers ------------------------------------------------
+        # Kept in sr_no order with placeholder rows dropped, because that
+        # filtered list IS the index space the export invoice's container
+        # split uses - see _is_shipped_container.
+        rows = [c for c in plan.containers if self._is_shipped_container(c)]
+        container_index_by_sr = {c["sr_no"]: i for i, c in enumerate(rows)}
+        container_details = [{
+            "container_type": c.get("container_type"),
+            "container_no": c.get("container_no"),
+            "line_seal_no": c.get("line_seal_no"),
+            "rfid_seal_no": c.get("rfid_seal_no"),
+            "vehicle_no": c.get("vehicle_no"),
+            "lr_no": c.get("lr_no"),
+            "max_permitted_weight": c.get("max_permitted_weight"),
+            "tare_weight_kg": c.get("tare_weight_kg"),
+        } for c in rows]
+
+        # The type/count summary above the 11B table - how many of each type.
+        counts: dict = {}
+        for c in rows:
+            key = (c.get("container_type") or "").strip()
+            counts[key] = counts.get(key, 0) + 1
+        containers = [{"container_type": k, "container_count": v} for k, v in counts.items()]
+
+        skipped = len(plan.containers) - len(rows)
+        if not rows:
+            warnings.append("This loading planning has no container rows yet - the container "
+                            "details and the split come across empty.")
+        elif skipped:
+            warnings.append(f"{skipped} container row(s) on this plan carry no container number, "
+                            "seal, vehicle or tare and were left out.")
+
+        # ---- goods, merged per product ---------------------------------
+        surface_by_product = self._surface_by_product(plan, company_id)
+        merged: dict = {}
+        index_by_item_sr: dict = {}
+        for line in plan.items:
+            key = line.product_id if line.product_id is not None else f"name:{line.product_name}"
+            entry = merged.get(key)
+            if entry is None:
+                entry = merged[key] = {
+                    "index": len(merged),
+                    "product_id": line.product_id,
+                    "product_name": line.product_name,
+                    "hsn_code": line.hsn_code,
+                    "unit": line.unit or "SQM",
+                    "price_usd": line.price_usd or 0,
+                    "quantity_boxes": 0.0,
+                    "pallets": 0.0,
+                }
+            if not entry["hsn_code"]:
+                entry["hsn_code"] = line.hsn_code
+            if not entry["price_usd"]:
+                entry["price_usd"] = line.price_usd or 0
+            entry["quantity_boxes"] += line.quantity_boxes or 0
+            index_by_item_sr[line.sr_no] = entry["index"]
+
+        by_index = {entry["index"]: entry for entry in merged.values()}
+
+        # ---- the split, off the real packings --------------------------
+        # (container index, goods-line index) -> what went in it. A packing is
+        # one physical pallet/carton, so a content line's share of it is its
+        # share of the boxes on it - which is what makes two products on one
+        # pallet add back up to exactly one pallet.
+        net_by_item_sr = {i.sr_no: (i.net_weight_kg or 0) for i in plan.items}
+        buckets: dict = {}
+        unassigned = []
+        for packing in plan.packings:
+            total = sum(c.get("quantity_boxes") or 0 for c in packing.contents)
+            container_index = (container_index_by_sr.get(packing.container_sr_no)
+                               if packing.container_sr_no is not None else None)
+            for content in packing.contents:
+                item_sr = content.get("item_sr_no")
+                item_index = index_by_item_sr.get(item_sr)
+                if item_index is None:
+                    continue
+                boxes = content.get("quantity_boxes") or 0
+                share = (boxes / total) if total else 0
+                # Pallets on the GOODS line count every packing, assigned or
+                # not, so the line agrees with its own box count; an
+                # unassigned packing then shows as a shortfall in the split,
+                # which is the honest reading.
+                by_index[item_index]["pallets"] += share
+                if container_index is None:
+                    continue
+                net = boxes * net_by_item_sr.get(item_sr, 0)
+                bucket = buckets.setdefault((container_index, item_index), {
+                    "quantity_boxes": 0.0, "pallets": 0.0,
+                    "net_weight_kg": 0.0, "gross_weight_kg": 0.0,
+                })
+                bucket["quantity_boxes"] += boxes
+                bucket["pallets"] += share
+                bucket["net_weight_kg"] += net
+                # Mirrors LoadingPlanningPacking.gross_weight_kg - the plan
+                # snapshots each packing's real tare, which beats the export
+                # form's "pallets x the catalog pallet type's weight".
+                bucket["gross_weight_kg"] += net + share * (packing.tare_weight_kg or 0)
+            if total and container_index is None:
+                unassigned.append(packing.label)
+
+        if unassigned:
+            shown = ", ".join(unassigned[:6]) + (", ..." if len(unassigned) > 6 else "")
+            warnings.append(
+                f"{len(unassigned)} packing(s) are not in a container on this plan ({shown}) - "
+                "their boxes come across on the goods lines but not in the split, so those "
+                "lines will read as under-allocated.")
+
+        items = [{
+            "product_id": entry["product_id"],
+            "product_name": entry["product_name"],
+            "hsn_code": entry["hsn_code"],
+            "surface": surface_by_product.get(entry["product_id"]),
+            "pallets": round(entry["pallets"], 2) or None,
+            "quantity_boxes": round(entry["quantity_boxes"], 3) or None,
+            # Boxes x the product's alternate quantity - the same figure
+            # ExportInvoiceService._build_items settles on at save time, sent
+            # now so the Qty (SQM/LM) column is filled the moment the row lands.
+            "quantity_value": self._alternate_quantity_value(
+                entry["product_id"], entry["quantity_boxes"], company_id),
+            "unit": entry["unit"],
+            "price_usd": entry["price_usd"],
+            "igst_percent": self._product_igst_percent(entry["product_id"], company_id),
+        } for entry in merged.values()]
+
+        allocations = [{
+            "container_index": container_index,
+            "invoice_item_index": item_index,
+            "quantity_boxes": round(bucket["quantity_boxes"], 3),
+            "pallets": round(bucket["pallets"], 2),
+            "net_weight_kg": round(bucket["net_weight_kg"], 2),
+            "gross_weight_kg": round(bucket["gross_weight_kg"], 2),
+        } for (container_index, item_index), bucket in sorted(buckets.items())]
+
+        return {
+            "fields": {
+                "booking_no": plan.booking_no,
+                "booking_detail_id": plan.booking_detail_id,
+                "vessel_name": plan.vessel_name,
+                "voyage_no": plan.voyage_no,
+                "cd_transporter_name": plan.transporter_name,
+            },
+            "loading_planning_number": plan.loading_planning_number,
+            "containers": containers,
+            "container_details": container_details,
+            "items": items,
+            "allocations": allocations,
+            "warnings": warnings,
+        }
+
+    def _alternate_quantity_value(self, product_id, boxes, company_id: int) -> float:
+        """boxes x the product's alternate quantity (SQM/LM per box), or 0
+        when either is unknown - the form then leaves Qty for the user."""
+        if not product_id or not boxes:
+            return 0
+        product = self.product_repo.get_by_id(int(product_id))
+        if not product or product.company_id != company_id or not product.alternate_quantity:
+            return 0
+        try:
+            return round(boxes * float(product.alternate_quantity), 2)
+        except (TypeError, ValueError):
+            return 0
+
+    def _product_igst_percent(self, product_id, company_id: int) -> float:
+        """The same snapshot ExportInvoiceService takes when it builds its own
+        prefill - the export invoice taxes per line, each HSN differently."""
+        if not product_id:
+            return 0.0
+        product = self.product_repo.get_by_id(int(product_id))
+        if not product or product.company_id != company_id:
+            return 0.0
+        return product.igst_percent or 0.0
 
     # ---- auto-assign --------------------------------------------------
     def auto_assign_containers(self, packings: List[LoadingPlanningPacking],

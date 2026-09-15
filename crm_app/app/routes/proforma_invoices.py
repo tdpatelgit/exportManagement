@@ -42,6 +42,7 @@ def _extract_items(form) -> list:
     product_names = form.getlist("item_product_name[]")
     hsn_codes = form.getlist("item_hsn_code[]")
     pallets = form.getlist("item_pallets[]")
+    packing_units = form.getlist("item_packing_unit[]")
     boxes = form.getlist("item_quantity_boxes[]")
     values = form.getlist("item_quantity_value[]")
     units = form.getlist("item_unit[]")
@@ -53,6 +54,7 @@ def _extract_items(form) -> list:
             "product_name": product_names[i],
             "hsn_code": hsn_codes[i] if i < len(hsn_codes) else "",
             "pallets": pallets[i] if i < len(pallets) else "",
+            "packing_unit": packing_units[i] if i < len(packing_units) else "",
             "quantity_boxes": boxes[i] if i < len(boxes) else "",
             "quantity_value": values[i] if i < len(values) else "",
             "unit": units[i] if i < len(units) else "SQM",

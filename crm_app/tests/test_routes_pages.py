@@ -621,6 +621,111 @@ class TestExportPackingListRoutes:
         for key in ("export_invoice_number", "permission_no", "stuffing_location", "booking_no", "vessel_name", "voyage_no"):
             assert key not in payload["fields"]
 
+    def test_loading_planning_apis_narrow_by_proforma_and_404_across_companies(self, admin_ctx):
+        """The form's second importer. The dropdown is narrowed to the plans
+        raised against the ticked PIs, and a plan id from another company is a
+        404 like everywhere else - not a 403, which would confirm it exists."""
+        client, container, admin, company_id = admin_ctx
+
+        # No plan for this PI yet - the dropdown comes back empty rather than
+        # listing every plan in the company.
+        proforma = container.proforma_invoice_service.create(
+            admin, {"consignee_name": "ROBUST INTERNATIONAL", "invoice_date": "2026-01-01"},
+            [{"product_name": "GVT 600X1200", "quantity_value": "144", "price_usd": "5.92"}])
+        resp = client.get(f"/export-invoices/api/loading-plannings?proforma_invoice_ids={proforma.id}")
+        assert resp.status_code == 200
+        assert resp.get_json()["loading_plannings"] == []
+
+        # No ids at all is the page's own initial state, not an error.
+        assert client.get("/export-invoices/api/loading-plannings").get_json()["loading_plannings"] == []
+
+        resp = client.get("/export-invoices/api/loading-prefill?loading_planning_id=999999")
+        assert resp.status_code == 404
+        assert "error" in resp.get_json()
+
+    def test_shipping_bill_is_set_from_the_list_popup_not_the_form(self, admin_ctx):
+        """Shipping bill no. & date moved off the invoice form onto the
+        Export Invoices list's "Update shipping bill no" popup."""
+        client, container, admin, company_id = admin_ctx
+        invoice = self._create_export_invoice(client, container, admin, company_id)
+
+        form = client.get(f"/export-invoices/{invoice.id}/edit").get_data(as_text=True)
+        assert 'name="shipping_bill_no"' not in form
+        assert 'name="shipping_bill_date"' not in form
+
+        listing = client.get("/export-invoices/").get_data(as_text=True)
+        assert "Update shipping bill no" in listing
+        assert f"/export-invoices/{invoice.id}/shipping-bill" in listing
+
+        resp = client.post(f"/export-invoices/{invoice.id}/shipping-bill",
+                           data={"shipping_bill_no": "2620324", "shipping_bill_date": "2026-04-22"})
+        assert resp.status_code == 302
+        saved = container.export_invoice_service.get(invoice.id, company_id)
+        assert saved.shipping_bill_no == "2620324"
+        assert (saved.shipping_bill_date or "")[:10] == "2026-04-22"
+
+        listing = client.get("/export-invoices/").get_data(as_text=True)
+        assert "2620324" in listing
+
+    def test_shipping_bill_popup_404s_for_an_unknown_invoice(self, admin_ctx):
+        client, container, admin, company_id = admin_ctx
+        resp = client.post("/export-invoices/999999/shipping-bill",
+                           data={"shipping_bill_no": "X", "shipping_bill_date": ""})
+        assert resp.status_code == 404
+
+    def test_print_packing_column_says_cartons_for_a_carton_packed_line(self, admin_ctx):
+        """The Packing column used to print PLTS on every line. A line packed
+        in cartons now prints CTNS, a pallet-packed one still PLTS, and the
+        Packing total keeps the two apart instead of adding cartons to
+        pallets."""
+        client, container, admin, company_id = admin_ctx
+        rod = container.product_service.create_product(
+            current_user=admin, product_name="904 TOWEL ROD", description="", hsn_code="73269030",
+            igst_percent="18", quantity="1", quantity_unit="PCS", alternate_quantity="1", alternate_quantity_unit="PCS",
+            pallet_types=[{"name": "CTN", "boxes_per_pallet": "30", "weight_kg": "0.3", "unit_kind": "carton"}])
+        tile = container.product_service.create_product(
+            current_user=admin, product_name="GVT 600X1200", description="", hsn_code="69072100",
+            igst_percent="18", quantity="4", alternate_quantity="1.44",
+            pallet_types=[{"name": "Pallet", "boxes_per_pallet": "32", "weight_kg": "20", "unit_kind": "pallet"}])
+        invoice = container.export_invoice_service.create(
+            admin,
+            {"consignee_name": "ROBUST INTERNATIONAL", "invoice_date": "2026-02-20",
+             "tax_mode": "igst", "exchange_rate": "86.70", "export_invoice_number": "1000000077"},
+            [{"product_id": str(rod.id), "product_name": rod.product_name, "hsn_code": "73269030",
+              "quantity_boxes": "90", "pallets": "3", "quantity_value": "90", "unit": "PCS", "price_usd": "12"},
+             {"product_id": str(tile.id), "product_name": tile.product_name, "hsn_code": "69072100",
+              "quantity_boxes": "64", "pallets": "2", "quantity_value": "92.16", "unit": "SQM", "price_usd": "5.92"}],
+        )
+
+        page = client.get(f"/export-invoices/{invoice.id}").get_data(as_text=True)
+        rows = [chunk[:chunk.find("</tr>")] for chunk in page.split('<tr class="ei-goods">')[1:]]
+        rod_row = next(r for r in rows if "904 TOWEL ROD" in r)
+        tile_row = next(r for r in rows if "GVT 600X1200" in r)
+        assert "CTNS" in rod_row and "PLTS" not in rod_row
+        assert "PLTS" in tile_row and "CTNS" not in tile_row
+
+        # The Packing total, in the row carrying the Export Under label, is
+        # one bare figure: 2 pallets + 3 cartons = 5, with no unit beside it.
+        marker = page.find('<span class="ei-lbl">Export Under</span>')
+        assert marker != -1
+        totals = page[marker:page.find("</tr>", marker)]
+        assert '<td class="ei-cnum">5</td>' in totals
+        assert "PLTS" not in totals and "CTNS" not in totals
+
+        # The Export Packing List prints the same units per line, and a bare
+        # Packing total.
+        packing_list = container.export_packing_list_service.get_for_invoice(invoice.id, company_id)
+        assert packing_list is not None
+        sheet = client.get(f"/export-packing-lists/{packing_list.id}").get_data(as_text=True)
+        pl_rows = [chunk[:chunk.find("</tr>")] for chunk in sheet.split("<tr>")]
+        pl_rod = next(r for r in pl_rows if "904 TOWEL ROD" in r)
+        pl_tile = next(r for r in pl_rows if "GVT 600X1200" in r)
+        assert "CTNS" in pl_rod and "PLTS" not in pl_rod
+        assert "PLTS" in pl_tile and "CTNS" not in pl_tile
+        pl_total = sheet[sheet.find('<tr class="epl-tot">'):]
+        pl_total = pl_total[:pl_total.find("</tr>")]
+        assert "PLTS" not in pl_total and "CTNS" not in pl_total
+
     def test_export_invoice_print_page_renders(self, admin_ctx):
         client, container, admin, company_id = admin_ctx
         invoice = self._create_export_invoice(client, container, admin, company_id)
@@ -787,6 +892,39 @@ class TestExportPackingListRoutes:
         assert anchor != -1
         block = page[anchor:anchor + 800]
         assert "24ABVFA1170D1ZO" not in block
+
+    def test_under_lut_a_full_tax_purchase_prints_only_its_epcg(self, admin_ctx):
+        """Under LUT an exemption purchase prints in full, while a full-tax
+        purchase prints just its EPCG number and date - never its supplier
+        GSTIN or invoice no. A full-tax row with no EPCG prints nothing, and
+        one repeating an EPCG already shown is not printed twice."""
+        client, container, admin, company_id = admin_ctx
+        invoice = self._create_export_invoice(client, container, admin, company_id, extra={
+            "tax_mode": "lut",
+            "pd_supplier_gstin[]": ["24ABVFA1170D1ZO", "24FULLTAX0001Z1", "24FULLTAX0002Z2", "24FULLTAX0003Z3"],
+            "pd_supplier_invoice_no[]": ["GSTT/4987", "FT/111", "FT/222", "FT/333"],
+            "pd_supplier_name[]": ["Alive Granito", "Full Tax One", "Full Tax Two", "Full Tax Three"],
+            "pd_purchase_type[]": ["exemption", "full_tax", "full_tax", "full_tax"],
+            "pd_epcg_number[]": ["2431000888", "2431000999", "", "2431000999"],
+            "pd_epcg_date[]": ["2021-09-17", "2022-03-05", "", "2022-03-05"],
+        })
+        got = container.export_invoice_service.get(invoice.id, company_id)
+        assert got.tax_mode == "lut"
+
+        page = client.get(f"/export-invoices/{invoice.id}").get_data(as_text=True)
+        anchor = page.find("Concessional Purchase &amp; EPCG details")
+        block = page[anchor:page.find("Invoice Value &amp; IGST Details", anchor)]
+
+        # The exemption purchase, in full.
+        assert "24ABVFA1170D1ZO" in block and "GSTT/4987" in block
+        assert "2431000888" in block and "17-09-2021" in block
+        # The full-tax purchase: its EPCG only...
+        assert "2431000999" in block and "05-03-2022" in block
+        assert block.count("2431000999") == 1            # ...printed once, not per supplier
+        # ...and never any full-tax supplier's GSTIN or invoice no.
+        for hidden in ("24FULLTAX0001Z1", "FT/111", "24FULLTAX0002Z2", "FT/222",
+                       "24FULLTAX0003Z3", "FT/333"):
+            assert hidden not in block
 
     def test_the_epcg_line_is_absent_when_there_is_no_licence(self, admin_ctx):
         client, container, admin, company_id = admin_ctx
@@ -1520,12 +1658,12 @@ class TestTaxInvoiceRoutes:
 
     def test_money_is_converted_to_inr_at_the_invoices_exchange_rate(self, admin_ctx):
         # 144 SQM @ 5.92 = 852.48, at the helper's 86.70 rate -> 73,910.02,
-        # printed with Indian grouping. The per-unit rate converts too:
-        # 5.92 * 86.70 = 513.26.
+        # printed bare in the Total Amount column (no ₹, no grouping). The
+        # per-unit rate converts too: 5.92 * 86.70 = 513.26.
         client, container, admin, company_id = admin_ctx
         invoice = self._create_export_invoice(client, container, admin, company_id)
         body = client.get(f"/tax-invoices/{invoice.id}").get_data(as_text=True)
-        assert "73,910.02" in body
+        assert "73910.02" in body
         assert "513.26" in body
         assert "86.70" in body                    # the rate it was converted at
         assert "RUPEES" in body                   # spelled out in INR wording
@@ -1538,7 +1676,27 @@ class TestTaxInvoiceRoutes:
         invoice = self._create_export_invoice(client, container, admin, company_id)
         body = client.get(f"/tax-invoices/{invoice.id}").get_data(as_text=True)
         assert "IGST" in body
-        assert "13,303.80" in body
+        assert "IGST %" in body
+        assert "18%" in body                      # the line's own rate
+        assert "13303.80" in body
+
+    def test_hsn_summary_sums_the_lines_per_six_digit_hsn(self, admin_ctx):
+        # One goods line (HSN 69072100, 18%, 73910.02): the summary prints it
+        # under 690721 with the same total, and the Total Invoice Value row
+        # still prints its own figure - so the amount appears three times.
+        client, container, admin, company_id = admin_ctx
+        invoice = self._create_export_invoice(client, container, admin, company_id)
+        body = client.get(f"/tax-invoices/{invoice.id}").get_data(as_text=True)
+        # Its own table below the totals, with its own four columns.
+        assert "HSNC wise Summary" in body
+        assert "TAXABLE AMOUNT" in body and "IGST AMOUNT" in body
+        assert body.index("EwayBill Date") < body.index("TAXABLE AMOUNT")
+        summary = body.split("TAXABLE AMOUNT", 1)[1]
+        assert "690721" in summary and "18%" in summary
+        assert "73910.02" in summary              # taxable = the HSN's total
+        assert "13303.80" in summary              # 73910.02 x 18%
+        assert body.count("73910.02") == 3
+        assert body.count("13303.80") == 2        # IGST row unchanged + summary
         assert "IGST Value In Word" in body
 
     def test_igst_is_nil_under_lut(self, admin_ctx):
@@ -1547,7 +1705,10 @@ class TestTaxInvoiceRoutes:
             client, container, admin, company_id, extra={"tax_mode": "lut"})
         body = client.get(f"/tax-invoices/{invoice.id}").get_data(as_text=True)
         assert "NIL" in body
-        assert "13,303.80" not in body
+        assert "13303.80" not in body
+        # IGST % prints 0 under LUT, on the goods line and in the HSNC summary.
+        assert "18%" not in body
+        assert body.count(">0%<") == 2
 
     def test_ship_to_is_the_consignee_and_bill_to_the_notify_party(self, admin_ctx):
         client, container, admin, company_id = admin_ctx
@@ -1591,88 +1752,48 @@ class TestTaxInvoiceRoutes:
         assert "Loading Port PIN Code" in body
         assert "370421" in body
 
-    def test_eway_bill_is_typed_on_the_tax_invoice_and_prints_there(self, admin_ctx):
-        """The e-way bill appears on this sheet and nowhere else, so it is
-        asked for here rather than on the export invoice form."""
+    def test_tax_invoice_has_no_edit_page(self, admin_ctx):
+        client, container, admin, company_id = admin_ctx
+        invoice = self._create_export_invoice(client, container, admin, company_id)
+        assert client.get(f"/tax-invoices/{invoice.id}/edit").status_code == 404
+        body = client.get(f"/tax-invoices/{invoice.id}").get_data(as_text=True)
+        assert f"/tax-invoices/{invoice.id}/edit" not in body
+
+    def test_eway_bill_is_set_from_the_export_invoice_list_and_prints_here(self, admin_ctx):
         client, container, admin, company_id = admin_ctx
         invoice = self._create_export_invoice(client, container, admin, company_id)
         # It is not on the export invoice's form at all.
         ei_form = client.get(f"/export-invoices/{invoice.id}/edit").get_data(as_text=True)
         assert 'name="eway_bill_no"' not in ei_form
-        assert 'name="eway_bill_no"' in client.get(
-            f"/tax-invoices/{invoice.id}/edit").get_data(as_text=True)
 
-        resp = client.post(f"/tax-invoices/{invoice.id}/edit", data={
-            "tax_invoice_number": "", "tax_invoice_date": "",
+        listing = client.get("/export-invoices/").get_data(as_text=True)
+        assert "Update Eway bill no" in listing
+        assert f"/export-invoices/{invoice.id}/eway-bill" in listing
+        assert 'data-tax-invoice-no="1000000042"' in listing    # the popup shows it
+
+        resp = client.post(f"/export-invoices/{invoice.id}/eway-bill", data={
             "eway_bill_no": "622115137765", "eway_bill_date": "2026-04-22"})
         assert resp.status_code == 302
         got = container.export_invoice_service.get(invoice.id, company_id)
         assert got.eway_bill_no == "622115137765"
         assert got.eway_bill_date == "2026-04-22"
+        assert "622115137765" in client.get("/export-invoices/").get_data(as_text=True)
         body = client.get(f"/tax-invoices/{invoice.id}").get_data(as_text=True)
         assert "622115137765" in body
         assert "22-04-2026" in body
 
-    def test_edit_form_asks_only_for_the_tax_invoices_own_number_and_date(self, admin_ctx):
+    def test_eway_bill_popup_404s_for_an_unknown_invoice(self, admin_ctx):
         client, container, admin, company_id = admin_ctx
-        invoice = self._create_export_invoice(client, container, admin, company_id)
-        body = client.get(f"/tax-invoices/{invoice.id}/edit").get_data(as_text=True)
-        assert "Tax invoice number" in body and "Tax invoice date" in body
-        # The export invoice's own number/date are shown, but read-only.
-        assert "Export invoice number" in body and "Export invoice date" in body
-        assert 'name="tax_invoice_number"' in body and 'name="tax_invoice_date"' in body
-        assert 'name="eway_bill_no"' in body and 'name="eway_bill_date"' in body
-        # Nothing else is asked for - no consignee, bank, goods or charges, and
-        # the export invoice's own number is shown but not submittable.
-        for absent in ('name="consignee_name"', 'name="bank_name"', 'name="exchange_rate"',
-                       'name="item_price_usd[]"', 'name="export_invoice_number"'):
-            assert absent not in body
+        resp = client.post("/export-invoices/999999/eway-bill",
+                           data={"eway_bill_no": "X", "eway_bill_date": ""})
+        assert resp.status_code == 404
 
-    def test_saving_a_number_and_date_changes_what_the_sheet_prints(self, admin_ctx):
+    def test_editing_the_export_invoice_does_not_wipe_the_eway_bill(self, admin_ctx):
+        """The export invoice form never posts these two, so they must not
+        ride along on its header tuple."""
         client, container, admin, company_id = admin_ctx
         invoice = self._create_export_invoice(client, container, admin, company_id)
-        resp = client.post(f"/tax-invoices/{invoice.id}/edit", data={
-            "tax_invoice_number": "TI/001/26-27", "tax_invoice_date": "2026-04-22"})
-        assert resp.status_code == 302
-        got = container.export_invoice_service.get(invoice.id, company_id)
-        assert got.tax_invoice_number == "TI/001/26-27"
-        assert got.tax_invoice_date == "2026-04-22"
-        body = client.get(f"/tax-invoices/{invoice.id}").get_data(as_text=True)
-        assert "TI/001/26-27" in body
-        assert "22-04-2026" in body
-        # The export invoice itself is untouched.
-        assert got.export_invoice_number == "1000000042"
-        assert got.invoice_date == "2026-02-20"
-
-    def test_blank_falls_back_to_the_export_invoices_own_number_and_date(self, admin_ctx):
-        client, container, admin, company_id = admin_ctx
-        invoice = self._create_export_invoice(client, container, admin, company_id)
-        client.post(f"/tax-invoices/{invoice.id}/edit", data={
-            "tax_invoice_number": "TI/001/26-27", "tax_invoice_date": "2026-04-22"})
-        client.post(f"/tax-invoices/{invoice.id}/edit", data={
-            "tax_invoice_number": "", "tax_invoice_date": ""})
-        got = container.export_invoice_service.get(invoice.id, company_id)
-        assert got.tax_invoice_number is None and got.tax_invoice_date is None
-        assert got.tax_invoice_number_printed == "1000000042"
-        assert got.tax_invoice_date_printed == "2026-02-20"
-        body = client.get(f"/tax-invoices/{invoice.id}").get_data(as_text=True)
-        assert "1000000042" in body and "20-02-2026" in body
-
-    def test_an_over_long_tax_invoice_number_is_rejected(self, admin_ctx):
-        client, container, admin, company_id = admin_ctx
-        invoice = self._create_export_invoice(client, container, admin, company_id)
-        resp = client.post(f"/tax-invoices/{invoice.id}/edit",
-                           data={"tax_invoice_number": "X" * 17, "tax_invoice_date": ""})
-        assert resp.status_code == 400
-        assert container.export_invoice_service.get(invoice.id, company_id).tax_invoice_number is None
-
-    def test_editing_the_export_invoice_does_not_wipe_the_tax_invoices_fields(self, admin_ctx):
-        """The export invoice form never posts any of the four, so they must
-        not ride along on its header tuple."""
-        client, container, admin, company_id = admin_ctx
-        invoice = self._create_export_invoice(client, container, admin, company_id)
-        client.post(f"/tax-invoices/{invoice.id}/edit", data={
-            "tax_invoice_number": "TI/001/26-27", "tax_invoice_date": "2026-04-22",
+        client.post(f"/export-invoices/{invoice.id}/eway-bill", data={
             "eway_bill_no": "622115137765", "eway_bill_date": "2026-04-22"})
         client.post(f"/export-invoices/{invoice.id}/edit", data={
             "export_invoice_number": "1000000042", "invoice_date": "2026-02-20",
@@ -1681,12 +1802,10 @@ class TestTaxInvoiceRoutes:
             "item_quantity_boxes[]": "100", "item_quantity_value[]": "144",
             "item_unit[]": "SQM", "item_price_usd[]": "5.92"}, follow_redirects=True)
         got = container.export_invoice_service.get(invoice.id, company_id)
-        assert got.tax_invoice_number == "TI/001/26-27"
-        assert got.tax_invoice_date == "2026-04-22"
         assert got.eway_bill_no == "622115137765"
         assert got.eway_bill_date == "2026-04-22"
 
-    def test_editing_another_companys_tax_invoice_is_a_404(self, admin_ctx):
+    def test_updating_another_companys_eway_bill_is_a_404(self, admin_ctx):
         client, container, admin, _ = admin_ctx
         other = container.tenant_repo.create("Rival", "rival-ti-edit")
         rival_admin = container.auth_service.create_user(
@@ -1695,9 +1814,8 @@ class TestTaxInvoiceRoutes:
             rival_admin, {"export_invoice_number": "9000000002", "invoice_date": "2026-03-01",
                           "consignee_name": "RIVAL BUYER", "exchange_rate": "80"},
             [{"product_name": "P", "quantity_value": "10", "price_usd": "2"}])
-        assert client.get(f"/tax-invoices/{rival.id}/edit").status_code == 404
-        assert client.post(f"/tax-invoices/{rival.id}/edit",
-                           data={"tax_invoice_number": "HACK"}).status_code == 404
+        assert client.post(f"/export-invoices/{rival.id}/eway-bill",
+                           data={"eway_bill_no": "HACK"}).status_code == 404
 
     def test_tax_invoice_another_companys_invoice_is_a_404(self, app, client, admin_ctx):
         _, container, admin, _ = admin_ctx
@@ -2090,8 +2208,8 @@ class TestEsealRoutes:
             client, container, admin, company_id,
             extra={"shipping_bill_no": "2620324", "shipping_bill_date": "2026-04-22",
                    "cd_vehicle_no[]": ["GJ12BX4611", "GJ12BX4612"]})
-        # The e-way bill lives on the tax invoice form.
-        client.post(f"/tax-invoices/{invoice.id}/edit",
+        # The e-way bill is set from the Export Invoices list popup.
+        client.post(f"/export-invoices/{invoice.id}/eway-bill",
                     data={"eway_bill_no": "622115137765"})
         body = client.get(f"/e-seals/{invoice.id}").get_data(as_text=True)
         assert "2620324" in body
@@ -2279,7 +2397,7 @@ class TestEwayBillRoutes:
             client, container, admin, company_id,
             extra={"cd_vehicle_no[]": ["GJ12BX4611", "GJ12BX4612"],
                    "cd_lr_no[]": ["LR 0001", "LR 0002"]})
-        client.post(f"/tax-invoices/{invoice.id}/edit", data={
+        client.post(f"/export-invoices/{invoice.id}/eway-bill", data={
             "eway_bill_no": "622115137765", "eway_bill_date": "2026-04-22"})
         body = client.get(f"/eway-bills/{invoice.id}").get_data(as_text=True)
         assert "622115137765" in body

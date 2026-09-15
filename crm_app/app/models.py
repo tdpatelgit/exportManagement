@@ -1028,6 +1028,7 @@ class QuotationItem:
     quantity_boxes: Optional[float] = None
     quantity_unit: str = "PCS"
     pallets: Optional[float] = None
+    packing_unit: Optional[str] = None  # unit `pallets` counts; None = PLT
     quantity_value: float = 0
     unit: str = "SQM"
     price_usd: float = 0
@@ -1050,6 +1051,7 @@ class QuotationItem:
             quantity_boxes=row["quantity_boxes"],
             quantity_unit=row["quantity_unit"] if "quantity_unit" in row.keys() else "PCS",
             pallets=row["pallets"] if "pallets" in row.keys() else None,
+            packing_unit=row["packing_unit"] if "packing_unit" in row.keys() else None,
             quantity_value=row["quantity_value"],
             unit=row["unit"],
             price_usd=row["price_usd"],
@@ -2301,6 +2303,7 @@ class ProformaInvoiceItem:
     hsn_code: Optional[str] = None
     surface: Optional[str] = None  # optional finish (GLOSSY / MATT / ...), drives the surface-grouped print view
     pallets: Optional[float] = None
+    packing_unit: Optional[str] = None  # unit `pallets` counts; None = PLT
     quantity_boxes: Optional[float] = None
     quantity_unit: str = "PCS"
     quantity_value: float = 0
@@ -2324,6 +2327,7 @@ class ProformaInvoiceItem:
             hsn_code=row["hsn_code"],
             surface=row["surface"] if "surface" in row.keys() else None,
             pallets=row["pallets"],
+            packing_unit=row["packing_unit"] if "packing_unit" in row.keys() else None,
             quantity_boxes=row["quantity_boxes"],
             quantity_unit=row["quantity_unit"] if "quantity_unit" in row.keys() else "PCS",
             quantity_value=row["quantity_value"],

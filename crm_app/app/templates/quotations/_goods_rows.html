@@ -1,22 +1,93 @@
 {# Shared goods-row renderer for the quotation sheet and the annexure sheet.
-   Unlike proforma_invoices/_goods_rows.html, quotation items don't group
-   under a shared category heading (no display_mode toggle here) - just a
-   flat numbered list, one row per item. Sr No comes straight off the item's
-   own stored sr_no (assigned sequentially across the whole item list at
-   save time - see QuotationService._build_items), so numbering already
-   continues correctly onto the annexure with no running counter needed. #}
+   Prints the product lines the same way proforma_invoices/_goods_rows.html
+   does in its 'index' mode (quotations have no surface / display_mode
+   toggle): consecutive items are grouped under a category heading row (first
+   line of the name, HSN code in its own column), every item line gets a
+   running number in the Sr No column, and numbering continues across the
+   annexure.
 
-{% macro rows(items, currency_prefix='$') %}
+   An item whose name has extra lines below the first prints those lines as
+   its description (the first line lives in the heading); a lone single-line
+   item skips the heading and prints its name, HSN and quantities on one
+   numbered row. #}
+
+{% macro group_key(item) -%}
+  {{- (item.product_name or '').split('\n')[0]|trim|upper }}|{{ item.hsn_code or '' -}}
+{%- endmacro %}
+
+{# How many items print on the quotation page before the rest spill onto the
+   ANNEXURE - decided by the height the goods rows will take, not a fixed item
+   count. Same estimate and budget as proforma_invoices/_goods_rows.html
+   (the two sheets share a header height). Returns the index as text - pipe
+   it through |int. Used by both _sheet.html and _annexure.html, so the two
+   can't disagree on where the split falls. #}
+{% set GOODS_BUDGET_PX = 320 %}
+{% set SPLIT_RESERVE_PX = 34 %}
+{% set DESC_CHARS_PER_LINE = 52 %}
+{% macro _cut(items, budget) -%}
+  {%- set st = namespace(key=none, used=0, cut=items|length) -%}
+  {%- for item in items -%}
+    {%- set key = group_key(item) -%}
+    {%- set next_key = group_key(items[loop.index]) if loop.index < items|length else none -%}
+    {%- set name = (item.product_name or '') -%}
+    {%- set inline = key != st.key and next_key != key and '\n' not in name -%}
+    {%- set c = namespace(px=0) -%}
+    {%- if key != st.key -%}
+      {%- set st.key = key -%}
+      {%- if not inline %}{% set c.px = c.px + 14 %}{% endif -%}
+    {%- endif -%}
+    {%- set lines = [name.split('\n')[0]] if inline else name.split('\n')[1:] -%}
+    {%- set ln = namespace(n=0) -%}
+    {%- for line in (lines or ['']) %}{% set ln.n = ln.n + ((line|length + DESC_CHARS_PER_LINE - 1) // DESC_CHARS_PER_LINE or 1) %}{% endfor -%}
+    {%- set c.px = c.px + 4 + 10 * ln.n -%}
+    {%- if st.cut == items|length and st.used + c.px > budget %}{% set st.cut = [loop.index0, 1]|max %}{% endif -%}
+    {%- set st.used = st.used + c.px -%}
+  {%- endfor -%}
+  {{- st.cut -}}
+{%- endmacro %}
+{% macro annex_start(items) -%}
+  {%- set n = _cut(items, GOODS_BUDGET_PX)|int -%}
+  {%- if n < items|length %}{% set n = _cut(items, GOODS_BUDGET_PX - SPLIT_RESERVE_PX)|int %}{% endif -%}
+  {{- n -}}
+{%- endmacro %}
+
+{% macro rows(items, sr_start=0, currency_prefix='$') %}
+  {% set gs = namespace(sr=sr_start, key=none) %}
   {% for item in items %}
-  <tr class="qt-goods">
-    <td class="qt-val qt-center">{{ item.sr_no }}</td>
-    <td class="qt-val qt-mid">{{ (item.product_name or '')|upper|replace('\n', '<br>')|safe }}</td>
-    <td class="qt-val qt-center qt-mid">{{ item.hsn_code or '' }}</td>
-    <td class="qt-val qt-center">{% if item.pallets %}{{ '{:,.0f}'.format(item.pallets) }} <span class="qt-unit-sm">PLTS</span>{% endif %}</td>
-    <td class="qt-val qt-right">{% if item.quantity_boxes %}{{ '{:,.0f}'.format(item.quantity_boxes) }} <span class="qt-unit-sm">{{ item.quantity_unit }}</span>{% endif %}</td>
-    <td class="qt-val qt-right">{{ '{:,.2f}'.format(item.quantity_value or 0) }} <span class="qt-unit-sm">{{ item.unit }}</span></td>
-    <td class="qt-val qt-right">{{ currency_prefix }}{{ '{:,.2f}'.format(item.price_usd or 0) }} <span class="qt-unit-sm">/ {{ item.unit }}</span></td>
-    <td class="qt-val qt-right">{{ currency_prefix }}&nbsp;{{ '{:,.2f}'.format(item.total_usd or 0) }}</td>
-  </tr>
+    {% set key = group_key(item) %}
+    {% set is_new_group = key != gs.key %}
+    {% set next_key = group_key(items[loop.index]) if loop.index < items|length else none %}
+    {% set inline_into_row = is_new_group and next_key != key and '\n' not in (item.product_name or '') %}
+    {% if is_new_group %}
+      {% set gs.key = key %}
+      {% if not inline_into_row %}
+      <tr class="qt-goods">
+        <td class="qt-val qt-center"></td>
+        <td class="qt-val qt-bottom">{{ (item.product_name or '').split('\n')[0]|upper }}</td>
+        <td class="qt-val qt-center">{{ item.hsn_code or '' }}</td>
+        <td></td><td></td><td></td><td></td><td></td>
+      </tr>
+      {% endif %}
+    {% endif %}
+    {% set gs.sr = gs.sr + 1 %}
+    {% set rest = (item.product_name or '').split('\n')[1:] | join('\n') %}
+    <tr class="qt-goods">
+      <td class="qt-val qt-center">{{ gs.sr }}</td>
+      <td class="qt-val">
+        {%- if inline_into_row -%}
+          {{ (item.product_name or '').split('\n')[0]|upper }}
+        {%- else -%}
+          {%- for line in rest.split('\n') -%}
+            {{ line|upper }}{% if not loop.last %}<br>{% endif %}
+          {%- endfor -%}
+        {%- endif -%}
+      </td>
+      <td class="qt-val qt-center">{% if inline_into_row %}{{ item.hsn_code or '' }}{% endif %}</td>
+      <td class="qt-val qt-center">{% if item.pallets %}{{ '{:,.0f}'.format(item.pallets) }} <span class="qt-unit-sm">{{ {'PLT': 'PLTS', 'CTN': 'CTNS', 'BOX': 'BOXES', 'BAG': 'BAGS', 'SET': 'SETS'}.get(item.packing_unit or 'PLT', item.packing_unit) }}</span>{% endif %}</td>
+      <td class="qt-val qt-right">{% if item.quantity_boxes %}{{ '{:,.0f}'.format(item.quantity_boxes) }} <span class="qt-unit-sm">{{ item.quantity_unit }}</span>{% endif %}</td>
+      <td class="qt-val qt-right">{{ '{:,.2f}'.format(item.quantity_value or 0) }} <span class="qt-unit-sm">{{ item.unit }}</span></td>
+      <td class="qt-val qt-right">{{ currency_prefix }}{{ '{:,.2f}'.format(item.price_usd or 0) }} <span class="qt-unit-sm">/ {{ item.unit }}</span></td>
+      <td class="qt-val qt-right">{{ currency_prefix }}&nbsp;{{ '{:,.2f}'.format(item.total_usd or 0) }}</td>
+    </tr>
   {% endfor %}
 {% endmacro %}

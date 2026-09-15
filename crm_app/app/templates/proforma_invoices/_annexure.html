@@ -4,14 +4,15 @@
    all when every item fits on the invoice page, in the combined document
    the same as the single invoice view. Must be included AFTER
    proforma_invoices/_sheet.html (it reuses the .pi-* styles that partial
-   brings along). Keep PI_ANNEX_START in sync with _sheet.html. #}
+   brings along). The split point comes from goods.annex_start, the same
+   call _sheet.html makes. #}
 {% import 'proforma_invoices/_goods_rows.html' as goods %}
-{% set PI_ANNEX_START = 6 %}
+{% set pi_mode = invoice.display_mode or 'index' %}
 {# printed_items - the CIF-priced lines, exactly as the invoice page prints
    them. See _sheet.html. #}
+{% set PI_ANNEX_START = goods.annex_start(invoice.printed_items, pi_mode)|int %}
 {% set annex_items = invoice.printed_items[PI_ANNEX_START:] %}
 {% if annex_items %}
-{% set pi_mode = invoice.display_mode or 'index' %}
 {# line numbering continues from the invoice page (index view) #}
 {% set annex_sr_start = invoice.printed_items|length - annex_items|length %}
 
@@ -38,8 +39,10 @@
 
     <table class="pi-items">
       <colgroup>
-        <col style="width:6%"><col style="width:29%"><col style="width:8%"><col style="width:9%"><col style="width:11%">
-        <col style="width:11%"><col style="width:9%"><col style="width:17%">
+        {# Same widths as the export invoice sheet's goods table. #}
+        <col style="width:5%"><col style="width:40%"><col style="width:8%">
+        <col style="width:9%"><col style="width:8%"><col style="width:9%">
+        <col style="width:11%"><col style="width:10%">
       </colgroup>
       <thead>
         <tr>

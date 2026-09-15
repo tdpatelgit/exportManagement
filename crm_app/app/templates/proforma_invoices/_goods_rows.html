@@ -20,6 +20,50 @@
   {{- (item.product_name or '').split('\n')[0]|trim|upper }}|{{ item.hsn_code or '' }}{% if mode == 'surface' %}|{{ (item.surface or '')|trim|upper }}{% endif -%}
 {%- endmacro %}
 
+{# How many items print on the invoice page before the rest spill onto the
+   ANNEXURE - decided by the height the goods rows will take, not a fixed item
+   count, so a list of short single-line items fills the page instead of
+   breaking after a handful. Walks the same grouping as rows() below and
+   estimates each printed row in px (8px bold text: a 14px row, +10px per
+   wrapped line). GOODS_BUDGET_PX is the room the invoice page
+   leaves for goods rows; when a split is needed, SPLIT_RESERVE_PX pays for the
+   "(CONTINUE TO ANNEXURE)" row and the Annexure charge line it adds.
+   Returns the index as text - pipe it through |int. Used by both _sheet.html
+   and _annexure.html, so the two can't disagree on where the split falls. #}
+{# Measured on a real render: with the usual 3-4 line addresses the page has
+   ~380px for goods rows; kept under that for longer headers and the 30px
+   filler floor. #}
+{% set GOODS_BUDGET_PX = 100 %}
+{% set SPLIT_RESERVE_PX = 34 %}
+{% set DESC_CHARS_PER_LINE = 52 %}
+{% macro _cut(items, mode, budget) -%}
+  {%- set st = namespace(key=none, first=true, used=0, cut=items|length) -%}
+  {%- for item in items -%}
+    {%- set key = group_key(item, mode) -%}
+    {%- set next_key = group_key(items[loop.index], mode) if loop.index < items|length else none -%}
+    {%- set name = (item.product_name or '') -%}
+    {%- set inline = key != st.key and next_key != key and '\n' not in name and mode != 'surface' -%}
+    {%- set c = namespace(px=0) -%}
+    {%- if key != st.key -%}
+      {%- set st.key = key -%}
+      {%- if not inline %}{% set c.px = c.px + 14 %}{% endif -%}
+    {%- endif -%}
+    {%- set lines = [name.split('\n')[0]] if inline else name.split('\n')[1:] -%}
+    {%- set ln = namespace(n=0) -%}
+    {%- for line in (lines or ['']) %}{% set ln.n = ln.n + ((line|length + DESC_CHARS_PER_LINE - 1) // DESC_CHARS_PER_LINE or 1) %}{% endfor -%}
+    {%- set c.px = c.px + 4 + 10 * ln.n -%}
+    {%- if st.cut == items|length and st.used + c.px > budget %}{% set st.cut = [loop.index0, 1]|max %}{% endif -%}
+    {%- set st.used = st.used + c.px -%}
+    {%- set st.first = false -%}
+  {%- endfor -%}
+  {{- st.cut -}}
+{%- endmacro %}
+{% macro annex_start(items, mode) -%}
+  {%- set n = _cut(items, mode, GOODS_BUDGET_PX)|int -%}
+  {%- if n < items|length %}{% set n = _cut(items, mode, GOODS_BUDGET_PX - SPLIT_RESERVE_PX)|int %}{% endif -%}
+  {{- n -}}
+{%- endmacro %}
+
 {% macro rows(items, mode, sr_start=0, currency_prefix='$') %}
   {% set gs = namespace(sr=sr_start, key=none, first=true) %}
   {% for item in items %}
@@ -41,11 +85,6 @@
     {% set inline_into_row = is_solo and mode != 'surface' %}
     {% if is_new_group %}
       {% set gs.key = key %}
-      {% if not gs.first %}
-      <tr class="pi-goods pi-group-gap">
-        <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
-      </tr>
-      {% endif %}
       {% if not inline_into_row %}
       <tr class="pi-goods">
         <td class="pi-val pi-center">{% if mode == 'surface' %}{{ (item.surface or '')|upper }}{% endif %}</td>
@@ -70,7 +109,7 @@
         {%- endif -%}
       </td>
       <td class="pi-val pi-center">{% if inline_into_row %}{{ item.hsn_code or '' }}{% endif %}</td>
-      <td class="pi-val pi-center">{% if item.pallets %}{{ '{:,.0f}'.format(item.pallets) }} <span class="pi-unit-sm">PLTS</span>{% endif %}</td>
+      <td class="pi-val pi-center">{% if item.pallets %}{{ '{:,.0f}'.format(item.pallets) }} <span class="pi-unit-sm">{{ {'PLT': 'PLTS', 'CTN': 'CTNS', 'BOX': 'BOXES', 'BAG': 'BAGS', 'SET': 'SETS'}.get(item.packing_unit or 'PLT', item.packing_unit) }}</span>{% endif %}</td>
       <td class="pi-val pi-right">{% if item.quantity_boxes %}{{ '{:,.0f}'.format(item.quantity_boxes) }} <span class="pi-unit-sm">{{ item.quantity_unit }}</span>{% endif %}</td>
       <td class="pi-val pi-right">{{ '{:,.2f}'.format(item.quantity_value or 0) }} <span class="pi-unit-sm">{{ item.unit }}</span></td>
       <td class="pi-val pi-right">{{ currency_prefix }}{{ '{:,.2f}'.format(item.price_usd or 0) }} <span class="pi-unit-sm">/ {{ item.unit }}</span></td>

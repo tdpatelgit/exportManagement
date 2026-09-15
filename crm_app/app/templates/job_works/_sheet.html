@@ -58,7 +58,7 @@
   .jw-buyer-text { padding-right: 115px; }
   .jw-buyer-logo { position: absolute; top: 1px; right: 6px; bottom: 1px; display: flex; align-items: center; }
   .jw-buyer-logo img { max-height: 100%; width: auto; max-width: 110px; object-fit: contain; }
-  .jw-items thead td { text-align: left; vertical-align: middle; font-size: 9px; font-weight: bold; }
+  .jw-items thead td { text-align: center; vertical-align: middle; font-size: 9px; }
   .jw-items tbody tr.jw-goods td, .jw-items tbody tr.jw-filler td { border-top: none; border-bottom: none; padding: 2px 5px; }
   {# .jw-filler's height is measured in the browser - see templates/_page_filler.html #}
   .jw-sign-cell { height: 92px; padding: 4px 6px; }
@@ -162,19 +162,17 @@
        quotation's own item table, not the design/job-quantity chain) -->
   <table class="jw-items">
     <colgroup>
-      <col style="width:4%"><col style="width:24%"><col style="width:11%">
-      <col style="width:9%"><col style="width:11%"><col style="width:8%">
-      <col style="width:11%"><col style="width:7%"><col style="width:15%">
+      <col style="width:5%"><col style="width:33%"><col style="width:8%"><col style="width:9%"><col style="width:10%">
+      <col style="width:11%"><col style="width:7%"><col style="width:17%">
     </colgroup>
     <thead>
       <tr>
-        <td>SR<br>NO</td>
-        <td>PRODUCT</td>
+        <td>SR NO</td>
+        <td>DESCRIPTION OF GOODS</td>
         <td>HSN CODE</td>
-        <td>BOXES</td>
-        <td>QTY (SQM/LM)</td>
-        <td>UNIT</td>
-        <td>PRICE ({{ job_work.currency_code or 'INR' }})</td>
+        <td>QTY</td>
+        <td>ALT. QTY</td>
+        <td>RATE</td>
         <td>PER</td>
         <td>TOTAL ({{ job_work.currency_code or 'INR' }})</td>
       </tr>
@@ -182,29 +180,27 @@
     <tbody>
       {% for p in job_work.products %}
       <tr class="jw-goods">
-        <td class="jw-center">{{ p.sr_no }}</td>
+        <td>{{ p.sr_no }}</td>
         <td class="jw-bottom">{{ p.product_name }}</td>
-        <td class="jw-center">{{ p.hsn_code or '-' }}</td>
-        <td class="jw-right">{{ num(p.quantity_boxes) }}</td>
-        <td class="jw-right">{{ num(p.quantity_value) }}</td>
-        <td class="jw-center">{{ p.unit }}</td>
-        <td class="jw-right">{{ num(p.price_inr) }}</td>
-        <td class="jw-center">{{ p.price_per }}</td>
-        <td class="jw-right">{{ num(p.total_inr) }}</td>
+        <td>{{ p.hsn_code or '' }}</td>
+        <td>{% if p.quantity_boxes %}{{ num(p.quantity_boxes) }} <span class="jw-unit-sm">{{ p.quantity_unit }}</span>{% endif %}</td>
+        <td>{{ '{:,.2f}'.format(p.quantity_value or 0) }} <span class="jw-unit-sm">{{ p.unit }}</span></td>
+        <td>{{ '{:,.2f}'.format(p.price_inr or 0) }}</td>
+        <td>{{ p.price_per }}</td>
+        <td>{{ '{:,.2f}'.format(p.total_inr or 0) }}</td>
       </tr>
       {% endfor %}
       <tr class="jw-filler js-page-filler">
-        <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+        <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
       </tr>
       <tr>
         <td></td>
-        <td class="jw-val jw-center" colspan="2">TOTAL</td>
-        <td class="jw-val jw-right">{{ num(ns.boxes) }}</td>
-        <td class="jw-val jw-right">{{ num(ns.qty) }}</td>
+        <td class="jw-val">TOTAL QUANTITY</td>
         <td></td>
-        <td></td>
-        <td></td>
-        <td class="jw-val jw-right">{{ num(ns.amount) }}</td>
+        <td class="jw-val">{{ num(ns.boxes) }}</td>
+        <td class="jw-val">{{ '{:,.2f}'.format(ns.qty) }}</td>
+        <td class="jw-val" colspan="2">TOTAL AMOUNT</td>
+        <td class="jw-val">{{ '{:,.2f}'.format(ns.amount) }}</td>
       </tr>
     </tbody>
   </table>
