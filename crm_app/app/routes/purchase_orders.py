@@ -135,7 +135,10 @@ def _product_meta_map(items) -> dict:
             continue
         try:
             product = container.product_service.get_product(product_id, g.user.company_id)
-            result[product_id] = {"alt_qty": product.alternate_quantity or "", "igst": product.igst_percent or ""}
+            result[product_id] = {
+                "alt_qty": product.alternate_quantity or "", "igst": product.igst_percent or "",
+                "qty_unit": product.quantity_unit or "",
+            }
         except NotFoundError:
             pass
     return result

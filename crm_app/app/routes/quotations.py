@@ -112,6 +112,30 @@ def _alt_qty_map(items) -> dict:
     return result
 
 
+def _quantity_unit_map(items) -> dict:
+    """Maps product_id -> that product's (Boxes) quantity unit, so the form
+    can re-show the unit hint under the Boxes field for rows already tied to
+    a catalog product. Same walk as _alt_qty_map above."""
+    container = current_app.container
+    result = {}
+    for item in items:
+        raw_id = item.get("product_id") if isinstance(item, dict) else item.product_id
+        if not raw_id or raw_id in result:
+            continue
+        try:
+            product_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if product_id in result:
+            continue
+        try:
+            product = container.product_service.get_product(product_id, g.user.company_id)
+            result[product_id] = product.quantity_unit or ""
+        except NotFoundError:
+            pass
+    return result
+
+
 def _pallet_types_map(items) -> dict:
     """product_id -> plain dicts of that product's pallet types, for rows
     already tied to a catalog product - fills each row's Pallet type
@@ -170,6 +194,7 @@ def new_quotation():
                 "quotations/form.html", quotation=None, leads=leads, buyers=buyers, bank_options=bank_options,
                 container_types=container_types, categories_tree=categories_tree, hsn_code_options=hsn_code_options, unit_options=unit_options,
                 form_data=request.form, form_items=items, alt_qty_map=_alt_qty_map(items),
+                quantity_unit_map=_quantity_unit_map(items),
                 pallet_types_map=_pallet_types_map(items), form_containers=_extract_containers(request.form),
                 today=date.today().isoformat(),
             ), 400
@@ -189,7 +214,7 @@ def new_quotation():
     return render_template(
         "quotations/form.html", quotation=None, leads=leads, buyers=buyers, bank_options=bank_options,
         container_types=container_types, categories_tree=categories_tree, hsn_code_options=hsn_code_options, unit_options=unit_options,
-        form_data=prefill, form_items=None, alt_qty_map={}, pallet_types_map={}, form_containers=None,
+        form_data=prefill, form_items=None, alt_qty_map={}, quantity_unit_map={}, pallet_types_map={}, form_containers=None,
         today=date.today().isoformat(),
     )
 
@@ -255,6 +280,7 @@ def edit_quotation(quotation_id):
                 "quotations/form.html", quotation=quotation, leads=leads, buyers=buyers, bank_options=bank_options,
                 container_types=container_types, categories_tree=categories_tree, hsn_code_options=hsn_code_options, unit_options=unit_options,
                 form_data=request.form, form_items=items, alt_qty_map=_alt_qty_map(items),
+                quantity_unit_map=_quantity_unit_map(items),
                 pallet_types_map=_pallet_types_map(items), form_containers=_extract_containers(request.form),
                 today=date.today().isoformat(),
             ), 400
@@ -264,6 +290,7 @@ def edit_quotation(quotation_id):
         "quotations/form.html", quotation=quotation, leads=leads, buyers=buyers, bank_options=bank_options,
         container_types=container_types, categories_tree=categories_tree, hsn_code_options=hsn_code_options, unit_options=unit_options,
         form_data=None, form_items=None, alt_qty_map=_alt_qty_map(quotation.items),
+        quantity_unit_map=_quantity_unit_map(quotation.items),
         pallet_types_map=_pallet_types_map(quotation.items), form_containers=None, today=date.today().isoformat(),
     )
 

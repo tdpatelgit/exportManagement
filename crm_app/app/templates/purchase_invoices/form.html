@@ -151,8 +151,8 @@
             <th style="min-width:220px;">Product</th>
             <th>Source</th>
             <th>HSN code</th>
-            <th>Boxes</th>
-            <th>Qty (SQM/LM)</th>
+            <th>QTY</th>
+            <th>ALT QTY</th>
             <th>Unit</th>
             <th>Price ({{ chosen_currency }})</th>
             <th>Per</th>
@@ -164,7 +164,8 @@
           {% set rows = form_items if form_items is not none else (purchase_invoice.items if purchase_invoice else []) %}
           {% for row in rows %}
           {% set meta = product_meta_map.get(row.product_id | int, {}) if row.product_id else {} %}
-          <tr class="item-row" data-alt-qty="{{ meta.get('alt_qty', '') }}" data-igst="{{ meta.get('igst', '') }}">
+          <tr class="item-row" data-alt-qty="{{ meta.get('alt_qty', '') }}" data-igst="{{ meta.get('igst', '') }}"
+              data-qty-unit="{{ meta.get('qty_unit', '') }}">
             <td class="js-sr">{{ loop.index }}</td>
             <td>
               <input type="hidden" name="item_product_id[]" class="js-product-id" value="{{ row.product_id or '' }}">
@@ -176,8 +177,14 @@
               {{ row.source_po_number or row.source_jw_number or '—' }}
             </td>
             <td><input type="text" name="item_hsn_code[]" class="js-hsn" value="{{ row.hsn_code or '' }}"></td>
-            <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" value="{{ row.quantity_boxes or '' }}"></td>
-            <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required value="{{ row.quantity_value or '' }}"></td>
+            <td>
+              <input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" value="{{ row.quantity_boxes or '' }}">
+              <div class="text-sm text-soft js-boxes-unit"></div>
+            </td>
+            <td>
+              <input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required value="{{ row.quantity_value or '' }}">
+              <div class="text-sm text-soft js-qty-unit"></div>
+            </td>
             <td>
               <select name="item_unit[]" class="js-unit">
                 {% for u in PRODUCT_UNITS %}
@@ -296,8 +303,14 @@
         —
       </td>
       <td><input type="text" name="item_hsn_code[]" class="js-hsn"></td>
-      <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes"></td>
-      <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required></td>
+      <td>
+        <input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes">
+        <div class="text-sm text-soft js-boxes-unit"></div>
+      </td>
+      <td>
+        <input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required>
+        <div class="text-sm text-soft js-qty-unit"></div>
+      </td>
       <td>
         <select name="item_unit[]" class="js-unit">
           {% for u in PRODUCT_UNITS %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
@@ -432,7 +445,10 @@
     recalcTotals();
   });
   itemsBody.addEventListener('change', (e) => {
-    if (e.target.classList.contains('js-unit')) syncPerLabel(e.target.closest('tr'));
+    if (e.target.classList.contains('js-unit')) {
+      syncPerLabel(e.target.closest('tr'));
+      e.target.closest('tr').querySelector('.js-qty-unit').textContent = e.target.value || '';
+    }
     recalcTotals();
   });
   ['discount_amount', 'insurance_other', 'freight', 'igst_amount', 'cgst_amount', 'sgst_amount', 'round_off']
@@ -591,7 +607,17 @@
     }
   });
 
+  // Rows already tied to a catalog product show that product's unit under
+  // Boxes (data-qty-unit, stashed by the server the same way as
+  // data-alt-qty) and under Qty (SQM/LM), the alt unit already sitting in
+  // the Unit select.
+  function initRowUnitLabels(tr) {
+    tr.querySelector('.js-boxes-unit').textContent = tr.dataset.qtyUnit || '';
+    tr.querySelector('.js-qty-unit').textContent = tr.querySelector('.js-unit').value || '';
+  }
+
   itemsBody.querySelectorAll('.item-row').forEach(syncPerLabel);
+  itemsBody.querySelectorAll('.item-row').forEach(initRowUnitLabels);
   renumber();
   recalcTotals();
 })();

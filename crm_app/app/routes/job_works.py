@@ -135,6 +135,7 @@ def _product_meta_map(products) -> dict:
             result[product_id] = {
                 "alt_qty": catalog_product.alternate_quantity or "", "igst": catalog_product.igst_percent or "",
                 "unit": catalog_product.alternate_quantity_unit or "",
+                "qty_unit": catalog_product.quantity_unit or "",
             }
         except NotFoundError:
             pass
@@ -208,6 +209,7 @@ def _invoice_context(proforma_invoice_id) -> tuple:
             "master_hsn_code": (master.hsn_code or "") if master else "",
             "master_alt_qty": (master.alternate_quantity or "") if master else "",
             "master_unit": (master.alternate_quantity_unit or "") if master else "",
+            "master_qty_unit": (master.quantity_unit or "") if master else "",
             "master_igst": (master.igst_percent or "") if master else "",
         })
     return products, quantities, by_design_only, to_products

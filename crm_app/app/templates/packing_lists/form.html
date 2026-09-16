@@ -88,6 +88,7 @@
       {% set first = group[0] %}
       {% set pm = product_map.get(first.product_id | int) if first.product_id else None %}
       <div class="product-block" data-alt-qty="{{ (pm.alternate_quantity or '') if pm else '' }}" data-pcs-per-box="{{ (pm.quantity or '') if pm else '' }}"
+           data-qty-unit="{{ (pm.quantity_unit or '') if pm else '' }}"
            data-net-per-box="{{ pm.net_weight_kg if pm and pm.net_weight_kg is not none else '' }}"
            data-pallet-types="{{ (pallet_types_map.get(first.product_id | int, []) if first.product_id else []) | tojson | forceescape }}"
            data-box-per-pallet="{{ first.box_per_pallet or '' }}">
@@ -128,10 +129,10 @@
               <tr>
                 <th>Sr</th>
                 <th style="min-width:160px;">Design</th>
-                <th>Boxes<span class="required-mark">*</span></th>
+                <th>QTY<span class="required-mark">*</span></th>
                 <th>Pcs</th>
                 <th>Plts</th>
-                <th>Qty (SQM/LM)</th>
+                <th>ALT QTY</th>
                 <th>Net wt (KG)</th>
                 <th>Gross wt (KG)</th>
                 <th></th>
@@ -152,10 +153,16 @@
                   <input type="hidden" name="item_pallet_weight_kg[]" class="js-mirror-pallet-weight" value="">
                   <input type="hidden" name="item_unit[]" class="js-mirror-unit" value="{{ item.unit or 'SQM' }}">
                 </td>
-                <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" required value="{{ item.quantity_boxes or '' }}"></td>
+                <td>
+                  <input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" required value="{{ item.quantity_boxes or '' }}">
+                  <div class="text-sm text-soft js-boxes-unit">{{ (pm.quantity_unit or '') if pm else '' }}</div>
+                </td>
                 <td><input type="number" step="0.01" name="item_pcs[]" class="js-pcs" value="{{ item.pcs or '' }}"></td>
                 <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets" value="{{ item.pallets or '' }}"></td>
-                <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" value="{{ item.quantity_value or '' }}"></td>
+                <td>
+                  <input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" value="{{ item.quantity_value or '' }}">
+                  <div class="text-sm text-soft js-qty-unit">{{ item.unit or 'SQM' }}</div>
+                </td>
                 <td><input type="number" step="0.01" name="item_net_weight_kg[]" class="js-net" value="{{ item.net_weight_kg or '' }}"></td>
                 <td><input type="number" step="0.01" name="item_gross_weight_kg[]" class="js-gross" value="{{ item.gross_weight_kg or '' }}"></td>
                 <td><button type="button" class="btn-link-danger js-remove-design">Remove</button></td>
@@ -281,10 +288,10 @@
             <tr>
               <th>Sr</th>
               <th style="min-width:160px;">Design</th>
-              <th>Boxes<span class="required-mark">*</span></th>
+              <th>QTY<span class="required-mark">*</span></th>
               <th>Pcs</th>
               <th>Plts</th>
-              <th>Qty (SQM/LM)</th>
+              <th>ALT QTY</th>
               <th>Net wt (KG)</th>
               <th>Gross wt (KG)</th>
               <th></th>
@@ -320,10 +327,16 @@
         <input type="hidden" name="item_pallet_weight_kg[]" class="js-mirror-pallet-weight">
         <input type="hidden" name="item_unit[]" class="js-mirror-unit">
       </td>
-      <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" required></td>
+      <td>
+        <input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" required>
+        <div class="text-sm text-soft js-boxes-unit"></div>
+      </td>
       <td><input type="number" step="0.01" name="item_pcs[]" class="js-pcs"></td>
       <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets"></td>
-      <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty"></td>
+      <td>
+        <input type="number" step="0.01" name="item_quantity_value[]" class="js-qty">
+        <div class="text-sm text-soft js-qty-unit"></div>
+      </td>
       <td><input type="number" step="0.01" name="item_net_weight_kg[]" class="js-net"></td>
       <td><input type="number" step="0.01" name="item_gross_weight_kg[]" class="js-gross"></td>
       <td><button type="button" class="btn-link-danger js-remove-design">Remove</button></td>`;
@@ -372,6 +385,8 @@
     row.querySelector('.js-mirror-pallet-weight').value =
       (palletSel.value !== '' && palletOpt) ? (palletOpt.dataset.weightKg || '') : '';
     row.querySelector('.js-mirror-unit').value = block.querySelector('.js-unit').value;
+    row.querySelector('.js-boxes-unit').textContent = block.dataset.qtyUnit || '';
+    row.querySelector('.js-qty-unit').textContent = block.querySelector('.js-unit').value || '';
   }
 
   // Rebuilds a block's Pallet type dropdown from its product's pallet
@@ -668,6 +683,7 @@
     // the other options.
     setUnitValue(activeBlock.querySelector('.js-unit'), p.alt_quantity_unit);
     activeBlock.dataset.altQty = parseFloat(p.alternate_quantity) || '';
+    activeBlock.dataset.qtyUnit = p.quantity_unit || '';
     activeBlock.dataset.pcsPerBox = parseFloat(p.quantity) || '';
     activeBlock.dataset.netPerBox = p.net_weight_kg || '';
     populatePalletOptions(activeBlock, p.pallet_types || [], null);

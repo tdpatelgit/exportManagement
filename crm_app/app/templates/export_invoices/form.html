@@ -513,10 +513,10 @@
             <th>Sr</th>
             <th style="min-width:220px;">Product</th>
             <th>HSN code</th>
-            <th>Boxes</th>
+            <th>QTY</th>
             <th style="min-width:150px;">Packing</th>
             <th>Plts</th>
-            <th>Qty (SQM/LM)</th>
+            <th>ALT QTY</th>
             <th>Unit</th>
             <th id="price-header">FOB price (<span class="js-currency-label">{{ chosen_currency }}</span>)</th>
             <th>IGST %</th>
@@ -529,6 +529,7 @@
           {% for row in rows %}
           {% set meta = (product_meta_map.get(row.product_id | int, {}) if row.product_id else {}) %}
           <tr class="item-row" data-alt-qty="{{ meta.get('alternate_quantity') or '' }}"
+              data-qty-unit="{{ meta.get('quantity_unit') or '' }}"
               data-pallet-types="{{ (pallet_types_map.get(row.product_id | int, []) if row.product_id else []) | tojson | forceescape }}"
               data-igst="{{ row.igst_percent | default('', true) }}"
               data-net-weight="{{ meta.get('net_weight_kg') or '' }}"
@@ -543,12 +544,18 @@
               <button type="button" class="btn btn-ghost btn-sm js-choose-product">📦 Choose product</button>
             </td>
             <td><input type="text" name="item_hsn_code[]" class="js-hsn" value="{{ row.hsn_code or '' }}" readonly tabindex="-1"></td>
-            <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" value="{{ row.quantity_boxes or '' }}"></td>
+            <td>
+              <input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes" value="{{ row.quantity_boxes or '' }}">
+              <div class="text-sm text-soft js-boxes-unit"></div>
+            </td>
             {# Read-only: the packing is decided in Packing Planning and comes in
                through the loaded goods lines, so it is not picked here. #}
             <td><select class="js-pallet-type" disabled title="Comes from Packing / Loading Planning"><option value="">Loose — no pallets</option></select></td>
             <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets" value="{{ row.pallets or '' }}"></td>
-            <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required value="{{ row.quantity_value or '' }}"></td>
+            <td>
+              <input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required value="{{ row.quantity_value or '' }}">
+              <div class="text-sm text-soft js-qty-unit"></div>
+            </td>
             <td>
               <select name="item_unit[]" class="js-unit">
                 {% for u in PRODUCT_UNITS %}<option value="{{ u }}" {{ 'selected' if row.unit == u }}>{{ u }}</option>{% endfor %}
@@ -756,10 +763,16 @@
         <button type="button" class="btn btn-ghost btn-sm js-choose-product">📦 Choose product</button>
       </td>
       <td><input type="text" name="item_hsn_code[]" class="js-hsn" readonly tabindex="-1"></td>
-      <td><input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes"></td>
+      <td>
+        <input type="number" step="0.01" name="item_quantity_boxes[]" class="js-boxes">
+        <div class="text-sm text-soft js-boxes-unit"></div>
+      </td>
       <td><select class="js-pallet-type" disabled title="Comes from Packing / Loading Planning"><option value="">Loose — no pallets</option></select></td>
       <td><input type="number" step="0.01" name="item_pallets[]" class="js-pallets"></td>
-      <td><input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required></td>
+      <td>
+        <input type="number" step="0.01" name="item_quantity_value[]" class="js-qty" required>
+        <div class="text-sm text-soft js-qty-unit"></div>
+      </td>
       <td>
         <select name="item_unit[]" class="js-unit">
           {% for u in PRODUCT_UNITS %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
@@ -929,6 +942,9 @@
   });
   itemsBody.addEventListener('change', (e) => {
     if (e.target.classList.contains('js-pallet-type')) recalcRowPallets(e.target.closest('tr'));
+    else if (e.target.classList.contains('js-unit')) {
+      e.target.closest('tr').querySelector('.js-qty-unit').textContent = e.target.value || '';
+    }
   });
   ['discount_amount', 'sea_freight', 'insurance', 'certification', 'other_charges', 'exchange_rate'].forEach((id) => {
     const el = document.getElementById(id);
@@ -1135,6 +1151,9 @@
     // prefill already carries (the PI loader's, off what was actually bought)
     // is kept; a blank one is derived here instead of being left empty.
     tr.dataset.altQty = parseFloat(item.alternate_quantity) || '';
+    tr.dataset.qtyUnit = item.quantity_unit || '';
+    tr.querySelector('.js-boxes-unit').textContent = item.quantity_unit || '';
+    tr.querySelector('.js-qty-unit').textContent = tr.querySelector('.js-unit').value || '';
     if (!(parseFloat(item.quantity_value) > 0)) recalcRowQty(tr);
     return tr;
   }
@@ -1608,6 +1627,9 @@
     activeRow.querySelector('.js-hsn').value = p.hsn_code || '';
     setUnitValue(activeRow.querySelector('.js-unit'), p.alt_quantity_unit);
     activeRow.dataset.altQty = parseFloat(p.alternate_quantity) || '';
+    activeRow.dataset.qtyUnit = p.quantity_unit || '';
+    activeRow.querySelector('.js-boxes-unit').textContent = p.quantity_unit || '';
+    activeRow.querySelector('.js-qty-unit').textContent = p.alt_quantity_unit || '';
     activeRow.dataset.igst = (p.igst_percent ?? '') === '' ? '' : p.igst_percent;
     // Per-box weights and the HSN heading drive the export packing list's
     // container split, which reads them straight off this row.
@@ -1625,7 +1647,17 @@
     overlay.hidden = true;
   }
 
+  // Rows already tied to a catalog product show that product's unit under
+  // Boxes (data-qty-unit, stashed by the server the same way as
+  // data-alt-qty) and under Qty (SQM/LM), the alt unit already sitting in
+  // the Unit select.
+  function initRowUnitLabels(tr) {
+    tr.querySelector('.js-boxes-unit').textContent = tr.dataset.qtyUnit || '';
+    tr.querySelector('.js-qty-unit').textContent = tr.querySelector('.js-unit').value || '';
+  }
+
   itemsBody.querySelectorAll('.item-row').forEach(initRowPalletSelection);
+  itemsBody.querySelectorAll('.item-row').forEach(initRowUnitLabels);
   renumber();
   recalcTotals();
   updateTypeColumnVisibility();

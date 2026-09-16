@@ -113,6 +113,29 @@ def _alt_qty_map(items) -> dict:
     return result
 
 
+def _quantity_unit_map(items) -> dict:
+    """product_id -> that product's (Boxes) quantity unit, for rows already
+    tied to a catalog product. Same walk as _alt_qty_map above."""
+    container = current_app.container
+    result = {}
+    for item in items:
+        raw_id = item.get("product_id") if isinstance(item, dict) else item.product_id
+        if not raw_id or raw_id in result:
+            continue
+        try:
+            product_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if product_id in result:
+            continue
+        try:
+            product = container.product_service.get_product(product_id, g.user.company_id)
+            result[product_id] = product.quantity_unit or ""
+        except NotFoundError:
+            pass
+    return result
+
+
 def _pallet_types_map(items) -> dict:
     """product_id -> plain dicts of that product's pallet types, for rows
     already tied to a catalog product - fills each row's Pallet type
@@ -176,7 +199,8 @@ def new_proforma_invoice():
                 "proforma_invoices/form.html", invoice=None, buyers=buyers, quotations=quotations,
                 bank_options=bank_options, container_types=container_types, categories_tree=categories_tree, hsn_code_options=hsn_code_options, unit_options=unit_options,
                 form_data=request.form, form_items=items,
-                alt_qty_map=_alt_qty_map(items), pallet_types_map=_pallet_types_map(items),
+                alt_qty_map=_alt_qty_map(items), quantity_unit_map=_quantity_unit_map(items),
+                pallet_types_map=_pallet_types_map(items),
                 form_containers=_extract_containers(request.form),
                 today=date.today().isoformat(),
             ), 400
@@ -201,6 +225,7 @@ def new_proforma_invoice():
         bank_options=bank_options, container_types=container_types, categories_tree=categories_tree, hsn_code_options=hsn_code_options, unit_options=unit_options,
         form_data=prefill, form_items=form_items,
         alt_qty_map=_alt_qty_map(form_items) if form_items else {},
+        quantity_unit_map=_quantity_unit_map(form_items) if form_items else {},
         pallet_types_map=_pallet_types_map(form_items) if form_items else {},
         form_containers=form_containers,
         today=date.today().isoformat(),
@@ -286,7 +311,8 @@ def edit_proforma_invoice(proforma_invoice_id):
                 "proforma_invoices/form.html", invoice=invoice, buyers=buyers, quotations=quotations,
                 bank_options=bank_options, container_types=container_types, categories_tree=categories_tree, hsn_code_options=hsn_code_options, unit_options=unit_options,
                 form_data=request.form, form_items=items,
-                alt_qty_map=_alt_qty_map(items), pallet_types_map=_pallet_types_map(items),
+                alt_qty_map=_alt_qty_map(items), quantity_unit_map=_quantity_unit_map(items),
+                pallet_types_map=_pallet_types_map(items),
                 form_containers=_extract_containers(request.form),
                 today=date.today().isoformat(),
             ), 400
@@ -296,7 +322,8 @@ def edit_proforma_invoice(proforma_invoice_id):
         "proforma_invoices/form.html", invoice=invoice, buyers=buyers, quotations=quotations,
         bank_options=bank_options, container_types=container_types, categories_tree=categories_tree, hsn_code_options=hsn_code_options, unit_options=unit_options,
         form_data=None, form_items=None,
-        alt_qty_map=_alt_qty_map(invoice.items), pallet_types_map=_pallet_types_map(invoice.items),
+        alt_qty_map=_alt_qty_map(invoice.items), quantity_unit_map=_quantity_unit_map(invoice.items),
+        pallet_types_map=_pallet_types_map(invoice.items),
         form_containers=None,
         today=date.today().isoformat(),
     )

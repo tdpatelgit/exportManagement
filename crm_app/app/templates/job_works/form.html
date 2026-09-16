@@ -137,7 +137,8 @@
             <option value="{{ p.id }}" data-name="{{ p.name }}" data-unit="{{ p.unit }}"
                     data-master-id="{{ p.master_product_id }}" data-master-name="{{ p.master_product_name }}"
                     data-master-hsn="{{ p.master_hsn_code }}" data-master-alt-qty="{{ p.master_alt_qty }}"
-                    data-master-unit="{{ p.master_unit }}" data-master-igst="{{ p.master_igst }}">{{ p.name }}</option>
+                    data-master-unit="{{ p.master_unit }}" data-master-qty-unit="{{ p.master_qty_unit }}"
+                    data-master-igst="{{ p.master_igst }}">{{ p.name }}</option>
           {% endfor %}
         </select>
         <div class="text-sm text-soft">Only this proforma invoice's products still not fully covered by a purchase order are listed. Design list and Jobed Qty come from the proforma invoice's packing list under whichever of its own products this matches.</div>
@@ -205,8 +206,8 @@
             <th>Sr</th>
             <th style="min-width:220px;">Product</th>
             <th>HSN code</th>
-            <th>Boxes</th>
-            <th>Qty (SQM/LM)</th>
+            <th>QTY</th>
+            <th>ALT QTY</th>
             <th>Unit</th>
             <th>Price ({{ chosen_currency }})</th>
             <th>Per</th>
@@ -217,7 +218,8 @@
         <tbody id="pl-items-body">
           {% for row in form_products %}
           {% set meta = product_meta_map.get(row.product_id | int, {}) if row.product_id else {} %}
-          <tr class="pl-item-row" data-alt-qty="{{ meta.get('alt_qty', '') }}" data-igst="{{ meta.get('igst', '') }}">
+          <tr class="pl-item-row" data-alt-qty="{{ meta.get('alt_qty', '') }}" data-igst="{{ meta.get('igst', '') }}"
+              data-qty-unit="{{ meta.get('qty_unit', '') }}">
             <td class="js-sr">{{ loop.index }}</td>
             <td>
               <input type="hidden" name="pl_product_id[]" class="js-pl-product-id" value="{{ row.product_id or '' }}">
@@ -225,8 +227,14 @@
               <button type="button" class="btn btn-ghost btn-sm js-pl-choose-product">📦 Choose product</button>
             </td>
             <td><input type="text" name="pl_hsn_code[]" class="js-pl-hsn" value="{{ row.hsn_code or '' }}" readonly tabindex="-1"></td>
-            <td><input type="number" step="0.01" name="pl_quantity_boxes[]" class="js-pl-boxes" value="{{ row.quantity_boxes or '' }}"></td>
-            <td><input type="number" step="0.01" name="pl_quantity_value[]" class="js-pl-qty" required value="{{ row.quantity_value or '' }}"></td>
+            <td>
+              <input type="number" step="0.01" name="pl_quantity_boxes[]" class="js-pl-boxes" value="{{ row.quantity_boxes or '' }}">
+              <div class="text-sm text-soft js-pl-boxes-unit"></div>
+            </td>
+            <td>
+              <input type="number" step="0.01" name="pl_quantity_value[]" class="js-pl-qty" required value="{{ row.quantity_value or '' }}">
+              <div class="text-sm text-soft js-pl-qty-unit"></div>
+            </td>
             <td>
               <select name="pl_unit[]" class="js-pl-unit">
                 {% for u in PRODUCT_UNITS %}
@@ -434,11 +442,11 @@
   // app/routes/job_works.py).
   function currentMasterInfo() {
     const opt = toProductSelect.selectedOptions[0];
-    if (!opt || !opt.value) return { id: '', name: '', hsn: '', altQty: '', unit: '', igst: '' };
+    if (!opt || !opt.value) return { id: '', name: '', hsn: '', altQty: '', unit: '', qtyUnit: '', igst: '' };
     return {
       id: opt.dataset.masterId || '', name: opt.dataset.masterName || '',
       hsn: opt.dataset.masterHsn || '', altQty: opt.dataset.masterAltQty || '',
-      unit: opt.dataset.masterUnit || '', igst: opt.dataset.masterIgst || '',
+      unit: opt.dataset.masterUnit || '', qtyUnit: opt.dataset.masterQtyUnit || '', igst: opt.dataset.masterIgst || '',
     };
   }
 
@@ -658,8 +666,14 @@
         <button type="button" class="btn btn-ghost btn-sm js-pl-choose-product">📦 Choose product</button>
       </td>
       <td><input type="text" name="pl_hsn_code[]" class="js-pl-hsn" readonly tabindex="-1"></td>
-      <td><input type="number" step="0.01" name="pl_quantity_boxes[]" class="js-pl-boxes"></td>
-      <td><input type="number" step="0.01" name="pl_quantity_value[]" class="js-pl-qty" required></td>
+      <td>
+        <input type="number" step="0.01" name="pl_quantity_boxes[]" class="js-pl-boxes">
+        <div class="text-sm text-soft js-pl-boxes-unit"></div>
+      </td>
+      <td>
+        <input type="number" step="0.01" name="pl_quantity_value[]" class="js-pl-qty" required>
+        <div class="text-sm text-soft js-pl-qty-unit"></div>
+      </td>
       <td>
         <select name="pl_unit[]" class="js-pl-unit">
           {% for u in PRODUCT_UNITS %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
@@ -791,6 +805,9 @@
   });
   plItemsBody.addEventListener('change', (e) => {
     if (e.target.classList.contains('js-pl-price-per')) plRecalcTotals();
+    else if (e.target.classList.contains('js-pl-unit')) {
+      e.target.closest('tr').querySelector('.js-pl-qty-unit').textContent = e.target.value || '';
+    }
   });
   document.getElementById('pl_purchase_type').addEventListener('change', plRecalcTotals);
   document.getElementById('manufacturer_gstin').addEventListener('input', plRecalcTotals);
@@ -853,6 +870,9 @@
     plActiveRow.querySelector('.js-pl-hsn').value = p.hsn_code || '';
     plSetUnitValue(plActiveRow.querySelector('.js-pl-unit'), p.alt_quantity_unit);
     plActiveRow.dataset.altQty = parseFloat(p.alternate_quantity) || '';
+    plActiveRow.dataset.qtyUnit = p.quantity_unit || '';
+    plActiveRow.querySelector('.js-pl-boxes-unit').textContent = p.quantity_unit || '';
+    plActiveRow.querySelector('.js-pl-qty-unit').textContent = p.alt_quantity_unit || '';
     plActiveRow.dataset.igst = parseFloat(p.igst_percent) || '';
     plRecalcRowQty(plActiveRow);
     plRecalcTotals();
@@ -881,7 +901,10 @@
       tr.querySelector('.js-pl-hsn').value = hsn;
       tr.dataset.altQty = info.altQty || '';
       tr.dataset.igst = info.igst || '';
+      tr.dataset.qtyUnit = info.qtyUnit || '';
+      tr.querySelector('.js-pl-boxes-unit').textContent = info.qtyUnit || '';
       if (info.unit) plSetUnitValue(tr.querySelector('.js-pl-unit'), info.unit);
+      tr.querySelector('.js-pl-qty-unit').textContent = tr.querySelector('.js-pl-unit').value || '';
       plRenumber();
     }
     plSyncBoxesFromLines();
@@ -923,6 +946,15 @@
     });
     plRecalcTotals();
   }
+
+  // Rows already tied to a catalog product show that product's unit under
+  // Boxes (data-qty-unit, stashed by the server the same way as
+  // data-alt-qty) and under Qty (SQM/LM), the alt unit already sitting in
+  // the Unit select.
+  plItemsBody.querySelectorAll('.pl-item-row').forEach((tr) => {
+    tr.querySelector('.js-pl-boxes-unit').textContent = tr.dataset.qtyUnit || '';
+    tr.querySelector('.js-pl-qty-unit').textContent = tr.querySelector('.js-pl-unit').value || '';
+  });
 
   plRenumber();
   plSyncBoxesFromLines();

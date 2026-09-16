@@ -140,7 +140,7 @@
     <table class="ledger">
       <thead>
         <tr>
-          <th>Sr</th><th>Product</th>{% if purchase_orders | length > 1 %}<th>Source PO</th>{% endif %}{% if job_works | length > 1 %}<th>Source job work</th>{% endif %}<th>HSN code</th><th>Boxes</th><th>Qty</th><th>Unit</th>
+          <th>Sr</th><th>Product</th>{% if purchase_orders | length > 1 %}<th>Source PO</th>{% endif %}{% if job_works | length > 1 %}<th>Source job work</th>{% endif %}<th>HSN code</th><th>QTY</th><th>ALT QTY</th><th>Unit</th>
           <th>Price ({{ purchase_invoice.currency_name }})</th><th>Per</th><th class="num">Total ({{ purchase_invoice.currency_name }})</th>
         </tr>
       </thead>

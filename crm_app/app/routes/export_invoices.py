@@ -269,6 +269,7 @@ def _product_maps(items) -> tuple:
             # product picker never touched (a saved invoice, or one loaded
             # from the PIs or a loading planning).
             "alternate_quantity": product.alternate_quantity,
+            "quantity_unit": product.quantity_unit,
             "net_weight_kg": product.net_weight_kg,
             "gross_weight_kg": product.gross_weight_kg,
             "group_label": container.export_packing_list_service.group_label_for(product, product.product_name),
@@ -431,6 +432,7 @@ def export_invoice_prefill():
             # so a loaded row behaves like a freshly picked product.
             "pallet_types": pallet_types_map.get(product_id, []),
             "alternate_quantity": meta.get("alternate_quantity") or "",
+            "quantity_unit": meta.get("quantity_unit") or "",
             "net_weight_kg": meta.get("net_weight_kg") or "",
             "gross_weight_kg": meta.get("gross_weight_kg") or "",
             "group_label": meta.get("group_label") or "",
@@ -500,6 +502,7 @@ def export_invoice_loading_prefill():
             **{k: ("" if v is None else v) for k, v in item.items()},
             "pallet_types": pallet_types_map.get(product_id, []),
             "alternate_quantity": meta.get("alternate_quantity") or "",
+            "quantity_unit": meta.get("quantity_unit") or "",
             "net_weight_kg": meta.get("net_weight_kg") or "",
             "gross_weight_kg": meta.get("gross_weight_kg") or "",
             "group_label": meta.get("group_label") or "",
