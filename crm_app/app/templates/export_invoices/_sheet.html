@@ -66,6 +66,7 @@
     background: #eee; border-top: 1.5px solid #000; border-bottom: 1.5px solid #000;
   }
   .ei-sign { height: 46px; position: relative; }
+  .ei-decl { font-size: 7.5px; line-height: 1.1; }
   /* Pins the Authorised Signatury block to the bottom of its cell
      regardless of how tall the name/designation text ends up, rather than
      the fixed margin-top guess that used to approximate it. */
@@ -474,12 +475,18 @@
      different column splits (the declaration row merges the label column into
      the text, so the "INDIAN ORIGIN" stamp gets its own middle cell) - hence
      the four-column grid with the signatory spanning both rows on the right,
-     exactly as the reference does. #}
+     exactly as the reference does.
+
+     The signature column was wider than "For COMPANY / Authorised Signatory"
+     ever needs, which starved the declaration text next to it and forced the
+     two-clause text onto extra wrapped lines; the width freed up here goes
+     to that text, and .ei-decl tightens its line-height on top of that so
+     the same two clauses print noticeably shorter. #}
   <table>
-    <colgroup><col style="width:13%"><col style="width:28%"><col style="width:22%"><col style="width:37%"></colgroup>
+    <colgroup><col style="width:10%"><col style="width:32%"><col style="width:26%"><col style="width:32%"></colgroup>
     <tr>
       <td class="ei-lbl ei-mid">Self Sealing Declaration</td>
-      <td colspan="2">{{ (invoice.self_sealing_declaration or (company.self_sealing_declaration if company else '') or '-')|replace('\n', '<br>')|safe }}</td>
+      <td colspan="2" class="ei-decl">{{ (invoice.self_sealing_declaration or (company.self_sealing_declaration if company else '') or '-')|replace('\n', '<br>')|safe }}</td>
       <td rowspan="2" class="ei-r ei-sign">
         <div class="ei-lbl">For {{ company.company_name|upper if company else '' }}</div>
         <div class="ei-sign-bottom">

@@ -7133,8 +7133,11 @@ class ExportPackingListService:
                 # snapshotted the moment it was picked - see
                 # ExportInvoiceItem.pallet_weight_kg and the form's
                 # recalcRowPallets). A Loose line (or Plts typed by hand with
-                # no type picked) carries no pallet weight, so its gross is
-                # simply its net.
+                # no type picked) carries no pallet weight, so there is no
+                # pallet weight to add and gross is simply its net. The
+                # catalog's flat per-box gross weight is deliberately NOT
+                # consulted here - see TestDerivedFigures in
+                # tests/test_services_export_packing_lists.py for why.
                 if item.pallet_weight_kg and pallets:
                     gross = round((net or 0) + pallets * item.pallet_weight_kg, 2)
                 elif net is not None:

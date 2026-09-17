@@ -1053,24 +1053,24 @@ class TestExportPackingListRoutes:
         assert b"2,250.50" in resp.data
 
     def test_11b_gross_net_weight_and_total_row_come_from_the_packing_list(self, admin_ctx):
-        # Container 1 gets 60 boxes, container 2 gets 40 - both from a
-        # product whose catalog net/gross weight per box is 26.5/27.0 KG
-        # (see _create_export_invoice), so the packing list derives:
-        #   container 1: net 60*26.5=1590.00, gross 60*27.0=1620.00
-        #   container 2: net 40*26.5=1060.00, gross 40*27.0=1080.00
-        #   TOTAL: net 2650.00, gross 2700.00
-        # Also on the annexure tab, same as the tare weight above.
+        # Container 1 gets 60 boxes, container 2 gets 40, both from a product
+        # whose catalog net weight per box is 26.5 KG (see
+        # _create_export_invoice) - so net is:
+        #   container 1: 60*26.5=1590.00, container 2: 40*26.5=1060.00, TOTAL 2650.00
+        # No pallet type is posted on this line (Loose), so there is no
+        # pallet weight to add and gross equals net on every row - see
+        # TestDerivedFigures.test_no_pallet_type_means_gross_equals_net in
+        # tests/test_services_export_packing_lists.py, which pins the same
+        # rule: the catalog's own flat gross weight is deliberately not
+        # consulted once boxes are loaded into containers.
         client, container, admin, company_id = admin_ctx
         invoice = self._create_export_invoice(client, container, admin, company_id)
         resp = client.get(f"/export-annexures/{invoice.id}")
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        assert "1,620.00" in body  # container 1 gross
-        assert "1,590.00" in body  # container 1 net
-        assert "1,080.00" in body  # container 2 gross
-        assert "1,060.00" in body  # container 2 net
-        assert "2,700.00" in body  # TOTAL gross
-        assert "2,650.00" in body  # TOTAL net
+        assert "1,590.00" in body  # container 1 net and gross
+        assert "1,060.00" in body  # container 2 net and gross
+        assert "2,650.00" in body  # TOTAL net and gross
         assert "TOTAL" in body
 
     def test_for_invoice_shortcut_redirects_to_the_generated_list(self, admin_ctx):

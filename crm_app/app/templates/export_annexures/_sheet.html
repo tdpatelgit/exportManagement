@@ -63,7 +63,15 @@
 {% set total_pallets = packing_list.total_pallets if packing_list else 0 %}
 {% set total_boxes = packing_list.total_boxes if packing_list else 0 %}
 {% set total_quantity = packing_list.total_quantity if packing_list else 0 %}
+{% set total_net = packing_list.total_net_weight if packing_list else 0 %}
 {% set total_gross = packing_list.total_gross_weight if packing_list else 0 %}
+{# Tare weight is typed on the export invoice's own 11B rows
+   (invoice.container_details), not on the packing list - container_rows'
+   own sr_no is 1-based and lines up with that list by position (the same
+   index ExportPackingListService.build_items reads containers by), so it
+   is looked up here rather than carried onto the packing list model. #}
+{% set invoice_containers = invoice.container_details if invoice else [] %}
+{% set total_tare = invoice_containers | map(attribute='tare_weight_kg') | map('default', 0, true) | sum %}
 
 {# The container grid is a single column of lines read top to bottom. #}
 
@@ -209,12 +217,18 @@
   </table>
   <table>
     <colgroup>
-      <col style="width:6%"><col style="width:19%"><col style="width:17%"><col style="width:18%"><col style="width:9%"><col style="width:11%"><col style="width:20%">
+      <col style="width:4%"><col style="width:15%"><col style="width:13%"><col style="width:14%"><col style="width:8%"><col style="width:9%"><col style="width:12%"><col style="width:12%"><col style="width:13%">
     </colgroup>
     <tr class="eia-chead">
-      <td>Sr No</td><td>Container No</td><td>Lince Seal No</td><td>RFID Seal No</td><td>Packing</td><td>Qty</td><td>Gross Weight(KG)</td>
+      <td>Sr No</td><td>Container No</td><td>Lince Seal No</td><td>RFID Seal No</td><td>Packing</td><td>Qty</td>
+      <td>Tare Weight(KG)</td><td>Net Weight(KG)</td><td>Gross Weight(KG)</td>
     </tr>
     {% for c in container_rows %}
+    {# Tare weight lives on the export invoice's own 11B row, not the packing
+       list - c.sr_no is 1-based and lines up with invoice_containers by
+       position, the same index build_items reads containers by. #}
+    {% set tare_idx = c.sr_no - 1 %}
+    {% set tare = invoice_containers[tare_idx].tare_weight_kg if 0 <= tare_idx < invoice_containers|length else None %}
     <tr class="eia-crow">
       <td class="eia-c">{{ loop.index }}</td>
       <td class="eia-c">{{ c.container_no or '' }}</td>
@@ -222,6 +236,8 @@
       <td class="eia-c">{{ c.rfid_seal_no or '' }}</td>
       <td class="eia-c">{{ n0(c.pallets) }}</td>
       <td class="eia-c">{{ n0(c.quantity_boxes) }}</td>
+      <td class="eia-c">{{ n2(tare) }}</td>
+      <td class="eia-c">{{ n2(c.net_weight_kg) }}</td>
       <td class="eia-c">{{ n2(c.gross_weight_kg) }}</td>
     </tr>
     {% endfor %}
@@ -229,12 +245,14 @@
        _page_filler.html stretches so the sheet fills its A4 page however few
        containers there are. #}
     <tr class="eia-crow js-page-filler">
-      <td class="eia-x" colspan="7"></td>
+      <td class="eia-x" colspan="9"></td>
     </tr>
     <tr class="eia-crow">
-      <td colspan="4" class="eia-head">Total</td>
+      <td colspan="4" class="eia-head">TOTAL</td>
       <td class="eia-c">{{ n0(total_pallets) }}</td>
       <td class="eia-c">{{ n0(total_boxes) }}</td>
+      <td class="eia-c">{{ n2(total_tare) }}</td>
+      <td class="eia-c">{{ n2(total_net) }}</td>
       <td class="eia-c">{{ n2(total_gross) }}</td>
     </tr>
   </table>
