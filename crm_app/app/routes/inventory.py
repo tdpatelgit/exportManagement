@@ -4,15 +4,15 @@ app/routes/inventory.py
 Inventory: the same catalog browser as Products (categories -> products ->
 sub categories -> designs), but read-only and focused on stock on hand. The
 design tables gain a "current stock" column, and a design's page drops the
-Product tax/packing block in favour of an Inventory block plus a
-Purchase/Sale history of every time it was received or sold.
+Product tax/packing block in favour of an Inventory block plus a Purchase
+history of every time it was received.
 
 Stock per design is everything RECEIVED (listed on a purchase invoice's own
 packing list), less everything DISPATCHED back out for job work (belonging to
-an invoice that has a Job Out challan against it), less everything SOLD
-(allocated on an export invoice's Designs Packing List). Goods coming back
-from job work aren't modelled yet - that's the Job In document, still to be
-built. See InventoryService for the arithmetic.
+an invoice that has a Job Out challan against it), plus everything RETURNED
+from job work (a Job In). See InventoryService for the arithmetic. What has
+shipped out is tracked at Packing Planning / Loading Planning instead, not
+netted into this figure.
 
 Everyone signed in can browse; nothing here is editable (stock is derived
 from the documents themselves, so it's maintained through the Documents
@@ -56,7 +56,6 @@ def list_inventory(category_id=None):
                 design["id"],
                 {"boxes": 0, "pcs": 0, "quantity": 0,
                  "dispatched_boxes": 0, "dispatched_quantity": 0,
-                 "sold_boxes": 0, "sold_quantity": 0,
                  "net_boxes": 0, "net_pcs": 0, "net_quantity": 0,
                  "unit": None, "qty_unit": None},
             )
@@ -91,7 +90,7 @@ def view_product(product_id, folder_id=None):
 
 
 # ============================================================
-# DESIGN (stock on hand + purchase/sale history)
+# DESIGN (stock on hand + purchase history)
 # ============================================================
 @inventory_bp.route("/design/<int:design_id>")
 @login_required

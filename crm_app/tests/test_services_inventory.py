@@ -5,8 +5,7 @@ Stock arithmetic - previously untested territory.
 
 Stock per design is RECEIVED (a purchase invoice's own packing list) less
 DISPATCHED (received goods belonging to an invoice that has a Job Out challan
-against it) less SOLD (allocated on an export invoice's Designs Packing List).
-These tests pin down which document is the receipt event, since that is the
+against it). These tests pin down which document is the receipt event, since that is the
 part most easily broken by accident: a purchase order's or a job work's own
 packing list normally lists the SAME goods as the invoice raised from it, so
 counting either of those as well would double every purchase.
@@ -314,7 +313,6 @@ def test_stock_history_summary_agrees_with_stock_by_design(container, seed, cata
     summary = container.inventory_service.stock_history_summary(seed.company_id, design.id)
     assert summary["received_boxes"] == stock["boxes"]
     assert summary["dispatched_boxes"] == stock["dispatched_boxes"]
-    assert summary["sale_boxes"] == stock["sold_boxes"]
     assert summary["stock_boxes"] == stock["net_boxes"]
     assert summary["stock_alt_qty"] == stock["net_quantity"]
 

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}{{ platform_login.platform_name }}{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Platform Login #{{ platform_login.id }}</div>
+    <h1>{{ platform_login.platform_name }}</h1>
+  </div>
+  <div class="topbar-actions">
+    {% if platform_login.login_url %}
+    <a href="{{ platform_login.login_url }}" target="_blank" rel="noopener noreferrer" class="btn btn-primary">Open login page ↗</a>
+    {% endif %}
+    {% if current_user.is_admin %}
+    <a href="{{ url_for('platform_logins.edit_platform_login', platform_login_id=platform_login.id) }}" class="btn btn-ghost">Edit</a>
+    <form method="POST" action="{{ url_for('platform_logins.delete_platform_login', platform_login_id=platform_login.id) }}" style="display:inline;"
+          onsubmit="return confirmDeleteWithPassword(this, 'Delete this platform login? This cannot be undone.');">
+      <button type="submit" class="btn btn-danger">Delete</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+{% if platform_login.login_url %}
+<div class="empty-state text-sm" style="margin-bottom:16px;">
+  Browsers won't accept a username/password through a link for security reasons - open the login page, then copy the credentials below into it.
+</div>
+{% endif %}
+
+<div class="card" style="max-width:760px;">
+  <div class="card-header"><h3>Credentials</h3></div>
+  <table class="ledger">
+    <tr>
+      <td class="text-soft" style="width:40%;">Login link</td>
+      <td>
+        {% if platform_login.login_url %}<a href="{{ platform_login.login_url }}" target="_blank" rel="noopener noreferrer">{{ platform_login.login_url }}</a>{% else %}—{% endif %}
+      </td>
+    </tr>
+    <tr>
+      <td class="text-soft">Username</td>
+      <td class="mono">
+        {{ platform_login.username or '—' }}
+        {% if platform_login.username %}<button type="button" class="btn btn-ghost btn-sm" onclick="copyText('{{ platform_login.username|e }}', this)">Copy</button>{% endif %}
+      </td>
+    </tr>
+    <tr>
+      <td class="text-soft">Password</td>
+      <td class="mono">
+        {% if platform_login.password %}
+        <span id="pw-mask">••••••••</span>
+        <span id="pw-plain" style="display:none;">{{ platform_login.password }}</span>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="togglePassword()" id="pw-toggle-btn">Show</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="copyText('{{ platform_login.password|e }}', this)">Copy</button>
+        {% else %}—{% endif %}
+      </td>
+    </tr>
+    <tr><td class="text-soft">Email</td><td>{{ platform_login.email or '—' }}</td></tr>
+    <tr><td class="text-soft">Mobile number</td><td>{{ platform_login.mobile_number or '—' }}</td></tr>
+    <tr><td class="text-soft">Notes</td><td>{{ platform_login.notes or '—' }}</td></tr>
+    <tr><td class="text-soft">Added</td><td>{{ platform_login.created_at|friendly_date }}</td></tr>
+  </table>
+</div>
+
+<script>
+  function togglePassword() {
+    const mask = document.getElementById('pw-mask');
+    const plain = document.getElementById('pw-plain');
+    const btn = document.getElementById('pw-toggle-btn');
+    const showing = plain.style.display !== 'none';
+    mask.style.display = showing ? 'inline' : 'none';
+    plain.style.display = showing ? 'none' : 'inline';
+    btn.textContent = showing ? 'Show' : 'Hide';
+  }
+  function copyText(text, btn) {
+    navigator.clipboard.writeText(text).then(() => {
+      const original = btn.textContent;
+      btn.textContent = 'Copied';
+      setTimeout(() => { btn.textContent = original; }, 1200);
+    });
+  }
+</script>
+
+{% endblock %}

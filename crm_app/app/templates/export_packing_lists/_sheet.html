@@ -48,7 +48,7 @@
   /* The container split prints small so long descriptions keep to one or
      two lines; the quantity columns (Packing / Qty / Alt. Qty) right-align
      with the weight columns, rows and TOTAL alike. Headers stay centred. */
-  .epl-items td { font-size: 6.5px; }
+  .epl-items td { font-size: 7px; }
   .epl-items tbody td.epl-cnum { text-align: right; }
   .epl-tot td { font-weight: bold; }
   {# "Packing" and "Net/Gross Weight (KG)" are wider than their columns at
@@ -214,7 +214,7 @@
         <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
       </tr>
       <tr class="epl-tot">
-        <td colspan="5" style="font-weight:normal;">TOTAL</td>
+        <td colspan="5" style="font-weight:normal; text-align:right;">TOTAL</td>
         {# One bare figure - every packing unit counted together, whatever
            each line's own unit, same as the export invoice's total. #}
         <td class="epl-cnum">{% if packing_list.total_pallets %}{{ num(packing_list.total_pallets, 0) }}{% endif %}</td>

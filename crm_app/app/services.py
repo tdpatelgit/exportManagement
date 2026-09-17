@@ -34,7 +34,7 @@ from werkzeug.utils import secure_filename
 
 from app.exceptions import ValidationError, PermissionDeniedError, NotFoundError, AccountLockedError
 from app.models import (
-    User, Lead, Party, Supplier, Transporter, Permit, BookingDetail, MiscCurrency, MiscNatureOfContract, MiscPortOfLoading, MiscContainerType, MiscHsnCode, MiscCountry, MiscUnit, DEFAULT_CURRENCIES, DEFAULT_CONTAINER_TYPES, ContactPerson, Communication, PaymentEntry, DocumentEntry,
+    User, Lead, Party, Supplier, Transporter, PlatformLogin, Permit, BookingDetail, MiscCurrency, MiscNatureOfContract, MiscPortOfLoading, MiscContainerType, MiscHsnCode, MiscCountry, MiscUnit, DEFAULT_CURRENCIES, DEFAULT_CONTAINER_TYPES, ContactPerson, Communication, PaymentEntry, DocumentEntry,
     LEAD_STATUSES, CLIENT_STATUSES, CLIENT_STATUS_ADVANCE_ON, PRODUCT_UNITS, Category, Product,
     ProductPalletType, ProductFolder,
     Design, Quotation, QuotationItem, ProformaInvoice, ProformaInvoiceItem,
@@ -45,13 +45,13 @@ from app.models import (
     PROFORMA_STATUSES, PROFORMA_STATUS_DRAFT, PROFORMA_STATUS_CONFIRMED,
     ExportInvoice, ExportInvoiceItem, EXPORT_TAX_MODES, EXPORT_TAX_MODE_IGST, EXPORT_TAX_MODE_LUT,
     EXPORT_LOADING_TYPES, EXPORT_LOADING_SELF_SEALING,
-    ExportPackingList, ExportPackingListItem, ExportPackingListItemDesign, ExportDesignsPackingList,
+    ExportPackingList, ExportPackingListItem,
     LoadingPlanning, LoadingPlanningItem, LoadingPlanningPacking,
     PackingPlanning, PackingPlanningItem, PackingPlanningManualUnit, PackingPlanningLabel,
 )
 from app.repositories import (
     TenantRepository, UserRepositoryBase, LeadRepositoryBase, PartyRepositoryBase, SupplierRepositoryBase,
-    TransporterRepositoryBase,
+    TransporterRepositoryBase, PlatformLoginRepositoryBase,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
     CategoryRepository, ProductRepository, ProductPalletTypeRepository, ProductFolderRepository, DesignRepository,
     QuotationRepository, ProformaInvoiceRepository, PurchaseOrderRepository,
@@ -1222,6 +1222,66 @@ class TransporterService:
         return transporter
 
 
+class PlatformLoginService:
+    """The Platform Login directory (see models.PlatformLogin) - saved
+    credentials for third-party platforms, plain company-scoped CRUD: reads
+    for anyone signed in, writes admin-only, same gating TransporterService
+    applies."""
+
+    def __init__(self, platform_login_repo: PlatformLoginRepositoryBase):
+        self.platform_login_repo = platform_login_repo
+
+    # ---- reads --------------------------------------------------
+    def get(self, platform_login_id: int, company_id: int) -> PlatformLogin:
+        platform_login = self.platform_login_repo.get_by_id(platform_login_id)
+        if not platform_login or platform_login.company_id != company_id:
+            raise NotFoundError(f"Platform login #{platform_login_id} not found.")
+        return platform_login
+
+    def list_all(self, company_id: int) -> List[PlatformLogin]:
+        return self.platform_login_repo.list_all(company_id)
+
+    # ---- validation --------------------------------------------------
+    @staticmethod
+    def _clean_fields(fields: dict) -> dict:
+        platform_name = (fields.get("platform_name") or "").strip()
+        if not platform_name:
+            raise ValidationError("Platform name is compulsory.")
+        return {
+            "platform_name": platform_name,
+            "login_url": (fields.get("login_url") or "").strip() or None,
+            "username": (fields.get("username") or "").strip() or None,
+            "password": (fields.get("password") or "").strip() or None,
+            "email": (fields.get("email") or "").strip() or None,
+            "mobile_number": (fields.get("mobile_number") or "").strip() or None,
+            "notes": (fields.get("notes") or "").strip() or None,
+        }
+
+    # ---- writes --------------------------------------------------
+    def create(self, current_user: User, fields: dict) -> PlatformLogin:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can add a platform login.")
+        clean = self._clean_fields(fields)
+        platform_login = self.platform_login_repo.create(PlatformLogin(
+            id=None, company_id=current_user.company_id, created_by=current_user.id, **clean,
+        ))
+        return platform_login
+
+    def update(self, platform_login_id: int, current_user: User, fields: dict) -> PlatformLogin:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can edit a platform login.")
+        self.get(platform_login_id, current_user.company_id)  # 404s if missing/another company's
+        self.platform_login_repo.update(platform_login_id, self._clean_fields(fields))
+        return self.get(platform_login_id, current_user.company_id)
+
+    def delete(self, platform_login_id: int, current_user: User) -> PlatformLogin:
+        if not current_user.is_admin:
+            raise PermissionDeniedError("Only an admin can delete a platform login.")
+        platform_login = self.get(platform_login_id, current_user.company_id)
+        self.platform_login_repo.delete(platform_login_id)
+        return platform_login
+
+
 def advance_client_status(party_repos: dict, lead_repo: LeadRepositoryBase,
                            lead_id: Optional[int], document_type: str) -> None:
     """Moves the buyer/supplier tied to `lead_id` forward to whatever
@@ -2288,7 +2348,7 @@ class InventoryService:
     ProductService for all catalog navigation (categories, products, sub
     categories, designs) and adds the stock numbers on top.
 
-    Stock per design moves in three ways:
+    Stock per design moves in two ways:
 
       RECEIVED  `boxes`/`pcs`/`quantity` - the raw received totals, listed on
                 a PURCHASE INVOICE's own packing list (bought_totals_by_design).
@@ -2301,18 +2361,18 @@ class InventoryService:
                 point of the cycle: the master goes out, something else comes
                 back. Counted into `boxes`/`quantity` alongside what was
                 purchased, since both are stock genuinely on hand.
-      SOLD      `sold_boxes`/`sold_quantity` - allocated on an export
-                invoice's Designs Packing List (sold_totals_by_design).
 
     `net_boxes`/`net_pcs`/`net_quantity` are received (purchased + returned)
-    less dispatched less sold. pcs is tracked on neither the dispatched nor
-    the sold side, so net_pcs is netted proportionally off the received
-    pcs-per-box ratio."""
+    less dispatched. pcs is tracked on neither side, so net_pcs is netted
+    proportionally off the received pcs-per-box ratio. There is no "sold"
+    side any more (dropped along with the per-line design allocation feature
+    - see the v104 schema changelog) - what has actually shipped out is
+    tracked at Packing Planning / Loading Planning instead, not fed back into
+    this figure."""
 
     def __init__(self, product_service: "ProductService", packing_list_repo: PackingListRepository,
                  design_repo: DesignRepository,
                  purchase_order_repo: Optional[PurchaseOrderRepository] = None,
-                 export_invoice_repo: Optional[ExportInvoiceRepository] = None,
                  purchase_invoice_repo: Optional[PurchaseInvoiceRepository] = None,
                  job_in_repo: Optional[JobInRepository] = None):
         self.products = product_service
@@ -2321,35 +2381,29 @@ class InventoryService:
         # Goods returned from job work - the jobbed product's way into stock.
         # Optional so an unwired caller simply sees no returns.
         self.job_in_repo = job_in_repo
-        # Optional: only needed for stock_history_summary's PO Qty/Sale Qty
-        # columns and purchase_sale_history's document links - the rest of
-        # this service works without them.
+        # Optional: only needed for stock_history_summary's PO Qty column and
+        # purchase_sale_history's document links - the rest of this service
+        # works without them.
         self.purchase_order_repo = purchase_order_repo
-        self.export_invoice_repo = export_invoice_repo
         self.purchase_invoice_repo = purchase_invoice_repo
 
-    def _stock_from_bought(self, bought: dict, sold: Optional[dict] = None,
-                           dispatched: Optional[dict] = None) -> dict:
+    def _stock_from_bought(self, bought: dict, dispatched: Optional[dict] = None) -> dict:
         """Turn a {boxes, pcs, quantity} received total into a stock figure
         carrying the raw received totals and the same figures net of what has
-        been dispatched for job work and what has been sold. pcs is tracked on
-        neither of those sides, so net_pcs is netted proportionally off the
-        received pcs-per-box ratio - the same fraction of boxes gone is
-        treated as that fraction of pcs gone, so net_pcs reaches zero exactly
-        when net_boxes does.
+        been dispatched for job work. pcs is tracked on neither side, so
+        net_pcs is netted proportionally off the received pcs-per-box ratio -
+        the same fraction of boxes gone is treated as that fraction of pcs
+        gone, so net_pcs reaches zero exactly when net_boxes does.
 
         This is the ONE place stock arithmetic happens; stock_history_summary
         reads its result rather than repeating the subtraction."""
-        sold = sold or {}
         dispatched = dispatched or {}
         bought_boxes = bought.get("boxes", 0) or 0
         bought_pcs = bought.get("pcs", 0) or 0
         bought_quantity = bought.get("quantity", 0) or 0
-        sold_boxes = sold.get("boxes", 0) or 0
-        sold_quantity = sold.get("quantity", 0) or 0
         dispatched_boxes = dispatched.get("boxes", 0) or 0
         dispatched_quantity = dispatched.get("quantity", 0) or 0
-        net_boxes = bought_boxes - dispatched_boxes - sold_boxes
+        net_boxes = bought_boxes - dispatched_boxes
         pcs_per_box = (bought_pcs / bought_boxes) if bought_boxes else 0
         return {
             "boxes": bought_boxes,
@@ -2357,11 +2411,9 @@ class InventoryService:
             "quantity": bought_quantity,
             "dispatched_boxes": dispatched_boxes,
             "dispatched_quantity": dispatched_quantity,
-            "sold_boxes": sold_boxes,
-            "sold_quantity": sold_quantity,
             "net_boxes": net_boxes,
             "net_pcs": round(net_boxes * pcs_per_box, 2) if bought_boxes else bought_pcs,
-            "net_quantity": bought_quantity - dispatched_quantity - sold_quantity,
+            "net_quantity": bought_quantity - dispatched_quantity,
             "unit": bought.get("unit") or None,  # the quantity's unit (SQM/PCS/...)
             "qty_unit": bought.get("qty_unit") or None,  # the boxes' unit (product.quantity_unit)
         }
@@ -2393,14 +2445,12 @@ class InventoryService:
 
     def stock_by_design(self, company_id: int) -> dict:
         """design_id -> {boxes, pcs, quantity, dispatched_boxes,
-        dispatched_quantity, sold_boxes, sold_quantity, net_boxes, net_pcs,
-        net_quantity} on hand, for the whole company in one query. Designs
-        never received are simply absent."""
+        dispatched_quantity, net_boxes, net_pcs, net_quantity} on hand, for
+        the whole company in one query. Designs never received are simply
+        absent."""
         totals = self._received_totals(company_id)
-        sold_totals = self.export_invoice_repo.sold_totals_by_design(company_id) if self.export_invoice_repo else {}
         dispatched_totals = self.packing_list_repo.dispatched_totals_by_design(company_id)
-        return {design_id: self._stock_from_bought(bought, sold_totals.get(design_id),
-                                                   dispatched_totals.get(design_id))
+        return {design_id: self._stock_from_bought(bought, dispatched_totals.get(design_id))
                 for design_id, bought in totals.items()}
 
     def stock_for_design(self, company_id: int, design_id: int) -> dict:
@@ -2408,7 +2458,6 @@ class InventoryService:
         return self.stock_by_design(company_id).get(
             design_id, {"boxes": 0, "pcs": 0, "quantity": 0,
                         "dispatched_boxes": 0, "dispatched_quantity": 0,
-                        "sold_boxes": 0, "sold_quantity": 0,
                         "net_boxes": 0, "net_pcs": 0, "net_quantity": 0,
                         "unit": None, "qty_unit": None}
         )
@@ -2416,101 +2465,58 @@ class InventoryService:
     def in_stock_designs(self, company_id: int) -> List[dict]:
         """Every design ever bought in, newest-purchase concerns aside - just
         design + product name + stock, for the "in stock right now" summary
-        at the top of the Inventory catalog root. Shown even once net stock
-        has been sold down to zero, so the Qty (raw purchased) and Stock
-        (net of sales) columns both stay visible for a design that's fully
-        sold out rather than the row disappearing. One batched design
-        lookup, no per-design queries."""
+        at the top of the Inventory catalog root. One batched design lookup,
+        no per-design queries."""
         totals = self._received_totals(company_id)
         if not totals:
             return []
-        sold_totals = self.export_invoice_repo.sold_totals_by_design(company_id) if self.export_invoice_repo else {}
         dispatched_totals = self.packing_list_repo.dispatched_totals_by_design(company_id)
         rows = self.design_repo.list_by_ids_with_product(list(totals.keys()))
         in_stock = []
         for row in rows:
-            stock = self._stock_from_bought(totals.get(row["id"], {}), sold_totals.get(row["id"]),
-                                            dispatched_totals.get(row["id"]))
+            stock = self._stock_from_bought(totals.get(row["id"], {}), dispatched_totals.get(row["id"]))
             if stock["boxes"] or stock["pcs"] or stock["quantity"]:
                 in_stock.append({**row, "stock": stock})
         return in_stock
 
     def purchase_sale_history(self, company_id: int, design_id: int) -> List[dict]:
-        """The design's Purchase / Sale history, one row per Purchase Order
-        the design was received against, each carrying its own Purchase
-        Invoice(s), Received/PO Remain Qty, and whichever Export Invoice(s)
-        that PO's goods were eventually sold on - PO20260815001 -> PINV.. ->
-        EXP/25-26/002 on one line, the way the buy and sell side of the same
-        stock actually connect. A sale is attached to a PO's row if EITHER
-        signal matches: the sale's own PO number, or one of the PO's own
-        Purchase Invoice numbers appearing in the sale's Purchase Details -
-        so the chain still joins even when a sale only carries the
-        PI leg (goods line prefilled from the PI's own numbers) rather than
-        the PO number. A sale that matches neither (older data, or a
-        hand-typed PO number) still appears, as its own row with blank
-        purchase columns - nothing is dropped. purchase_order_repo/
-        purchase_invoice_repo/export_invoice_repo are optional on this
-        service, so a caller that never wired them just sees an empty list
-        instead of an error."""
-        sales = self.export_invoice_repo.sold_history_for_design(company_id, design_id) if self.export_invoice_repo else []
-        sales_by_po: dict = {}
-        sales_by_pi_number: dict = {}
-        for sale in sales:
-            for po_number in sale.get("po_numbers") or []:
-                sales_by_po.setdefault(po_number, []).append(sale)
-            for pi_number in sale.get("pi_invoice_numbers") or []:
-                sales_by_pi_number.setdefault(pi_number, []).append(sale)
-
+        """The design's Purchase history, one row per Purchase Order the
+        design was received against, carrying its own Purchase Invoice(s) and
+        Received/PO Remain Qty. purchase_order_repo/purchase_invoice_repo are
+        optional on this service, so a caller that never wired them just sees
+        an empty list instead of an error."""
+        if not self.purchase_order_repo:
+            return []
         rows = []
-        matched_sale_ids = set()
-        if self.purchase_order_repo:
-            for row in self.purchase_order_repo.purchase_history_for_design(company_id, design_id):
-                ordered = row["po_ordered_boxes"] or 0
-                tagged = row["po_product_tagged_boxes"] or 0
-                po_qty = (row["received_boxes"] / tagged * ordered) if tagged else 0
-                row["po_qty"] = round(po_qty, 2)
-                row["po_remain_boxes"] = round(po_qty - (row["received_boxes"] or 0), 2)
-                purchase_invoices = (
-                    self.purchase_invoice_repo.list_for_purchase_order(row["purchase_order_id"])
-                    if self.purchase_invoice_repo else []
-                )
-                row["purchase_invoices"] = purchase_invoices
-
-                matched_sales = list(sales_by_po.get(row["po_number"], []))
-                for pinv in purchase_invoices:
-                    for sale in sales_by_pi_number.get(pinv.invoice_number, []):
-                        if sale not in matched_sales:
-                            matched_sales.append(sale)
-                row["sales"] = matched_sales
-                matched_sale_ids.update(id(s) for s in matched_sales)
-                rows.append(row)
-        unmatched_sales = [s for s in sales if id(s) not in matched_sale_ids]
-        for sale in unmatched_sales:
-            rows.append({
-                "purchase_order_id": None, "po_number": None, "po_date": None,
-                "packing_list_number": None, "po_qty": None, "purchase_invoices": [],
-                "received_boxes": None, "po_remain_boxes": None, "qty_unit": None,
-                "sales": [sale],
-            })
+        for row in self.purchase_order_repo.purchase_history_for_design(company_id, design_id):
+            ordered = row["po_ordered_boxes"] or 0
+            tagged = row["po_product_tagged_boxes"] or 0
+            po_qty = (row["received_boxes"] / tagged * ordered) if tagged else 0
+            row["po_qty"] = round(po_qty, 2)
+            row["po_remain_boxes"] = round(po_qty - (row["received_boxes"] or 0), 2)
+            row["purchase_invoices"] = (
+                self.purchase_invoice_repo.list_for_purchase_order(row["purchase_order_id"])
+                if self.purchase_invoice_repo else []
+            )
+            rows.append(row)
         return rows
 
     def stock_history_summary(self, company_id: int, design_id: int) -> dict:
         """The design's Stock History card: one row of totals - PO Qty
         (ordered), Received Qty (listed on a purchase invoice's packing list),
-        PO Remain Qty, Dispatched Qty (sent back out on a Job Out), Sale Qty
-        (sold via an export invoice), Stock and its Alt Qty.
+        PO Remain Qty, Dispatched Qty (sent back out on a Job Out), Stock and
+        its Alt Qty.
 
         Stock/Alt Qty come straight off stock_for_design rather than being
         subtracted again here, so this card and the Inventory card above it
         can't disagree - _stock_from_bought is the single formula.
 
-        PO Qty and Sale Qty are only as complete as the PO/export invoice
-        lines that were actually tagged with this design (design tagging on
-        those two document types is optional) - untagged lines simply don't
-        count, the same way stock itself only counts packing lists with a
-        design chosen. purchase_order_repo/export_invoice_repo are optional
-        on this service, so a caller that never wired them just sees zeros
-        for those two columns instead of an error.
+        PO Qty is only as complete as the PO lines that were actually tagged
+        with this design (design tagging on that document type is optional) -
+        untagged lines simply don't count, the same way stock itself only
+        counts packing lists with a design chosen. purchase_order_repo is
+        optional on this service, so a caller that never wired it just sees
+        zeros for that column instead of an error.
 
         Note PO Qty stays purchase-ORDER based while Received Qty is now
         purchase-INVOICE based, so PO Remain Qty reads as "ordered but not yet
@@ -2526,8 +2532,6 @@ class InventoryService:
             "po_remain_boxes": (ordered["boxes"] - stock["boxes"]) if ordered["boxes"] else None,
             "dispatched_boxes": stock["dispatched_boxes"],
             "dispatched_qty_unit": stock["qty_unit"],
-            "sale_boxes": stock["sold_boxes"],
-            "sale_qty_unit": stock["qty_unit"],
             "stock_boxes": stock["net_boxes"],
             "stock_qty_unit": stock["qty_unit"],
             "stock_alt_qty": stock["net_quantity"],
@@ -6767,24 +6771,11 @@ class ExportPackingListService:
 
     def __init__(self, export_packing_list_repo: ExportPackingListRepository,
                  export_invoice_repo: ExportInvoiceRepository, product_repo: ProductRepository,
-                 category_repo: Optional[CategoryRepository] = None,
-                 design_repo: Optional[DesignRepository] = None,
-                 packing_list_repo: Optional[PackingListRepository] = None,
-                 designs_packing_list_repo: Optional["ExportDesignsPackingListRepository"] = None,
-                 job_in_repo: Optional["JobInRepository"] = None):
+                 category_repo: Optional[CategoryRepository] = None):
         self.export_packing_list_repo = export_packing_list_repo
         self.export_invoice_repo = export_invoice_repo
         self.product_repo = product_repo
         self.category_repo = category_repo
-        # All four are only used by the Designs Packing List (the design
-        # allocation and the document it becomes) - the container split
-        # itself needs none of them, so they stay optional. job_in_repo lets
-        # the allocation reference also offer designs that only entered stock
-        # through a job-work return (a Job In), never a purchase invoice.
-        self.design_repo = design_repo
-        self.packing_list_repo = packing_list_repo
-        self.designs_packing_list_repo = designs_packing_list_repo
-        self.job_in_repo = job_in_repo
 
     # ---- reads --------------------------------------------------
     def get(self, packing_list_id: int, company_id: int) -> ExportPackingList:
@@ -6802,243 +6793,6 @@ class ExportPackingListService:
         if not packing_list or packing_list.company_id != company_id:
             return None
         return packing_list
-
-    # ---- Designs Packing List: the document --------------------------------------------------
-    def get_designs_document(self, export_invoice_id: int, company_id: int) -> Optional[ExportDesignsPackingList]:
-        if not self.designs_packing_list_repo:
-            return None
-        doc = self.designs_packing_list_repo.get_for_invoice(export_invoice_id)
-        return doc if doc and doc.company_id == company_id else None
-
-    def create_designs_document(self, current_user: User, export_invoice_id: int) -> ExportDesignsPackingList:
-        """Turns a filled-in allocation into the DESIGNS PACKING LIST proper,
-        giving it its own DSGPL number and date. Refuses while any container
-        line is still part-allocated: the sheet is a packing list, and one
-        that accounts for only some of a container's boxes is worse than
-        none. Creating it twice is a no-op that returns the existing
-        document - the number it already went out under is never reissued."""
-        company_id = current_user.company_id
-        existing = self.get_designs_document(export_invoice_id, company_id)
-        packing_list = self.get_for_invoice(export_invoice_id, company_id)
-        if not packing_list:
-            raise ValidationError(
-                "This export invoice has no container split yet - open the invoice, "
-                "allocate its goods to containers, and save."
-            )
-        unfilled = []
-        for item in packing_list.items:
-            allocated = sum(d.quantity_boxes or 0 for d in item.designs)
-            if abs(allocated - (item.quantity_boxes or 0)) > _BOX_TOLERANCE:
-                unfilled.append(f"container {item.container_sr_no} ({item.product_name})")
-        if unfilled:
-            raise ValidationError(
-                "Every container's boxes must be split across designs first - still to do: "
-                + ", ".join(dict.fromkeys(unfilled)) + "."
-            )
-        if existing:
-            self.designs_packing_list_repo.touch(existing.id)
-            return self.designs_packing_list_repo.get_by_id(existing.id)
-        packing_list_date = (packing_list.invoice.invoice_date if packing_list.invoice
-                             else datetime.now().strftime("%Y-%m-%d"))
-        return self.designs_packing_list_repo.create(ExportDesignsPackingList(
-            id=None, company_id=company_id, export_invoice_id=export_invoice_id,
-            packing_list_number=self.designs_packing_list_repo.next_number(company_id, packing_list_date),
-            packing_list_date=packing_list_date, created_by=current_user.id,
-        ))
-
-    def list_designs_documents(self, company_id: int) -> List[ExportDesignsPackingList]:
-        return self.designs_packing_list_repo.list_all(company_id) if self.designs_packing_list_repo else []
-
-    # ---- Designs Packing List (per-line design allocation) --------------------------------------------------
-    def _received_design_totals(self, company_id: int, product_id: int,
-                                export_invoice_id: int) -> List[dict]:
-        """Every design received for one product on this shipment, merged
-        across both ways goods come in: bought against a purchase invoice
-        (PackingListRepository.design_totals_for_product, scoped to this
-        export invoice's source purchase orders) and returned from job work
-        on a Job In (JobInRepository.returned_design_totals_for_product,
-        scoped to its source job works). Rows are keyed by design and their
-        boxes/qty summed, so a design that came in both ways totals
-        correctly. The one shared source for reference_designs and
-        save_design_allocation, so the form and the save-time cap can never
-        disagree about how much of a design came in."""
-        if not self.packing_list_repo or not product_id:
-            return []
-        source_po_ids = self.export_invoice_repo.source_purchase_order_ids(
-            export_invoice_id, company_id
-        )
-        merged: dict = {}
-        for r in self.packing_list_repo.design_totals_for_product(
-                company_id, int(product_id), source_po_ids):
-            merged[r["design_id"]] = dict(r)
-        if self.job_in_repo:
-            job_work_ids = self.export_invoice_repo.source_job_work_ids(
-                export_invoice_id, company_id
-            )
-            for r in self.job_in_repo.returned_design_totals_for_product(
-                    company_id, int(product_id), job_work_ids):
-                existing = merged.get(r["design_id"])
-                if existing is None:
-                    merged[r["design_id"]] = dict(r)
-                else:
-                    existing["boxes"] = (existing.get("boxes") or 0) + (r.get("boxes") or 0)
-                    existing["quantity"] = (existing.get("quantity") or 0) + (r.get("quantity") or 0)
-        return list(merged.values())
-
-    def reference_designs(self, company_id: int, packing_list: ExportPackingList) -> dict:
-        """(invoice_item_sr_no, container_sr_no) -> the design rows this
-        specific container/line's allocation form should offer: every design
-        that actually came in for its product ON THIS SHIPMENT (scoped to the
-        purchase orders that fed this export invoice - see
-        ExportInvoiceRepository.source_purchase_order_ids), each carrying:
-
-        - `on_this_line`: boxes already allocated to THIS line (prefills its
-          checkbox/qty box)
-        - `remaining`: boxes still needing a container ACROSS THE WHOLE
-          INVOICE, counting this line's own share back in - so a design shows
-          0 remaining once every container between them has claimed all of
-          it, and a row with 0 remaining is dropped from every line except
-          the one(s) that already hold it (so it stays editable there, but
-          stops being offered as an option on later containers once there's
-          nothing left of it to load)."""
-        if not self.packing_list_repo:
-            return {}
-        by_product: dict = {}
-        # Total already allocated per design, across every container on this
-        # invoice - what "remaining" is measured against.
-        allocated_by_design: dict = {}
-        for item in packing_list.items:
-            for d in item.designs:
-                if d.design_id:
-                    allocated_by_design[d.design_id] = allocated_by_design.get(d.design_id, 0) + (d.quantity_boxes or 0)
-
-        reference: dict = {}
-        for item in packing_list.items:
-            key = (item.invoice_item_sr_no, item.container_sr_no)
-            if not item.product_id:
-                reference[key] = []
-                continue
-            if item.product_id not in by_product:
-                by_product[item.product_id] = self._received_design_totals(
-                    company_id, int(item.product_id), packing_list.export_invoice_id
-                )
-            on_this_line = {d.design_id: d.quantity_boxes or 0 for d in item.designs if d.design_id}
-            rows = []
-            for r in by_product[item.product_id]:
-                design_id = r.get("design_id")
-                received = r.get("boxes") or 0
-                mine = on_this_line.get(design_id, 0)
-                remaining = round(received - allocated_by_design.get(design_id, 0) + mine, 2)
-                if remaining <= _BOX_TOLERANCE and not mine:
-                    continue  # nothing left of this design, and this line never held it
-                rows.append({**r, "on_this_line": mine, "remaining": max(remaining, 0)})
-            reference[key] = rows
-        return reference
-
-    def save_design_allocation(self, company_id: int, export_packing_list_id: int,
-                               invoice_item_sr_no: int, container_sr_no: int, raw_rows: list) -> None:
-        """Replaces one container-split line's design breakdown. The boxes
-        allocated across its design rows must add up to EXACTLY that line's
-        own boxes - the same all-or-nothing rule _assert_balanced applies one
-        level up, and for the same reason: a design short is a box nobody can
-        account for, a design over is the same box counted twice."""
-        packing_list = self.get(export_packing_list_id, company_id)
-        line = next(
-            (i for i in packing_list.items
-             if i.invoice_item_sr_no == invoice_item_sr_no and i.container_sr_no == container_sr_no),
-            None,
-        )
-        if not line:
-            raise NotFoundError("That line is no longer on this packing list - reload the page and try again.")
-
-        # How many boxes of each design the OTHER containers have already
-        # claimed - a design can't be loaded onto this one beyond what that
-        # leaves, or the same physical boxes ship twice. Excludes this line's
-        # own current allocation, which is being replaced.
-        claimed_elsewhere: dict = {}
-        for other in packing_list.items:
-            if other.invoice_item_sr_no == invoice_item_sr_no and other.container_sr_no == container_sr_no:
-                continue
-            for d in other.designs:
-                if d.design_id:
-                    claimed_elsewhere[d.design_id] = claimed_elsewhere.get(d.design_id, 0) + (d.quantity_boxes or 0)
-        received_by_design = {}
-        if self.packing_list_repo and line.product_id:
-            received_by_design = {
-                r["design_id"]: (r.get("boxes") or 0)
-                for r in self._received_design_totals(
-                    company_id, int(line.product_id), packing_list.export_invoice_id
-                )
-            }
-
-        rows = []
-        for i, raw in enumerate(raw_rows, start=1):
-            design_id = int(raw["design_id"]) if raw.get("design_id") else None
-            if not design_id:
-                continue
-            try:
-                quantity_boxes = float(raw.get("quantity_boxes") or 0)
-            except (TypeError, ValueError):
-                raise ValidationError(f"Design row {i}: boxes must be a number.")
-            if quantity_boxes <= 0:
-                raise ValidationError(f"Design row {i}: boxes must be greater than zero.")
-            # Same ownership check every other design reference in this app
-            # applies: it must be this company's, and it must live under the
-            # line's own product.
-            design = self.design_repo.get_by_id(design_id) if self.design_repo else None
-            if not design or design.company_id != company_id or \
-                    (line.product_id and design.product_id != line.product_id):
-                raise ValidationError(
-                    f"Design row {i}: that design doesn't belong to '{line.product_name}'."
-                )
-            # Never load more of a design than this shipment actually received
-            # once the other containers have taken their share.
-            if design_id in received_by_design:
-                loadable = received_by_design[design_id] - claimed_elsewhere.get(design_id, 0)
-                if quantity_boxes - loadable > _BOX_TOLERANCE:
-                    raise ValidationError(
-                        f"'{design.design_name}': only {max(loadable, 0):g} boxes are left to load "
-                        f"(the other containers already hold {claimed_elsewhere.get(design_id, 0):g} "
-                        f"of the {received_by_design[design_id]:g} received)."
-                    )
-            # Qty follows the boxes at the line's own per-box rate, so the
-            # design rows always add back up to the line - the same reasoning
-            # behind _per_box for the container split itself.
-            qty_per_box = self._per_box(line.quantity_value, line.quantity_boxes)
-            rows.append(ExportPackingListItemDesign(
-                id=None, export_packing_list_id=export_packing_list_id,
-                invoice_item_sr_no=invoice_item_sr_no, container_sr_no=container_sr_no,
-                design_id=design_id, design_name=design.design_name,
-                quantity_boxes=quantity_boxes,
-                quantity_value=round(quantity_boxes * qty_per_box, 2) if qty_per_box is not None else 0,
-                unit=line.unit,
-            ))
-
-        # No design rows at all is the untouched state, and clearing every row
-        # is how you get back to it - only a PARTIALLY filled line is refused.
-        line_boxes = line.quantity_boxes or 0
-        allocated = sum(r.quantity_boxes for r in rows)
-        if rows:
-            diff = allocated - line_boxes
-            if diff > _BOX_TOLERANCE:
-                raise ValidationError(
-                    f"'{line.product_name}' in container {container_sr_no}: {allocated:g} boxes split across "
-                    f"designs, but the line only has {line_boxes:g} - remove {diff:g}."
-                )
-            if diff < -_BOX_TOLERANCE:
-                raise ValidationError(
-                    f"'{line.product_name}' in container {container_sr_no}: {allocated:g} of {line_boxes:g} "
-                    f"boxes split across designs - {-diff:g} still unassigned."
-                )
-
-        self.export_packing_list_repo.save_item_designs(
-            export_packing_list_id, invoice_item_sr_no, container_sr_no, rows
-        )
-        # An already-issued document keeps its number and date, but records
-        # that what it prints has changed.
-        doc = self.get_designs_document(packing_list.export_invoice_id, company_id)
-        if doc:
-            self.designs_packing_list_repo.touch(doc.id)
 
     # ---- derived per-row figures --------------------------------------------------
     def _product(self, product_id, company_id: int) -> Optional[Product]:

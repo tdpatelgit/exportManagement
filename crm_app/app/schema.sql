@@ -219,6 +219,28 @@ CREATE TABLE IF NOT EXISTS transporter_contacts (
 );
 
 -- ============================================================
+-- PLATFORM LOGINS
+-- Saved logins for third-party platforms (Facebook, IndiaMART, a
+-- marketplace portal, ...) - the link plus whatever credentials open it, so
+-- any teammate can jump straight into the account. Company-scoped, no
+-- satellites, same plain admin-gated-write CRUD as Transporter.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS platform_logins (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id      INTEGER NOT NULL REFERENCES tenants(id),
+    platform_name   TEXT NOT NULL,
+    login_url       TEXT,
+    username        TEXT,
+    password        TEXT,
+    email           TEXT,
+    mobile_number   TEXT,
+    notes           TEXT,
+    created_by      INTEGER NOT NULL REFERENCES users(id),
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ============================================================
 -- COMMUNICATIONS
 -- One shared table for lead, buyer and supplier communications.
 -- `parent_type` + `parent_id` act as a polymorphic foreign key - this keeps
@@ -1305,46 +1327,6 @@ CREATE TABLE IF NOT EXISTS export_packing_list_items (
     gross_weight_kg           REAL
 );
 
--- Splits one (container x goods line) row of the Export Packing List
--- (export_packing_list_items) further into the catalog designs its boxes
--- actually are, entered on the "Designs Packing List" page (see
--- app/routes/export_designs_packing_lists.py). Keyed on the container
--- split's own natural key (invoice_item_sr_no, container_sr_no) rather than
--- export_packing_list_items.id, because that table is wholesale deleted and
--- re-inserted every time the parent export invoice is saved
--- (ExportPackingListRepository._replace_items) - an FK to its id would lose
--- every allocation on the next invoice edit. Per line, quantity_boxes across
--- every design row must sum to exactly that line's own quantity_boxes.
--- The DESIGNS PACKING LIST document itself: the second packing list that
--- ships alongside the regular one, restating the same container split with
--- each line broken into its designs. Exactly one per export invoice, and it
--- owns nothing but its own number/date - every figure it prints comes from
--- the export packing list and the design rows below.
-CREATE TABLE IF NOT EXISTS export_designs_packing_lists (
-    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
-    company_id               INTEGER NOT NULL REFERENCES tenants(id),
-    export_invoice_id        INTEGER NOT NULL REFERENCES export_invoices(id) ON DELETE CASCADE,
-    packing_list_number      TEXT NOT NULL,
-    packing_list_date        TEXT NOT NULL,
-    created_by               INTEGER NOT NULL REFERENCES users(id),
-    created_at               TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at               TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (export_invoice_id),
-    UNIQUE (company_id, packing_list_number)
-);
-
-CREATE TABLE IF NOT EXISTS export_packing_list_item_designs (
-    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
-    export_packing_list_id   INTEGER NOT NULL REFERENCES export_packing_lists(id) ON DELETE CASCADE,
-    invoice_item_sr_no       INTEGER NOT NULL,
-    container_sr_no          INTEGER NOT NULL,
-    design_id                INTEGER REFERENCES designs(id) ON DELETE SET NULL,
-    design_name              TEXT,
-    quantity_boxes           REAL NOT NULL DEFAULT 0,
-    quantity_value           REAL NOT NULL DEFAULT 0,
-    unit                     TEXT
-);
-
 -- ============================================================
 -- LOADING PLANNING  (number generated as LP{YYYYMMDD}{seq-of-that-day} per
 -- company. The document that answers the one question nothing else in the
@@ -1386,10 +1368,9 @@ CREATE TABLE IF NOT EXISTS export_packing_list_item_designs (
 --      the export packing list's container split, a loading plan may
 --      legitimately be saved half-built.
 --
--- packing_no/item_sr_no/container_sr_no are NATURAL keys, not FKs to row ids,
--- for the same reason export_packing_list_item_designs keys on
--- (invoice_item_sr_no, container_sr_no): every child list is wholesale
--- deleted and re-inserted on save, so an FK to an id would lose the lot.
+-- packing_no/item_sr_no/container_sr_no are NATURAL keys, not FKs to row ids:
+-- every child list is wholesale deleted and re-inserted on save, so an FK to
+-- an id would lose the lot.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS loading_plannings (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1978,6 +1959,7 @@ CREATE INDEX IF NOT EXISTS idx_party_contacts_parent ON party_contacts(parent_ty
 CREATE INDEX IF NOT EXISTS idx_buyers_company ON buyers(company_id);
 CREATE INDEX IF NOT EXISTS idx_suppliers_company ON suppliers(company_id);
 CREATE INDEX IF NOT EXISTS idx_transporters_company ON transporters(company_id);
+CREATE INDEX IF NOT EXISTS idx_platform_logins_company ON platform_logins(company_id);
 CREATE INDEX IF NOT EXISTS idx_transporter_contacts_transporter ON transporter_contacts(transporter_id);
 CREATE INDEX IF NOT EXISTS idx_categories_company ON categories(company_id);
 CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);

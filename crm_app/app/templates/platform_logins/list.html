@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Platform Login{% endblock %}
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">Workspace</div>
+    <h1>Platform Login</h1>
+  </div>
+  {% if current_user.is_admin %}
+  <div class="topbar-actions">
+    <a href="{{ url_for('platform_logins.new_platform_login') }}" class="btn btn-primary">+ New Platform Login</a>
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  {% if platform_logins %}
+  <div class="table-wrap">
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th>Platform</th>
+          <th>Username</th>
+          <th>Email</th>
+          <th>Mobile</th>
+          <th>Link</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for pl in platform_logins %}
+        <tr>
+          <td><strong>{{ pl.platform_name }}</strong></td>
+          <td class="text-sm mono">{{ pl.username or '—' }}</td>
+          <td class="text-sm">{{ pl.email or '—' }}</td>
+          <td class="text-sm">{{ pl.mobile_number or '—' }}</td>
+          <td class="text-sm">
+            {% if pl.login_url %}<a href="{{ pl.login_url }}" target="_blank" rel="noopener noreferrer">Open ↗</a>{% else %}—{% endif %}
+          </td>
+          <td><a href="{{ url_for('platform_logins.view_platform_login', platform_login_id=pl.id) }}" class="text-sm">Open →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    No platform logins yet.
+    {% if current_user.is_admin %}<a href="{{ url_for('platform_logins.new_platform_login') }}">Add one →</a>{% endif %}
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

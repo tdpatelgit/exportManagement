@@ -30,13 +30,14 @@
       <nav class="sidebar-nav">
       <div class="nav-section-label">Workspace</div>
       <a class="nav-link {{ 'active' if request.endpoint == 'dashboard.home' }}" href="{{ url_for('dashboard.home') }}">📊 Dashboard</a>
+      <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('leads.') }}" href="{{ url_for('leads.list_leads') }}">🧭 Leads</a>
+      <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('platform_logins.') }}" href="{{ url_for('platform_logins.list_platform_logins') }}">🔑 Platform Login</a>
 
-      {% set master_prefixes = ['leads.', 'buyers.', 'suppliers.', 'transporters.', 'products.', 'inventory.'] %}
+      {% set master_prefixes = ['buyers.', 'suppliers.', 'transporters.', 'products.', 'inventory.'] %}
       {% set master_open = request.endpoint and (request.endpoint.split('.')[0] ~ '.') in master_prefixes %}
       <details class="nav-dropdown" {{ 'open' if master_open }}>
         <summary class="nav-link nav-dropdown-summary {{ 'active' if master_open }}">🗂️ Master Data</summary>
         <div class="nav-dropdown-panel">
-          <a class="nav-link nav-sublink {{ 'active' if request.endpoint and request.endpoint.startswith('leads.') }}" href="{{ url_for('leads.list_leads') }}">🧭 Leads</a>
           <a class="nav-link nav-sublink {{ 'active' if request.endpoint and request.endpoint.startswith('buyers.') }}" href="{{ url_for('buyers.list_parties') }}">🤝 Buyer</a>
           <a class="nav-link nav-sublink {{ 'active' if request.endpoint and request.endpoint.startswith('suppliers.') }}" href="{{ url_for('suppliers.list_suppliers') }}">🏭 Supplier</a>
           <a class="nav-link nav-sublink {{ 'active' if request.endpoint and request.endpoint.startswith('transporters.') }}" href="{{ url_for('transporters.list_transporters') }}">🚚 Transporter</a>

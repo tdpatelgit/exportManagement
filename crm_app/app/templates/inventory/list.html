@@ -19,7 +19,7 @@
   <div>
     <div class="eyebrow">Inventory{{ ' · Category' if current_category }}</div>
     <h1>{{ current_category.name if current_category else 'Inventory' }}</h1>
-    <div class="text-sm text-soft">The same catalog as Products, showing stock on hand. Open a product to see each design's current stock; open a design for its purchase &amp; sale history.</div>
+    <div class="text-sm text-soft">The same catalog as Products, showing stock on hand. Open a product to see each design's current stock; open a design for its purchase history.</div>
   </div>
 </div>
 
@@ -64,7 +64,6 @@
               <th>Design</th>
               <th>Product</th>
               <th class="sortable-th" data-sort-key="qty">Total Purchased Qty <span class="sort-arrows"><span class="sort-arrow sort-asc" data-dir="asc" title="Sort ascending">▲</span><span class="sort-arrow sort-desc" data-dir="desc" title="Sort descending">▼</span></span></th>
-              <th class="sortable-th" data-sort-key="sold">Total Sold Qty <span class="sort-arrows"><span class="sort-arrow sort-asc" data-dir="asc" title="Sort ascending">▲</span><span class="sort-arrow sort-desc" data-dir="desc" title="Sort descending">▼</span></span></th>
               <th class="sortable-th" data-sort-key="stock">Stock <span class="sort-arrows"><span class="sort-arrow sort-asc" data-dir="asc" title="Sort ascending">▲</span><span class="sort-arrow sort-desc" data-dir="desc" title="Sort descending">▼</span></span></th>
               <th></th>
             </tr>
@@ -78,7 +77,6 @@
               </td>
               <td class="text-sm">{{ design.product_name }}</td>
               <td class="text-sm" data-sort-value="{{ design.stock.boxes or 0 }}">{{ num(design.stock.boxes) }}{% if design.stock.qty_unit %} {{ design.stock.qty_unit }}{% endif %}</td>
-              <td class="text-sm" data-sort-value="{{ design.stock.sold_boxes or 0 }}">{{ num(design.stock.sold_boxes) }}{% if design.stock.qty_unit %} {{ design.stock.qty_unit }}{% endif %}</td>
               <td class="text-sm" data-sort-value="{{ design.stock.net_pcs or 0 }}">{{ num(design.stock.net_pcs) }}</td>
               <td><a href="{{ url_for('inventory.view_design', design_id=design.id) }}" class="text-sm">Open →</a></td>
             </tr>
@@ -110,7 +108,6 @@
           <th>Design</th>
           <th>Product</th>
           <th class="sortable-th" data-sort-key="qty">Total Purchased Qty <span class="sort-arrows"><span class="sort-arrow sort-asc" data-dir="asc" title="Sort ascending">▲</span><span class="sort-arrow sort-desc" data-dir="desc" title="Sort descending">▼</span></span></th>
-          <th class="sortable-th" data-sort-key="sold">Total Sold Qty <span class="sort-arrows"><span class="sort-arrow sort-asc" data-dir="asc" title="Sort ascending">▲</span><span class="sort-arrow sort-desc" data-dir="desc" title="Sort descending">▼</span></span></th>
           <th class="sortable-th" data-sort-key="stock">Stock <span class="sort-arrows"><span class="sort-arrow sort-asc" data-dir="asc" title="Sort ascending">▲</span><span class="sort-arrow sort-desc" data-dir="desc" title="Sort descending">▼</span></span></th>
           <th></th>
         </tr>
@@ -126,7 +123,6 @@
           </td>
           <td class="text-sm">{{ design.product_name }}</td>
           <td class="text-sm" data-sort-value="{{ design.stock.boxes or 0 }}">{{ num(design.stock.boxes) }}{% if design.stock.qty_unit %} {{ design.stock.qty_unit }}{% endif %}</td>
-          <td class="text-sm" data-sort-value="{{ design.stock.sold_boxes or 0 }}">{{ num(design.stock.sold_boxes) }}{% if design.stock.qty_unit %} {{ design.stock.qty_unit }}{% endif %}</td>
           <td class="text-sm" data-sort-value="{{ design.stock.net_pcs or 0 }}">{{ num(design.stock.net_pcs) }}</td>
           <td><a href="{{ url_for('inventory.view_design', design_id=design.id) }}" class="text-sm">Open →</a></td>
         </tr>

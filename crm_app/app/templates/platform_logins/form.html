@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if platform_login else 'New' }} Platform Login{% endblock %}
+
+{# Whatever was just typed wins over what is saved, so a bounced POST doesn't
+   throw the user's edits away. #}
+{% macro val(field) %}{% if form_data %}{{ form_data.get(field, '') }}{% elif platform_login %}{{ platform_login[field] or '' }}{% endif %}{% endmacro %}
+
+{% block content %}
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">{% if platform_login %}Platform Login #{{ platform_login.id }}{% else %}Workspace{% endif %}</div>
+    <h1>{{ 'Edit' if platform_login else 'New' }} Platform Login</h1>
+  </div>
+</div>
+
+<div class="card" style="max-width:760px;">
+  <form method="POST">
+    <fieldset>
+      <legend>Platform details</legend>
+      <div class="field">
+        <label for="platform_name">Platform name<span class="required-mark">*</span></label>
+        <input type="text" id="platform_name" name="platform_name" required value="{{ val('platform_name') }}" placeholder="e.g. Facebook, IndiaMART">
+      </div>
+      <div class="field">
+        <label for="login_url">Login link</label>
+        <input type="url" id="login_url" name="login_url" value="{{ val('login_url') }}" placeholder="https://...">
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Credentials</legend>
+      <div class="form-row">
+        <div class="field">
+          <label for="username">Username</label>
+          <input type="text" id="username" name="username" value="{{ val('username') }}">
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="text" id="password" name="password" value="{{ val('password') }}" autocomplete="off">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="field">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" value="{{ val('email') }}">
+        </div>
+        <div class="field">
+          <label for="mobile_number">Mobile number</label>
+          <input type="tel" id="mobile_number" name="mobile_number" value="{{ val('mobile_number') }}">
+        </div>
+      </div>
+      <div class="field">
+        <label for="notes">Notes <span class="text-soft text-sm">(optional)</span></label>
+        <textarea id="notes" name="notes" rows="3">{{ val('notes') }}</textarea>
+      </div>
+    </fieldset>
+
+    <button type="submit" class="btn btn-primary">{{ 'Save changes' if platform_login else 'Add Platform Login' }}</button>
+    <a href="{{ url_for('platform_logins.view_platform_login', platform_login_id=platform_login.id) if platform_login else url_for('platform_logins.list_platform_logins') }}"
+       class="btn btn-ghost">Cancel</a>
+  </form>
+</div>
+
+{% endblock %}

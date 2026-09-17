@@ -61,7 +61,7 @@
     <div><div class="text-sm text-soft">Quantity unit</div><div>{{ stock.qty_unit or '—' }}</div></div>
     <div><div class="text-sm text-soft">Alt Qty1 unit</div><div>{{ stock.unit or '—' }}</div></div>
   </div>
-  <div class="text-sm text-soft" style="margin-top:.5rem;">Stock is everything received (listed on a purchase invoice's packing list), less everything dispatched for job work, less everything sold.</div>
+  <div class="text-sm text-soft" style="margin-top:.5rem;">Stock is everything received (listed on a purchase invoice's packing list), less everything dispatched for job work.</div>
 </div>
 
 <div class="card">
@@ -74,7 +74,6 @@
           <th>Received Qty</th>
           <th>PO Remain Qty</th>
           <th>Dispatched Qty</th>
-          <th>Sale Qty</th>
           <th>Stock</th>
           <th>Alt Qty</th>
         </tr>
@@ -85,18 +84,17 @@
           <td class="text-sm">{{ num(stock_history.received_boxes) }}{% if stock_history.received_qty_unit %} {{ stock_history.received_qty_unit }}{% endif %}</td>
           <td class="text-sm">{{ num(stock_history.po_remain_boxes) if stock_history.po_remain_boxes is not none else '—' }}{% if stock_history.po_qty_unit and stock_history.po_remain_boxes is not none %} {{ stock_history.po_qty_unit }}{% endif %}</td>
           <td class="text-sm">{{ num(stock_history.dispatched_boxes) }}{% if stock_history.dispatched_qty_unit %} {{ stock_history.dispatched_qty_unit }}{% endif %}</td>
-          <td class="text-sm">{{ num(stock_history.sale_boxes) }}{% if stock_history.sale_qty_unit %} {{ stock_history.sale_qty_unit }}{% endif %}</td>
           <td class="text-sm">{{ num(stock_history.stock_boxes) }}{% if stock_history.stock_qty_unit %} {{ stock_history.stock_qty_unit }}{% endif %}</td>
           <td class="text-sm">{{ num(stock_history.stock_alt_qty) }}{% if stock_history.alt_unit %} {{ stock_history.alt_unit }}{% endif %}</td>
         </tr>
       </tbody>
     </table>
   </div>
-  <div class="text-sm text-soft" style="margin-top:.5rem;">PO Qty and Sale Qty only count Purchase Order / Export Invoice lines that were tagged with this design when saved. PO Remain Qty is what's been ordered but not yet invoiced; it shows &mdash; when the design's stock was received through job work rather than a purchase order. Dispatched Qty is stock sent back out on a Job Out challan.</div>
+  <div class="text-sm text-soft" style="margin-top:.5rem;">PO Qty only counts Purchase Order lines that were tagged with this design when saved. PO Remain Qty is what's been ordered but not yet invoiced; it shows &mdash; when the design's stock was received through job work rather than a purchase order. Dispatched Qty is stock sent back out on a Job Out challan.</div>
 </div>
 
 <div class="card">
-  <div class="card-header"><h3>Purchase / Sale history</h3></div>
+  <div class="card-header"><h3>Purchase history</h3></div>
   {% if history %}
   <div class="table-wrap">
     <table class="ledger">
@@ -107,8 +105,6 @@
           <th>Purchase Invoice</th>
           <th>Received Qty</th>
           <th>PO Remain Qty</th>
-          <th>Export Invoice</th>
-          <th>Sale Qty</th>
         </tr>
       </thead>
       <tbody>
@@ -132,29 +128,13 @@
           </td>
           <td class="text-sm">{{ num(row.received_boxes) if row.received_boxes is not none else '—' }}{% if row.qty_unit %} {{ row.qty_unit }}{% endif %}</td>
           <td class="text-sm">{{ num(row.po_remain_boxes) if row.po_remain_boxes is not none else '—' }}{% if row.qty_unit %} {{ row.qty_unit }}{% endif %}</td>
-          <td class="text-sm">
-            {% if row.sales %}
-              {% for sale in row.sales %}
-                <div><a href="{{ url_for('export_invoices.view_export_invoice', export_invoice_id=sale.export_invoice_id) }}">{{ sale.export_invoice_number }}</a></div>
-                <div class="text-soft">{{ sale.invoice_date or '—' }}</div>
-                <div class="text-soft">{{ sale.consignee_name or '—' }}</div>
-              {% endfor %}
-            {% else %}—{% endif %}
-          </td>
-          <td class="text-sm">
-            {% if row.sales %}
-              {% for sale in row.sales %}
-                <div>{{ num(sale.boxes) if sale.boxes is not none else '—' }}{% if sale.qty_unit %} {{ sale.qty_unit }}{% endif %}</div>
-              {% endfor %}
-            {% else %}—{% endif %}
-          </td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   {% else %}
-  <div class="empty-state">No purchases or sales recorded for this design yet.</div>
+  <div class="empty-state">No purchases recorded for this design yet.</div>
   {% endif %}
 </div>
 

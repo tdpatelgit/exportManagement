@@ -25,18 +25,18 @@ csrf = CSRFProtect()
 from app.database import Database
 from app.repositories import (
     TenantRepository, SqliteUserRepository, SqliteLeadRepository,
-    SqlitePartyRepository, SqliteSupplierRepository, SqliteTransporterRepository,
+    SqlitePartyRepository, SqliteSupplierRepository, SqliteTransporterRepository, SqlitePlatformLoginRepository,
     CommunicationRepository, PaymentRepository, DocumentRepository, CompanyRepository,
     CategoryRepository, ProductRepository, ProductPalletTypeRepository, ProductFolderRepository, DesignRepository,
     QuotationRepository, ProformaInvoiceRepository, PurchaseOrderRepository,
     PurchaseOrderProductionRepository, JobWorkRepository,
     PurchaseInvoiceRepository, JobOutRepository, JobInRepository,
-    ExportInvoiceRepository, ExportPackingListRepository, ExportDesignsPackingListRepository,
+    ExportInvoiceRepository, ExportPackingListRepository,
     PackingListRepository, LoadingPlanningRepository, PackingPlanningRepository, DocumentVersionRepository, PermitRepository, BookingDetailRepository, MiscCurrencyRepository, MiscNatureOfContractRepository,
     MiscPortOfLoadingRepository, MiscContainerTypeRepository, MiscHsnCodeRepository, MiscCountryRepository, MiscUnitRepository,
 )
 from app.services import (
-    AuthService, LeadService, PartyService, SupplierService, TransporterService, CurrencyService,
+    AuthService, LeadService, PartyService, SupplierService, TransporterService, PlatformLoginService, CurrencyService,
     CommunicationService, StatsService, CompanyService, ReportService, ProductService,
     QuotationService, ProformaInvoiceService, PurchaseOrderService, PurchaseOrderProductionService,
     JobWorkService, PurchaseInvoiceService,
@@ -65,6 +65,7 @@ class ServiceContainer:
         self.buyer_repo = SqlitePartyRepository(db, table="buyers", client_type="Buyer")
         self.supplier_repo = SqliteSupplierRepository(db)
         self.transporter_repo = SqliteTransporterRepository(db)
+        self.platform_login_repo = SqlitePlatformLoginRepository(db)
         self.comm_repo = CommunicationRepository(db)
         self.payment_repo = PaymentRepository(db)
         self.document_repo = DocumentRepository(db)
@@ -84,9 +85,6 @@ class ServiceContainer:
         self.job_in_repo = JobInRepository(db)
         self.export_invoice_repo = ExportInvoiceRepository(db)
         self.export_packing_list_repo = ExportPackingListRepository(db, self.export_invoice_repo)
-        self.export_designs_packing_list_repo = ExportDesignsPackingListRepository(
-            db, self.export_invoice_repo, self.export_packing_list_repo
-        )
         self.packing_list_repo = PackingListRepository(db)
         self.loading_planning_repo = LoadingPlanningRepository(db)
         self.packing_planning_repo = PackingPlanningRepository(db)
@@ -120,6 +118,7 @@ class ServiceContainer:
         # No lead_repo/comm/payment/document wiring here: a transporter has
         # none of those satellites (see models.Transporter).
         self.transporter_service = TransporterService(self.transporter_repo)
+        self.platform_login_service = PlatformLoginService(self.platform_login_repo)
         # Keyed by leads.converted_client_type - advance_client_status looks
         # up the right repo once it knows which type a lead converted to.
         self.party_repos = {"Buyer": self.buyer_repo, "Supplier": self.supplier_repo}
@@ -139,8 +138,7 @@ class ServiceContainer:
         )
         self.inventory_service = InventoryService(
             self.product_service, self.packing_list_repo, self.design_repo,
-            self.purchase_order_repo, self.export_invoice_repo, self.purchase_invoice_repo,
-            self.job_in_repo,
+            self.purchase_order_repo, self.purchase_invoice_repo, self.job_in_repo,
         )
         self.permit_service = PermitService(
             self.permit_repo,
@@ -241,8 +239,6 @@ class ServiceContainer:
         # every save of its invoice, so it is wired first and handed in.
         self.export_packing_list_service = ExportPackingListService(
             self.export_packing_list_repo, self.export_invoice_repo, self.product_repo, self.category_repo,
-            self.design_repo, self.packing_list_repo, self.export_designs_packing_list_repo,
-            self.job_in_repo,
         )
         self.export_invoice_service = ExportInvoiceService(
             self.export_invoice_repo, self.product_repo, self.lead_repo, self.proforma_invoice_repo,
@@ -391,6 +387,7 @@ def create_app(config_class=Config) -> Flask:
     from app.routes.parties import build_party_blueprint
     from app.routes.suppliers import suppliers_bp
     from app.routes.transporters import transporters_bp
+    from app.routes.platform_logins import platform_logins_bp
     from app.routes.admin import admin_bp
     from app.routes.company import company_bp
     from app.routes.permits import permits_bp
@@ -411,7 +408,6 @@ def create_app(config_class=Config) -> Flask:
     from app.routes.export_invoices import export_invoices_bp
     from app.routes.export_packing_lists import export_packing_lists_bp
     from app.routes.export_annexures import export_annexures_bp
-    from app.routes.export_designs_packing_lists import export_designs_packing_lists_bp
     from app.routes.tax_invoices import tax_invoices_bp
     from app.routes.bl_drafts import bl_drafts_bp
     from app.routes.vgm_attachments import vgm_attachments_bp
@@ -433,6 +429,7 @@ def create_app(config_class=Config) -> Flask:
     app.register_blueprint(buyers_bp)
     app.register_blueprint(suppliers_bp)
     app.register_blueprint(transporters_bp)
+    app.register_blueprint(platform_logins_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(company_bp)
     app.register_blueprint(permits_bp)
@@ -453,7 +450,6 @@ def create_app(config_class=Config) -> Flask:
     app.register_blueprint(export_invoices_bp)
     app.register_blueprint(export_packing_lists_bp)
     app.register_blueprint(export_annexures_bp)
-    app.register_blueprint(export_designs_packing_lists_bp)
     app.register_blueprint(tax_invoices_bp)
     app.register_blueprint(bl_drafts_bp)
     app.register_blueprint(vgm_attachments_bp)
