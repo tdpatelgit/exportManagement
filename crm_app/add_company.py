@@ -14,6 +14,7 @@ instead if you want to pass the company name as a CLI argument.
 
 import getpass
 import re
+import sqlite3
 
 from app import create_app
 
@@ -21,6 +22,20 @@ from app import create_app
 def _slugify(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     return slug or "company"
+
+
+def _create_tenant_unique(container, name: str):
+    """tenants.slug is globally unique (including inactive tenants), so retry
+    with a numeric suffix on collision instead of assuming the base slug is free."""
+    base = _slugify(name)
+    slug = base
+    n = 2
+    while True:
+        try:
+            return container.tenant_repo.create(name, slug)
+        except sqlite3.IntegrityError:
+            slug = f"{base}-{n}"
+            n += 1
 
 
 def main():
@@ -45,7 +60,7 @@ def main():
         while not admin_number:
             admin_number = getpass.getpass("Admin number (required): ").strip()
 
-        tenant = container.tenant_repo.create(company_name, _slugify(company_name))
+        tenant = _create_tenant_unique(container, company_name)
         container.auth_service.create_user(
             company_id=tenant.id, username=admin_id, password=admin_number,
             full_name=admin_name, role="admin",
